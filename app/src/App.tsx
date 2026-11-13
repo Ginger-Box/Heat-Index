@@ -91,31 +91,32 @@ export default function App() {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <div className="stat">
-          <b>
-            <Cr v={me.credits} volume={1} />
-          </b>
-          <span>credits</span>
-        </div>
-        <div className="stat">
-          <b>
-            <Glitch text={netWorth(w, me)} />
-          </b>
-          <span>net worth</span>
-        </div>
-        <div className="stat">
-          <b>
-            <Glitch text={me.elo} />
-          </b>
-          <span>ELO</span>
-        </div>
-        <div className="stat">
-          <b>
-            <Glitch
-              text={`S${w.season} · d${dayInSeason(w)}/${DAYS_PER_SEASON} · ${String(8 + hourOfDay).padStart(2, '0')}:00`}
-            />
-          </b>
-          <span>season · day · time</span>
+        {/* HUD: four equal cells, label on top, a big value below */}
+        <div className="hud">
+          <div className="hud-cell credits" title="Credits you can spend">
+            <span>CREDITS</span>
+            <b>
+              <Cr v={me.credits} volume={1} />
+            </b>
+          </div>
+          <div className="hud-cell worth" title="Credits + what your robots and broker stakes are worth">
+            <span>NET WORTH</span>
+            <b>
+              <Glitch text={`${netWorth(w, me)} CR`} />
+            </b>
+          </div>
+          <div className="hud-cell elo" title="Your Arena rating">
+            <span>ELO</span>
+            <b>
+              <Glitch text={me.elo} />
+            </b>
+          </div>
+          <div className="hud-cell time" title="Season · day of the season · time">
+            <span>SEASON {w.season}</span>
+            <b>
+              <Glitch text={`DAY ${dayInSeason(w)}/${DAYS_PER_SEASON} · ${String(8 + hourOfDay).padStart(2, '0')}:00`} />
+            </b>
+          </div>
         </div>
         {!live && (
           <span className="tag paused-tag" title="The world is paused — open settings to resume">

@@ -4446,3 +4446,80 @@ button.pick {
     opacity: 0;
   }
 }
+
+/* верхний HUD (App.tsx): четыре одинаковые ячейки, подпись сверху, крупное значение снизу */
+.hud {
+  display: flex;
+  align-items: stretch;
+  border: 2px solid var(--line);
+  background: #07060c;
+  box-shadow: inset 0 0 12px #000;
+}
+.hud-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 112px;
+  padding: 6px 14px;
+  border-left: 2px solid #1f1a30;
+}
+.hud-cell:first-child {
+  border-left: 0;
+}
+.hud-cell > span {
+  font-family: var(--font-px);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.hud-cell b {
+  font-family: var(--font-px);
+  font-weight: 400;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.hud-cell.credits b {
+  color: var(--yellow);
+  text-shadow: 0 0 8px #ffe60066;
+}
+.hud-cell.worth b {
+  color: var(--cyan);
+  text-shadow: 0 0 8px #00f0ff55;
+}
+.hud-cell.elo b {
+  color: var(--magenta);
+  text-shadow: 0 0 8px #ff2a8a66;
+}
+.hud-cell.time b {
+  color: var(--green);
+  font-size: 13px;
+  text-shadow: 0 0 8px #39ff1455;
+}
+.hud-cell .cr {
+  color: inherit;
+}
+/* the HUD always has its own row under the tabs, centred, with wide cells (tabs + HUD never fit in one row) */
+.hud {
+  order: 10;
+  flex-basis: 100%;
+  justify-content: center;
+  border-left: 0;
+  border-right: 0;
+}
+.hud-cell {
+  flex: 0 1 230px;
+  padding: 7px 14px;
+}
+.hud-cell b {
+  font-size: 18px;
+}
+.hud-cell.time b {
+  font-size: 15px;
+}
+/* during the training the tabs are locked — keep the active one readable */
+.nav button.active:disabled {
+  opacity: 1;
+  color: var(--cyan);
+}

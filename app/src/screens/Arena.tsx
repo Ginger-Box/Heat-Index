@@ -1338,8 +1338,17 @@ function TutPointer({ target }: { target: string }) {
   useEffect(() => {
     const measure = () => {
       const box = self.current?.closest('.tut-coach');
-      const el = document.querySelector(target);
-      setGeo(box && el ? { a: box.getBoundingClientRect(), b: el.getBoundingClientRect() } : null);
+      if (!box) return setGeo(null);
+      const a = box.getBoundingClientRect();
+      // of all matching elements, take one the hint box does not cover, the closest to it
+      const cx = a.left + a.width / 2;
+      const cy = a.top + a.height / 2;
+      const free = [...document.querySelectorAll(target)]
+        .filter((el) => !el.closest('.fx-dying') && !el.classList.contains('fx-dying'))
+        .map((el) => el.getBoundingClientRect())
+        .filter((b) => b.width > 0 && (b.right < a.left - 8 || b.left > a.right + 8 || b.bottom < a.top - 8 || b.top > a.bottom + 8))
+        .sort((p, q) => Math.hypot(p.x - cx, p.y - cy) - Math.hypot(q.x - cx, q.y - cy));
+      setGeo(free[0] ? { a, b: free[0] } : null);
     };
     // first draw once the hint box has faded in, so the arrow never starts from a moving box
     let id: ReturnType<typeof setInterval> | undefined;
@@ -1360,8 +1369,15 @@ function TutPointer({ target }: { target: string }) {
     const bx = b.left + b.width / 2;
     const by = b.top + b.height / 2;
     // start on the edge of the hint box that faces the target
-    const ax = Math.max(a.left, Math.min(a.right, bx));
-    const ay = by < a.top ? a.top : by > a.bottom ? a.bottom : a.top + a.height / 2;
+    // start where the line from the box centre to the target leaves the box
+    const acx = a.left + a.width / 2;
+    const acy = a.top + a.height / 2;
+    const t0 = Math.atan2(by - acy, bx - acx);
+    const kx = Math.abs(a.width / 2 / (Math.cos(t0) || 1e-9));
+    const ky = Math.abs(a.height / 2 / (Math.sin(t0) || 1e-9));
+    const kk = Math.min(kx, ky) + 6;
+    const ax = acx + Math.cos(t0) * kk;
+    const ay = acy + Math.sin(t0) * kk;
     // stop at the edge of the target (a little outside it)
     const ang = Math.atan2(by - ay, bx - ax);
     const rx = b.width / 2 + 8;
