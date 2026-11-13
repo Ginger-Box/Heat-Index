@@ -809,7 +809,9 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
         flash({ [e.uid]: 'fx-overheat' }, 900);
         battleSynth('alarm');
       } else if (e.t === 'turn') {
-        showBanner(e.side === 0 ? 'YOUR TURN' : `${opp.name.toUpperCase()}'S TURN`, e.side === 0 ? 'mine' : 'theirs');
+        // in training the hint box sits where the turn banner would — skip the banner there
+        if (!tutorial)
+          showBanner(e.side === 0 ? 'YOUR TURN' : `${opp.name.toUpperCase()}'S TURN`, e.side === 0 ? 'mine' : 'theirs');
         sfx('turn-start', { volume: e.side === 0 ? 1 : 0.5 });
       } else if (e.t === 'draw' && e.side === 0) {
         setDrawn(e.uid);
@@ -1118,22 +1120,21 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
         className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''} ${tutorial && TUT_STEPS[tut]?.focus ? TUT_STEPS[tut].focus.split(' ').map((f) => `tut-${f}`).join(' ') : ''}`}
         ref={tableRef}
       >
-        {/* training hint: its own row above the table, so turn banners and floating numbers never cover it */}
-        {tutorial && TUT_STEPS[tut] && (
-          <div className="tut-coach" key={tut}>
-            <span className="tut-step">
-              TRAINING {tut + 1}/{TUT_STEPS.length}
-            </span>
-            <p>{TUT_STEPS[tut].text}</p>
-            {(TUT_STEPS[tut].wait === 'next' || TUT_STEPS[tut].wait === 'free') && (
-              <button className="primary small" onClick={() => setTut(tut + 1)}>
-                Got it ▶
-              </button>
-            )}
-            {TUT_STEPS[tut].wait !== 'next' && TUT_STEPS[tut].wait !== 'free' && <span className="tut-wait">waiting for you…</span>}
-          </div>
-        )}
         <div className="b-table">
+          {tutorial && TUT_STEPS[tut] && (
+            <div className="tut-coach" key={tut}>
+              <span className="tut-step">
+                TRAINING {tut + 1}/{TUT_STEPS.length}
+              </span>
+              <p>{TUT_STEPS[tut].text}</p>
+              {(TUT_STEPS[tut].wait === 'next' || TUT_STEPS[tut].wait === 'free') && (
+                <button className="primary small" onClick={() => setTut(tut + 1)}>
+                  Got it ▶
+                </button>
+              )}
+              {TUT_STEPS[tut].wait !== 'next' && TUT_STEPS[tut].wait !== 'free' && <span className="tut-wait">waiting for you…</span>}
+            </div>
+          )}
           {/* opponent */}
           <div className="b-top">
             {renderCore(1)}
