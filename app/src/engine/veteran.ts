@@ -5,8 +5,10 @@
 export interface VetRecord {
   /** battles fought */
   b: number;
-  /** battles its team won */
+  /** battles its team won (counted toward the rank) */
   w: number;
+  d?: number;
+  t?: number;
 }
 
 export const VET_WINS = [3, 8, 15];
@@ -15,6 +17,8 @@ export const VET_NAME = ['Rookie', 'Veteran', 'Elite', 'Legend'];
 export const VET_PRICE = [1, 1.15, 1.35, 1.6];
 /** extra HP in battle */
 export const VET_HP = [0, 0, 1, 2];
+/** Your robots count at most this many wins a day toward their rank (the NEAR contract checks the same). */
+export const VET_WINS_PER_DAY = 6;
 
 export const vetRank = (r: { vet?: VetRecord }) => VET_WINS.filter((x) => (r.vet?.w ?? 0) >= x).length;
 export const vetStars = (rank: number) => '★'.repeat(rank);

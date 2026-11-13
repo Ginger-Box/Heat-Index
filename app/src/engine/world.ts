@@ -5,6 +5,7 @@
 import './ai'; // registers the battle AI used by simulateBattle
 import { simulateBattle, wearLoss, type BattleState } from './battle';
 import {
+  DAILY_GAIN_MAX,
   ECON,
   askPrice,
   battleReward,
@@ -23,7 +24,7 @@ import { Rng } from './rng';
 import { MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurability, model, type Robot, type RobotClass } from './robots';
 import { buildTeam, partialTeamError, teamEnergy, teamError } from './team';
 import { DIVISIONS, KING_TITLE, NPC_SETUP, divisionPrize, type LeagueState } from './league';
-import { VET_NAME, vetRank, vetStars } from './veteran';
+import { VET_NAME, VET_WINS_PER_DAY, vetRank, vetStars } from './veteran';
 
 export const PLAYER_ID = 'player';
 
@@ -167,6 +168,8 @@ export interface World {
   seasons: SeasonResult[];
   /** the player's climb through the Pit League */
   league?: LeagueState;
+  /** the player's realised trading profit today (UTC day number) — capped like on NEAR */
+  gainDay?: { day: number; amount: number };
 }
 
 export const dayOf = (w: World) => Math.floor(w.hour / HOURS_PER_DAY) + 1;
@@ -349,10 +352,12 @@ export function buy(w: World, managerId: string, brokerId: string, modelId: stri
   m.credits -= price;
   b.credits += price;
   r.owner = m.id;
+  r.paid = price;
   ledger(w, { kind: 'buy', from: m.id, to: b.id, uid: r.uid, amount: price });
   if (m.id === PLAYER_ID) {
     log(w, 'player', `You bought ${model(modelId).name} from ${b.name} for ${price} CR`);
     r.chainId = undefined; // a fresh token is minted for it on-chain
+    r.vet = undefined; // …with a fresh battle record
     playerHooks.buy?.(r, price, b.id);
   }
   return null;
@@ -375,6 +380,15 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     deal = { broker: b, price };
   } else deal = bestBid(w, r);
   if (!deal) return 'Nobody wants to buy this robot';
+  if (m.id === PLAYER_ID) {
+    // the daily trading-profit cap (the same limit the NEAR contract enforces)
+    const gain = Math.max(0, deal.price - (r.paid ?? model(r.modelId).basePrice));
+    const day = Math.floor(Date.now() / 86_400_000);
+    const g = w.gainDay?.day === day ? w.gainDay : { day, amount: 0 };
+    if (g.amount + gain > DAILY_GAIN_MAX)
+      return `Daily trading profit limit: ${DAILY_GAIN_MAX} CR a day (${g.amount} used) — sell it tomorrow`;
+    w.gainDay = { day, amount: g.amount + gain };
+  }
   m.credits += deal.price;
   deal.broker.credits -= deal.price;
   r.owner = deal.broker.id;
@@ -624,7 +638,15 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
       r.durability = Math.max(0, r.durability - wearLoss(st, uid, m.id === PLAYER_ID));
       // veteran record: a win counts for every robot that fought
       const rankBefore = vetRank(r);
-      r.vet = { b: (r.vet?.b ?? 0) + 1, w: (r.vet?.w ?? 0) + (res === 1 ? 1 : 0) };
+      // your robots count at most VET_WINS_PER_DAY wins a day toward the rank (as on NEAR)
+      const day = Math.floor(Date.now() / 86_400_000);
+      const today = r.vet?.d === day ? (r.vet.t ?? 0) : 0;
+      const counts = res === 1 && (m.id !== PLAYER_ID || today < VET_WINS_PER_DAY);
+      r.vet = {
+        b: (r.vet?.b ?? 0) + 1,
+        w: (r.vet?.w ?? 0) + (counts ? 1 : 0),
+        ...(m.id === PLAYER_ID ? { d: day, t: today + (counts ? 1 : 0) } : {}),
+      };
       const rank = vetRank(r);
       if (m.id === PLAYER_ID && rank > rankBefore)
         log(w, 'player', `${model(r.modelId).name} is now ${VET_NAME[rank]} ${vetStars(rank)}`);
@@ -1076,10 +1098,12 @@ function endHour(w: World) {
   snapshot(w, rel);
   if (w.hour % HOURS_PER_DAY === 0) {
     brokerDayEnd(w);
-    // league money: every NPC team gets its division's daily stipend
+    // league money: NPC teams get their division's daily stipend
     for (const m of w.managers) {
       if (m.id === PLAYER_ID) continue;
-      const pay = DIVISIONS[m.div ?? 0].stipend;
+      // only a team that is short of money gets it (up to 400 CR), so the league doesn't inflate the economy
+      const pay = Math.min(DIVISIONS[m.div ?? 0].stipend, Math.max(0, 400 - m.credits));
+      if (pay <= 0) continue;
       m.credits += pay;
       ledger(w, { kind: 'reward', from: 'league', to: m.id, amount: pay });
     }

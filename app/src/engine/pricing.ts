@@ -16,7 +16,7 @@ export const ECON = {
   scrapShare: 0.15, // selling a broken robot for parts = 15%; a worn-out robot at a broker is worth about the same
   // Battle purse = purseRate × (both teams' value at base prices).
   // The winner takes winShare, a draw gives drawShare to each, the loser gets lossShare.
-  purseRate: 0.025,
+  purseRate: 0.015,
   // the human player's battles pay more (Arena prize money for challengers) — so a few wins buy a good robot
   playerPurseRate: 0.06,
   winShare: 0.75,
@@ -87,7 +87,21 @@ export const askPrice = (fair: number, style: BrokerStyle) => Math.round(fair * 
 
 /** A broker buys a working robot: fair price − discount, adjusted for durability. */
 export const bidPrice = (fair: number, style: BrokerStyle, r: Robot) =>
-  Math.round(fair * (1 - style.spread) * durabilityFactor(r) * VET_PRICE[vetRank(r)]);
+  Math.min(
+    Math.round(fair * (1 - style.spread) * durabilityFactor(r) * VET_PRICE[vetRank(r)]),
+    gainCap(r),
+  );
+
+/**
+ * Anti-arbitrage (the NEAR contract checks the same): nobody pays more than GAIN_MAX × what the owner paid for a
+ * robot (× its veteran bonus); a starter counts as bought at its base price. The market's range is 0.3…2.4 × base,
+ * so only a buy at the very bottom resold at the very top hits it.
+ */
+export const GAIN_MAX = 2.5;
+export const gainCap = (r: Robot) =>
+  Math.floor((r.paid ?? model(r.modelId).basePrice) * GAIN_MAX * VET_PRICE[vetRank(r)]);
+/** A player's realised trading profit (sale − purchase price) is capped per day (UTC). */
+export const DAILY_GAIN_MAX = 1500;
 
 /** Only the scrap dealer takes a broken robot. */
 export const scrapPrice = (fair: number) => Math.max(1, Math.round(fair * ECON.scrapShare));

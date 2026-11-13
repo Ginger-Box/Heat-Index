@@ -212,6 +212,27 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   `mt_tokens_for_owner` return the record. 11 unit tests. Upgraded in place with a state migration; checked live with
   the bot players (records appear on their tokens).
 
+### Closing the arbitrage (Nov 14, night)
+- The jury session found two holes after the league update. (1) Prices and wins are reported by the client, so a
+  cheater could buy a robot at the market's floor (0.3 × base) and sell it at the ceiling (2.4 × base, ×1.6 for a
+  Legend after 15 fake wins in 7.5 minutes) — a Titan bought for 168 sold for ~2150. (2) League prizes were paid only
+  in the browser, so game credits and chain credits drifted apart after the first division.
+- **Contract v0.5**:
+  - every robot token remembers what its owner paid (starters: base price); a sale may be at most 2.5 × that
+    (× the on-chain veteran bonus);
+  - an account's realised trading profit (sale − purchase) is capped at 1500 CR a day;
+  - at most 6 wins a day count toward a robot's rank (a Legend takes 3 days);
+  - a battle may list at most 15 robots;
+  - the **Pit League runs on-chain**: the contract knows the 12 teams and their divisions, counts recorded wins,
+    mints the division prize and moves the player up — the same rules as the game, so credits stay equal.
+  - 15 unit tests (one per hole). Live: a Spark bought for 9 CR can't be resold for 60; 22 CR (2.5×) goes through.
+- **The game mirrors the same rules**, so an honest player never sends a transaction the chain would reject:
+  brokers never bid above 2.5 × the purchase price (for everyone, NPCs included), the player's daily trading profit
+  is capped with a clear message, a bought robot starts a fresh battle record (it is a fresh token on-chain).
+- Economy check after the league (`scripts/economy.ts`, 7 days): NPC teams were getting rich (avg 300 → 1600 CR) —
+  the upper leagues' costlier decks make bigger battle purses. NPC purse rate 2.5% → 1.5%, and the league stipend
+  now only tops up a team below 400 CR: NPC money now grows slowly (avg ~290 → 570–710 CR over a week).
+
 ## Next
 - Card art.
 - README for judges, demo video.

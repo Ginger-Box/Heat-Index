@@ -50,6 +50,27 @@ const BATTLE_COOLDOWN_MS: u64 = 30_000;
 const VET_WINS: [u32; 3] = [3, 8, 15];
 const VET_PRICE_PCT: [u128; 4] = [100, 115, 135, 160];
 
+/// Wins that count toward a robot's rank per day (UTC): a Legend takes at least 3 days, so ranks can't be farmed
+/// with a burst of reported battles.
+const VET_WINS_PER_DAY: u32 = 6;
+/// Anti-arbitrage. A robot never sells for more than GAIN_MAX_PCT % of what its owner paid for it (× its veteran
+/// bonus), and an account's realised trading profit (sale price − purchase price, summed) is capped per day.
+/// Starter robots count as bought at their base price.
+const GAIN_MAX_PCT: u128 = 250;
+const DAILY_GAIN_MAX: u128 = 1_500;
+const DAY_MS: u64 = 86_400_000;
+
+/// The Pit League (same as app/src/engine/league.ts): the 12 NPC teams by division, and the division prizes.
+/// Beat every team of your division once (a recorded win) to move up; winning the Apex League is a crown.
+const LEAGUE: [(&str, u8); 12] = [
+    ("Rusty Dogs", 0), ("Glitch", 0), ("Short Circuit", 0),
+    ("Steel Rats", 1), ("Byte Gang", 1), ("Dead Pixel", 1),
+    ("Night Shift", 2), ("Chrome Hawks", 2), ("Sector 9", 2),
+    ("Neon-17", 3), ("Syndicate Zero", 3), ("Protocol Omega", 3),
+];
+const LEAGUE_PRIZE: [u128; 4] = [150, 300, 500, 1_000];
+const CROWN_DEFENSE_PRIZE: u128 = 300;
+
 fn vet_rank(wins: u32) -> usize {
     VET_WINS.iter().filter(|&&w| wins >= w).count()
 }
@@ -80,6 +101,10 @@ enum Key {
     OwnerKeys,
     LastBattle,
     Records,
+    Paid,
+    Gains,
+    VetDay,
+    League,
 }
 
 /// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
@@ -117,6 +142,23 @@ pub struct Record {
     pub battles: u32,
     pub wins: u32,
     pub rank: u8,
+}
+
+/// A player's climb through the Pit League.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Default)]
+pub struct League {
+    pub div: u8,
+    pub beaten: Vec<String>,
+    pub crowns: u32,
+}
+
+/// A per-day counter (UTC day number + amount).
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Default)]
+pub struct DayCount {
+    pub day: u64,
+    pub amount: u128,
 }
 
 /// One robot's wear after a battle, as reported by the client.
@@ -158,11 +200,19 @@ pub struct Contract {
     last_battle: LookupMap<AccountId, u64>,
     /// robot token id -> battle record (veterans)
     records: LookupMap<String, Record>,
+    /// robot token id -> what its owner paid (starters: the base price)
+    paid: LookupMap<String, u128>,
+    /// account -> realised trading profit today
+    gains: LookupMap<AccountId, DayCount>,
+    /// robot token id -> wins counted toward its rank today
+    vet_day: LookupMap<String, DayCount>,
+    /// account -> its Pit League progress
+    league: LookupMap<AccountId, League>,
 }
 
-/// State layout of v0.3 (before veteran records) — used once by `migrate`.
+/// State layout of v0.4 (before the anti-arbitrage limits and the on-chain league) — used once by `migrate`.
 #[near(serializers = [borsh])]
-struct ContractV3 {
+struct ContractV4 {
     owner_id: AccountId,
     balances: LookupMap<String, u128>,
     supply: LookupMap<String, u128>,
@@ -176,6 +226,7 @@ struct ContractV3 {
     hour_bucket: u64,
     created_this_hour: u32,
     last_battle: LookupMap<AccountId, u64>,
+    records: LookupMap<String, Record>,
 }
 
 fn bal_key(token_id: &str, account: &AccountId) -> String {
@@ -208,14 +259,18 @@ impl Contract {
             created_this_hour: 0,
             last_battle: LookupMap::new(Key::LastBattle),
             records: LookupMap::new(Key::Records),
+            paid: LookupMap::new(Key::Paid),
+            gains: LookupMap::new(Key::Gains),
+            vet_day: LookupMap::new(Key::VetDay),
+            league: LookupMap::new(Key::League),
         }
     }
 
-    /// One-off upgrade from v0.3: keeps all balances, robots and players, adds the robots' battle records.
+    /// One-off upgrade from v0.4: keeps everything, adds purchase prices, daily limits and the on-chain league.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: ContractV3 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.3 state"));
+        let old: ContractV4 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.4 state"));
         Self {
             owner_id: old.owner_id,
             balances: old.balances,
@@ -230,7 +285,11 @@ impl Contract {
             hour_bucket: old.hour_bucket,
             created_this_hour: old.created_this_hour,
             last_battle: old.last_battle,
-            records: LookupMap::new(Key::Records),
+            records: old.records,
+            paid: LookupMap::new(Key::Paid),
+            gains: LookupMap::new(Key::Gains),
+            vet_day: LookupMap::new(Key::VetDay),
+            league: LookupMap::new(Key::League),
         }
     }
 
@@ -341,6 +400,7 @@ impl Contract {
         require!(durability >= 1 && durability <= max_durability(&model_id), "Durability out of range");
         self.burn_credits(&who, price.0, "buy robot");
         let id = self.mint_robot(&who, &model_id, durability, "bought from a broker");
+        self.paid.insert(id.clone(), price.0);
         self.trade(&who, "buy", &id, price.0, &broker);
         id
     }
@@ -356,6 +416,20 @@ impl Contract {
         let vet = VET_PRICE_PCT[self.records.get(&token_id).map(|x| x.rank as usize).unwrap_or(0)];
         let limit = base_price(&r.model_id) * SELL_MAX_PCT * vet * (15 * max_d + 85 * d) / (100 * 100 * 100 * max_d) + 1;
         require!(price.0 <= limit, "Price is above what any broker would pay for this robot");
+        // anti-arbitrage: at most GAIN_MAX_PCT of the purchase price (× veteran bonus), and a daily profit cap
+        let paid = self.paid.get(&token_id).copied().unwrap_or_else(|| base_price(&r.model_id));
+        require!(price.0 * 100 * 100 <= paid * GAIN_MAX_PCT * vet + 100 * 100, "Price is too far above what you paid for this robot");
+        let gain = price.0.saturating_sub(paid);
+        if gain > 0 {
+            let day = env::block_timestamp_ms() / DAY_MS;
+            let mut g = self.gains.get(&who).cloned().unwrap_or_default();
+            if g.day != day {
+                g = DayCount { day, amount: 0 };
+            }
+            require!(g.amount + gain <= DAILY_GAIN_MAX, "Daily trading profit limit reached");
+            g.amount += gain;
+            self.gains.insert(who.clone(), g);
+        }
         self.burn_robot(&who, &token_id, "sold to a broker");
         self.mint_credits(&who, price.0, "robot sold");
         self.trade(&who, "sell", &token_id, price.0, &broker);
@@ -388,6 +462,7 @@ impl Contract {
     pub fn record_battle(&mut self, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>) {
         let who = self.player();
         require!(result <= 2, "Bad result");
+        require!(wear.len() <= 15, "A deck has at most 15 robots");
         let now = env::block_timestamp_ms();
         if let Some(last) = self.last_battle.get(&who) {
             require!(now >= last + BATTLE_COOLDOWN_MS, "One battle per 30 seconds");
@@ -409,7 +484,17 @@ impl Contract {
             let mut rec = self.records.get(&w.token_id).cloned().unwrap_or_default();
             rec.battles += 1;
             if result == 1 {
-                rec.wins += 1;
+                // only VET_WINS_PER_DAY wins a day count toward the rank
+                let day = now / DAY_MS;
+                let mut d = self.vet_day.get(&w.token_id).cloned().unwrap_or_default();
+                if d.day != day {
+                    d = DayCount { day, amount: 0 };
+                }
+                if d.amount < VET_WINS_PER_DAY as u128 {
+                    d.amount += 1;
+                    rec.wins += 1;
+                }
+                self.vet_day.insert(w.token_id.clone(), d);
             }
             let rank = vet_rank(rec.wins) as u8;
             if rank > rec.rank {
@@ -420,6 +505,9 @@ impl Contract {
         }
         if reward.0 > 0 {
             self.mint_credits(&who, reward.0, "battle reward");
+        }
+        if result == 1 {
+            self.league_win(&who, &opponent);
         }
         let mut p = self.players.get(&who).cloned().unwrap_or_default();
         match result {
@@ -527,6 +615,16 @@ impl Contract {
 
     // ---------------- views for the game ----------------
 
+    /// The account's Pit League progress (division 0…3, teams beaten in it, crowns).
+    pub fn league_of(&self, account_id: AccountId) -> League {
+        self.league.get(&account_id).cloned().unwrap_or_default()
+    }
+
+    /// What the account paid for a robot (starters: its base price) — the anti-arbitrage basis.
+    pub fn paid_for(&self, token_id: String) -> Option<U128> {
+        self.robots.get(&token_id).map(|r| U128(self.paid.get(&token_id).copied().unwrap_or_else(|| base_price(&r.model_id))))
+    }
+
     pub fn player_of(&self, account_id: AccountId) -> Option<Player> {
         self.players.get(&account_id).cloned()
     }
@@ -607,6 +705,8 @@ impl Contract {
         self.change_supply(token_id, -1);
         self.robots.remove(token_id);
         self.records.remove(token_id);
+        self.paid.remove(token_id);
+        self.vet_day.remove(token_id);
         self.untrack(from, token_id);
         event("nep245", "1.0.0", "mt_burn", json!([{ "owner_id": from, "token_ids": [token_id], "amounts": ["1"], "memo": memo }]));
     }
@@ -623,6 +723,31 @@ impl Contract {
         if let Some(set) = self.owned.get_mut(owner) {
             set.remove(token_id);
         }
+    }
+
+    /// A recorded win over a team of the player's division counts toward the climb; beating all of them pays the
+    /// division prize (minted here, so the game's credits and the chain's stay equal) and moves the player up.
+    fn league_win(&mut self, who: &AccountId, opponent: &str) {
+        let Some(&(_, div)) = LEAGUE.iter().find(|(n, _)| *n == opponent) else { return };
+        let mut l = self.league.get(who).cloned().unwrap_or_default();
+        if div != l.div || l.beaten.iter().any(|b| b == opponent) {
+            return;
+        }
+        l.beaten.push(opponent.to_string());
+        let left = LEAGUE.iter().filter(|(_, d)| *d == l.div).any(|(n, _)| !l.beaten.iter().any(|b| b == n));
+        if !left {
+            let last = (LEAGUE_PRIZE.len() - 1) as u8;
+            let prize = if l.div == last && l.crowns > 0 { CROWN_DEFENSE_PRIZE } else { LEAGUE_PRIZE[l.div as usize] };
+            self.mint_credits(who, prize, "league prize");
+            event("heat_index", "1.0.0", "league", json!([{ "account_id": who, "division": l.div, "prize": U128(prize) }]));
+            if l.div < last {
+                l.div += 1;
+            } else {
+                l.crowns += 1;
+            }
+            l.beaten.clear();
+        }
+        self.league.insert(who.clone(), l);
     }
 
     fn trade(&mut self, who: &AccountId, kind: &str, token_id: &str, amount: u128, counterparty: &str) {
@@ -744,8 +869,9 @@ mod tests {
     fn veterans_earn_rank_and_price() {
         let (mut c, ids) = setup("jon.testnet");
         let volt = ids[5].clone(); // Volt-7, cost 3, base 100
+        // 4 wins a day over two days (the daily cap is 6)
         for i in 0..8u64 {
-            ctx_at("jon.testnet", 1_000 + i * 31_000);
+            ctx_at("jon.testnet", 1_000 + (i / 4) * DAY_MS + (i % 4) * 31_000);
             c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }]);
         }
         let rec = c.mt_token(vec![volt.clone()])[0].as_ref().unwrap().record.clone().unwrap();
@@ -759,6 +885,54 @@ mod tests {
     fn rookies_get_no_veteran_price() {
         let (mut c, ids) = setup("kim.testnet");
         c.sell_robot(ids[5].clone(), U128(320), "magpie".into());
+    }
+
+    #[test]
+    fn veteran_wins_are_capped_per_day() {
+        let (mut c, ids) = setup("lea.testnet");
+        for i in 0..10u64 {
+            ctx_at("lea.testnet", 1_000 + i * 31_000);
+            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: ids[5].clone(), durability: 10 }]);
+        }
+        let rec = c.mt_token(vec![ids[5].clone()])[0].as_ref().unwrap().record.clone().unwrap();
+        assert_eq!((rec.battles, rec.wins), (10, 6));
+    }
+
+    #[test]
+    #[should_panic(expected = "too far above what you paid")]
+    fn cheap_buy_cannot_be_flipped() {
+        let (mut c, _) = setup("max.testnet");
+        // a Titan (base 560) bought at the market's floor (168) can't be sold at the market's ceiling
+        let t = c.buy_robot("titan".into(), U128(168), 16, "magpie".into());
+        c.sell_robot(t, U128(1_300), "kessler".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "Daily trading profit limit")]
+    fn trading_profit_is_capped_per_day() {
+        let (mut c, _) = setup("ned.testnet");
+        c.mint_credits(&"ned.testnet".parse().unwrap(), 5_000, "test");
+        for _ in 0..5 {
+            let t = c.buy_robot("titan".into(), U128(300), 16, "magpie".into());
+            c.sell_robot(t, U128(700), "kessler".into()); // +400 each: the 4th sale passes 1500
+        }
+    }
+
+    #[test]
+    fn league_prize_is_minted_on_chain() {
+        let (mut c, _) = setup("ola.testnet");
+        let ola: AccountId = "ola.testnet".parse().unwrap();
+        for (i, team) in ["Rusty Dogs", "Glitch", "Short Circuit"].iter().enumerate() {
+            ctx_at("ola.testnet", 1_000 + i as u64 * 31_000);
+            c.record_battle(team.to_string(), 1, U128(10), i as u64, vec![]);
+        }
+        let l = c.league_of(ola.clone());
+        assert_eq!((l.div, l.beaten.len()), (1, 0));
+        assert_eq!(c.mt_balance_of(ola, CREDITS.into()).0, 1000 + 30 + 150);
+        // a team of another division doesn't count
+        ctx_at("ola.testnet", 200_000);
+        c.record_battle("Protocol Omega".into(), 1, U128(10), 9, vec![]);
+        assert_eq!(c.league_of("ola.testnet".parse().unwrap()).beaten.len(), 0);
     }
 
     #[test]

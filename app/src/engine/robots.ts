@@ -147,5 +147,7 @@ export interface Robot {
   modelId: string;
   durability: number;
   /** battle record — wins make a veteran (engine/veteran.ts) */
-  vet?: { b: number; w: number };
+  vet?: { b: number; w: number; /** UTC day of the last counted win */ d?: number; /** wins counted that day */ t?: number };
+  /** what its owner paid (anti-arbitrage basis; absent = the base price) */
+  paid?: number;
 }
