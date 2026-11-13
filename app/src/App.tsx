@@ -69,7 +69,11 @@ export default function App() {
   // which then powers on like an old TV. Returning players get a "welcome back" screen instead of the login.
   const [stage, setStage] = useState<'login' | 'boot' | 'game'>('login');
   const [powerOn, setPowerOn] = useState(false);
-  const enter = () => setStage('boot');
+  const enter = () => {
+    // the stage is re-read here: it may have changed since the page loaded (e.g. "start over" cleared it)
+    setTutorial(readTutorial());
+    setStage('boot');
+  };
   // coming back from the NEAR Auth login page (email login by redirect): finish creating the account
   const [resume, setResume] = useState<{ busy: boolean; error: string | null }>(() => ({
     busy: emailLoginPending(),
@@ -110,7 +114,10 @@ export default function App() {
         error={resume.error}
         onEnter={(name) => {
           startGame(name);
-          enter();
+          // a brand-new player always starts with the training battle, even if an older save on this browser
+          // had finished it
+          advanceTutorial('battle');
+          setStage('boot');
         }}
       />
     );

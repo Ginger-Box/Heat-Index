@@ -23,10 +23,42 @@ const START_CREDITS: u128 = 1_000;
 const STARTER: [&str; 12] = [
     "spark", "scout", "bolt", "ram", "welder", "volt", "wall", "dozer", "drone", "cracker", "dash", "plate",
 ];
-/// Sanity limits for values reported by the client.
-const MAX_REWARD: u128 = 2_000;
-const MAX_PRICE: u128 = 100_000;
-const MAX_DURABILITY: u32 = 16;
+/// The game's robot models and their energy cost (app/src/engine/robots.ts). The contract prices from this table,
+/// so a client can't invent prices: base price = BASE_PRICE[cost], max durability = 4 + 2 × cost.
+const MODELS: [(&str, u32); 28] = [
+    ("spark", 1), ("bolt", 2), ("volt", 3), ("dozer", 4), ("plate", 2), ("wall", 3), ("bastion", 4), ("titan", 6),
+    ("scout", 1), ("hound", 3), ("ghost", 4), ("raptor", 5), ("drone", 1), ("welder", 2), ("medic", 4), ("ark", 6),
+    ("cracker", 1), ("mine", 3), ("shrapnel", 5), ("apoc", 6), ("dash", 1), ("ram", 2), ("hammer", 3), ("bull", 5),
+    ("zapper", 2), ("arc", 3), ("tesla", 4), ("storm", 6),
+];
+const BASE_PRICE: [u128; 7] = [0, 30, 55, 100, 180, 320, 560];
+/// The market's price range, from the game's pricing rules (app/src/engine/pricing.ts), in % of the base price:
+/// fair = base × (0.5…1.5 relevance) × (0.6…1.6 stock); ask = fair × (1 + markup ≤ 15%);
+/// bid = fair × (1 − markup) × wear factor.
+const BUY_MIN_PCT: u128 = 30;
+const BUY_MAX_PCT: u128 = 280;
+const SELL_MAX_PCT: u128 = 240;
+/// A full repair (empty → full bar) costs at least this % of the base price (fair × 30% × missing, fair ≥ 0.3 base).
+const REPAIR_MIN_PCT: u128 = 8;
+/// A battle pays at most this % of the base value of the player's robots, and never more than MAX_REWARD.
+const REWARD_MAX_PCT: u128 = 25;
+const MAX_REWARD: u128 = 400;
+/// One battle result per account per this many milliseconds (a real battle takes minutes).
+const BATTLE_COOLDOWN_MS: u64 = 30_000;
+
+fn model_cost(model_id: &str) -> u32 {
+    MODELS
+        .iter()
+        .find(|(id, _)| *id == model_id)
+        .map(|(_, c)| *c)
+        .unwrap_or_else(|| env::panic_str("Unknown robot model"))
+}
+fn base_price(model_id: &str) -> u128 {
+    BASE_PRICE[model_cost(model_id) as usize]
+}
+fn max_durability(model_id: &str) -> u32 {
+    4 + 2 * model_cost(model_id)
+}
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -38,6 +70,7 @@ enum Key {
     Owned,
     OwnedSet { account_hash: Vec<u8> },
     OwnerKeys,
+    LastBattle,
 }
 
 /// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
@@ -100,11 +133,13 @@ pub struct Contract {
     owner_keys: LookupMap<String, AccountId>,
     hour_bucket: u64,
     created_this_hour: u32,
+    /// when each player last recorded a battle (rate limit)
+    last_battle: LookupMap<AccountId, u64>,
 }
 
-/// State layout of v0.1 (before the account factory) — used once by `migrate`.
+/// State layout of v0.2 (before the on-chain price checks) — used once by `migrate`.
 #[near(serializers = [borsh])]
-struct ContractV1 {
+struct ContractV2 {
     owner_id: AccountId,
     balances: LookupMap<String, u128>,
     supply: LookupMap<String, u128>,
@@ -114,6 +149,9 @@ struct ContractV1 {
     next_serial: u64,
     total_battles: u64,
     total_trades: u64,
+    owner_keys: LookupMap<String, AccountId>,
+    hour_bucket: u64,
+    created_this_hour: u32,
 }
 
 fn bal_key(token_id: &str, account: &AccountId) -> String {
@@ -144,14 +182,15 @@ impl Contract {
             owner_keys: LookupMap::new(Key::OwnerKeys),
             hour_bucket: 0,
             created_this_hour: 0,
+            last_battle: LookupMap::new(Key::LastBattle),
         }
     }
 
-    /// One-off upgrade from v0.1: keeps all balances and robots, adds the account factory fields.
+    /// One-off upgrade from v0.2: keeps all balances, robots and players, adds the battle rate limit.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: ContractV1 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.1 state"));
+        let old: ContractV2 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.2 state"));
         Self {
             owner_id: old.owner_id,
             balances: old.balances,
@@ -162,9 +201,10 @@ impl Contract {
             next_serial: old.next_serial,
             total_battles: old.total_battles,
             total_trades: old.total_trades,
-            owner_keys: LookupMap::new(Key::OwnerKeys),
-            hour_bucket: 0,
-            created_this_hour: 0,
+            owner_keys: old.owner_keys,
+            hour_bucket: old.hour_bucket,
+            created_this_hour: old.created_this_hour,
+            last_battle: LookupMap::new(Key::LastBattle),
         }
     }
 
@@ -253,7 +293,7 @@ impl Contract {
             Player { registered_at_ms: env::block_timestamp_ms(), ..Default::default() },
         );
         self.mint_credits(&who, START_CREDITS, "starting credits");
-        let ids: Vec<String> = STARTER.iter().map(|m| self.mint_robot(&who, m, MAX_DURABILITY, "starter robot")).collect();
+        let ids: Vec<String> = STARTER.iter().map(|m| self.mint_robot(&who, m, max_durability(m), "starter robot")).collect();
         event(
             "heat_index",
             "1.0.0",
@@ -263,11 +303,16 @@ impl Contract {
         ids
     }
 
-    /// Buy a new robot from a broker for `price` credits (the price comes from the game's market).
+    /// Buy a new robot from a broker for `price` credits. The price comes from the game's market, but it must lie in
+    /// the market's possible range for that model (BUY_MIN_PCT…BUY_MAX_PCT of its base price, set on-chain).
     pub fn buy_robot(&mut self, model_id: String, price: U128, durability: u32, broker: String) -> String {
         let who = self.player();
-        require!(price.0 <= MAX_PRICE, "Price out of range");
-        require!(durability >= 1 && durability <= MAX_DURABILITY, "Durability out of range");
+        let base = base_price(&model_id);
+        require!(
+            price.0 * 100 >= base * BUY_MIN_PCT && price.0 * 100 <= base * BUY_MAX_PCT,
+            "Price is outside this model's market range"
+        );
+        require!(durability >= 1 && durability <= max_durability(&model_id), "Durability out of range");
         self.burn_credits(&who, price.0, "buy robot");
         let id = self.mint_robot(&who, &model_id, durability, "bought from a broker");
         self.trade(&who, "buy", &id, price.0, &broker);
@@ -275,20 +320,33 @@ impl Contract {
     }
 
     /// Sell a robot to a broker: the robot token is burned, the credits are minted to the seller.
+    /// The price can't exceed what a broker could pay for this model at this wear (SELL_MAX_PCT × wear factor).
     pub fn sell_robot(&mut self, token_id: String, price: U128, broker: String) {
         let who = self.player();
-        require!(price.0 <= MAX_PRICE, "Price out of range");
+        let r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
+        let max_d = max_durability(&r.model_id) as u128;
+        let d = (r.durability as u128).min(max_d);
+        // wear factor 15% … 100%, like the game's durabilityFactor (which is never above the linear one)
+        let limit = base_price(&r.model_id) * SELL_MAX_PCT * (15 * max_d + 85 * d) / (100 * 100 * max_d) + 1;
+        require!(price.0 <= limit, "Price is above what any broker would pay for this robot");
         self.burn_robot(&who, &token_id, "sold to a broker");
         self.mint_credits(&who, price.0, "robot sold");
         self.trade(&who, "sell", &token_id, price.0, &broker);
     }
 
-    /// Repair a robot: pay `cost` credits, set its durability.
+    /// Repair a robot: pay `cost` credits, raise its durability. The cost can't be below the game's cheapest
+    /// possible repair for the restored durability, and durability can't exceed the model's maximum.
     pub fn repair_robot(&mut self, token_id: String, cost: U128, durability: u32) {
         let who = self.player();
-        require!(durability <= MAX_DURABILITY, "Durability out of range");
         let mut r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
         require!(r.owner_id == who, "Not your robot");
+        let max_d = max_durability(&r.model_id);
+        require!(durability <= max_d, "Durability out of range");
+        let from = r.durability.min(max_d);
+        require!(durability >= from, "A repair can't lower durability");
+        let base = base_price(&r.model_id);
+        let min_cost = base * REPAIR_MIN_PCT * (durability - from) as u128 / (100 * max_d as u128);
+        require!(cost.0 >= min_cost && cost.0 <= base, "Repair cost is out of range");
         self.burn_credits(&who, cost.0, "repair");
         r.durability = durability;
         self.robots.insert(token_id.clone(), r);
@@ -298,10 +356,22 @@ impl Contract {
     /// Record a finished battle: the reward is minted, the robots' durability is updated (broken robots stay
     /// as tokens with durability 0 until they are sold for scrap).
     /// `result`: 1 win, 0 loss, 2 draw. `seed` lets a verifier replay the battle later.
+    /// Limits: one battle per BATTLE_COOLDOWN_MS per account; the reward is at most REWARD_MAX_PCT of the base value
+    /// of the player's robots on-chain and at most MAX_REWARD; durability can only go down.
     pub fn record_battle(&mut self, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>) {
         let who = self.player();
         require!(result <= 2, "Bad result");
-        require!(reward.0 <= MAX_REWARD, "Reward out of range");
+        let now = env::block_timestamp_ms();
+        if let Some(last) = self.last_battle.get(&who) {
+            require!(now >= last + BATTLE_COOLDOWN_MS, "One battle per 30 seconds");
+        }
+        self.last_battle.insert(who.clone(), now);
+        let value: u128 = self
+            .owned
+            .get(&who)
+            .map(|set| set.iter().filter_map(|t| self.robots.get(t)).map(|r| base_price(&r.model_id)).sum())
+            .unwrap_or(0);
+        require!(reward.0 <= MAX_REWARD && reward.0 * 100 <= value * REWARD_MAX_PCT, "Reward out of range");
         for w in &wear {
             let mut r = self.robots.get(&w.token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
             require!(r.owner_id == who, "Not your robot");
@@ -478,7 +548,7 @@ impl Contract {
     }
 
     fn mint_robot(&mut self, to: &AccountId, model_id: &str, durability: u32, memo: &str) -> String {
-        require!(!model_id.is_empty() && model_id.len() <= 32, "Bad model id");
+        model_cost(model_id); // panics on an unknown model
         self.next_serial += 1;
         let id = format!("robot:{model_id}:{}", self.next_serial);
         self.robots.insert(id.clone(), Robot { model_id: model_id.to_string(), durability, owner_id: to.clone() });
@@ -534,31 +604,37 @@ mod tests {
     use near_sdk::testing_env;
 
     fn ctx(who: &str) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(who.parse().unwrap()).build());
+        ctx_at(who, 0);
+    }
+    fn ctx_at(who: &str, ms: u64) {
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(who.parse().unwrap())
+            .block_timestamp(ms * 1_000_000)
+            .build());
+    }
+    fn setup(who: &str) -> (Contract, Vec<String>) {
+        ctx("game.testnet");
+        let mut c = Contract::new("game.testnet".parse().unwrap());
+        ctx(who);
+        let ids = c.register();
+        (c, ids)
     }
 
     #[test]
     fn full_loop() {
-        ctx("game.testnet");
-        let mut c = Contract::new("game.testnet".parse().unwrap());
-        ctx("alice.testnet");
-        let ids = c.register();
+        let (mut c, ids) = setup("alice.testnet");
         assert_eq!(ids.len(), 12);
         let alice: AccountId = "alice.testnet".parse().unwrap();
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 1000);
         assert_eq!(c.mt_tokens_for_owner(alice.clone(), None, None).len(), 12);
         assert!(get_logs().iter().any(|l| l.contains("\"standard\":\"nep245\"") && l.contains("mt_mint")));
+        // starters get their model's durability (spark: cost 1 → 6)
+        assert_eq!(c.mt_token(vec![ids[0].clone()])[0].as_ref().unwrap().metadata.as_ref().unwrap().durability, 6);
 
-        // buy, battle, repair, sell
+        // buy, battle, repair, sell — all within the market's limits
         let bought = c.buy_robot("titan".into(), U128(560), 16, "kessler".into());
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 440);
-        c.record_battle(
-            "npc3".into(),
-            1,
-            U128(90),
-            42,
-            vec![Wear { token_id: bought.clone(), durability: 14 }],
-        );
+        c.record_battle("npc3".into(), 1, U128(90), 42, vec![Wear { token_id: bought.clone(), durability: 14 }]);
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 530);
         assert_eq!(c.mt_token(vec![bought.clone()])[0].as_ref().unwrap().metadata.as_ref().unwrap().durability, 14);
         c.repair_robot(bought.clone(), U128(30), 16);
@@ -572,21 +648,61 @@ mod tests {
     #[test]
     #[should_panic(expected = "Not enough balance")]
     fn cannot_overspend() {
-        ctx("game.testnet");
-        let mut c = Contract::new("game.testnet".parse().unwrap());
-        ctx("bob.testnet");
-        c.register();
-        c.buy_robot("apoc".into(), U128(5000), 16, "kessler".into());
+        let (mut c, _) = setup("bob.testnet");
+        c.buy_robot("apoc".into(), U128(1500), 16, "kessler".into());
     }
 
     #[test]
     #[should_panic(expected = "Durability can only go down")]
     fn battle_cannot_heal() {
-        ctx("game.testnet");
-        let mut c = Contract::new("game.testnet".parse().unwrap());
-        ctx("carol.testnet");
-        let ids = c.register();
-        c.record_battle("npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 15 }]);
-        c.record_battle("npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 16 }]);
+        let (mut c, ids) = setup("carol.testnet");
+        ctx_at("carol.testnet", 1_000);
+        c.record_battle("npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }]);
+        ctx_at("carol.testnet", 40_000);
+        c.record_battle("npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 6 }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "above what any broker would pay")]
+    fn cannot_sell_for_a_fortune() {
+        let (mut c, ids) = setup("dave.testnet");
+        c.sell_robot(ids[0].clone(), U128(100_000), "magpie".into()); // a Spark (base 30)
+    }
+
+    #[test]
+    #[should_panic(expected = "outside this model's market range")]
+    fn cannot_buy_for_free() {
+        let (mut c, _) = setup("erin.testnet");
+        c.buy_robot("titan".into(), U128(0), 16, "kessler".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown robot model")]
+    fn cannot_invent_models() {
+        let (mut c, _) = setup("fay.testnet");
+        c.buy_robot("god-mode".into(), U128(10), 10, "kessler".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "Repair cost is out of range")]
+    fn cannot_repair_for_free() {
+        let (mut c, ids) = setup("gus.testnet");
+        c.record_battle("npc1".into(), 0, U128(0), 1, vec![Wear { token_id: ids[0].clone(), durability: 1 }]);
+        c.repair_robot(ids[0].clone(), U128(0), 6);
+    }
+
+    #[test]
+    #[should_panic(expected = "Reward out of range")]
+    fn reward_is_capped() {
+        let (mut c, _) = setup("hal.testnet");
+        c.record_battle("npc1".into(), 1, U128(2_000), 1, vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "One battle per 30 seconds")]
+    fn battles_are_rate_limited() {
+        let (mut c, _) = setup("ivy.testnet");
+        c.record_battle("npc1".into(), 1, U128(50), 1, vec![]);
+        c.record_battle("npc1".into(), 1, U128(50), 2, vec![]);
     }
 }
