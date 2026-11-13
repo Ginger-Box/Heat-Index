@@ -175,20 +175,24 @@ export function Glitch({
       lv.textContent = t;
       el.setAttribute('data-text', t);
     };
-    el.classList.add('on');
+    // the "on" state is an attribute React does not manage, so a re-render can't switch the effect off mid-way;
+    // removing it first + a reflow restarts the CSS animations when a new change arrives during a glitch
+    el.removeAttribute('data-on');
+    void el.offsetWidth;
+    el.setAttribute('data-on', '');
     paint(scramble(0));
     const id = setInterval(() => {
       frame++;
       if (frame >= FRAMES) {
         clearInterval(id);
-        el.classList.remove('on');
+        el.removeAttribute('data-on');
         return;
       }
       paint(scramble(Math.floor((frame / FRAMES) * (value.length + 1))));
     }, 34);
     return () => {
       clearInterval(id);
-      el.classList.remove('on');
+      el.removeAttribute('data-on');
     };
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   return (

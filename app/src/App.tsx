@@ -20,6 +20,7 @@ import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soun
 import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
 import { FastForward } from './ui/FastForward';
+import { Ticker } from './ui/Ticker';
 
 const TABS = [
   ['arena', 'Arena'],
@@ -104,6 +105,8 @@ export default function App() {
           }}
         />
       </div>
+
+      <Ticker w={w} />
 
       {/* key={tab}: при смене вкладки блок пересоздаётся и проигрывает «включение кинескопа» */}
       <div className="content tab-crt" key={tab}>

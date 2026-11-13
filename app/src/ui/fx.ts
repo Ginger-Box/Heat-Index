@@ -217,16 +217,27 @@ export function initFx() {
 }
 
 /**
- * Click impact — two "arrows": sharp needles shoot left and right from the click point
- * (white-hot core, cyan glow, tapering to a point), with a faint magenta trail and a tiny diamond flash.
+ * Click impact — a "signal tear": a few needle-shaped slices of the real UI shifted sideways with a colour shift,
+ * an RGB split frame, digital dust and a one-frame inversion at the click point. Short and sharp (~110 ms).
  */
 function glitchHit(x: number, y: number) {
   const box = document.createElement('div');
-  box.className = 'cy-hit';
+  box.className = 'cy-glitch';
   box.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-  const len = 46 + Math.round(Math.random() * 22);
-  box.style.setProperty('--len', `${len}px`);
-  box.innerHTML = '<i class="ray l trail"></i><i class="ray r trail"></i><i class="ray l"></i><i class="ray r"></i><b class="spark"></b>';
+  const r = (a: number, b: number) => Math.round(a + Math.random() * (b - a));
+  const sign = () => (Math.random() < 0.5 ? -1 : 1);
+  let html = '<b class="inv"></b><b class="rgb c"></b><b class="rgb m"></b>';
+  for (let i = 0; i < 4; i++) {
+    const w = r(80, 180); // wide horizontally…
+    const h = [3, 3, 4, 5][r(0, 3)];
+    const top = r(-7, 4); // …but a narrow band vertically
+    const hue = sign() * r(70, 150);
+    html += `<i class="slice" style="width:${w}px;height:${h}px;top:${top}px;left:${-w / 2 + r(-14, 14)}px;--h:${hue}deg;--x1:${sign() * r(5, 16)}px;--x2:${sign() * r(10, 28)}px;--edge:${i % 2 ? '#00f0ff' : '#ff2a8a'}"></i>`;
+  }
+  for (let i = 0; i < 10; i++) {
+    html += `<i class="dust" style="left:${r(-60, 60)}px;top:${r(-6, 6)}px;background:${['#ffffff', '#00f0ff', '#ff2a8a', '#ffe600'][i % 4]}"></i>`;
+  }
+  box.innerHTML = html;
   document.body.appendChild(box);
-  setTimeout(() => box.remove(), 260);
+  setTimeout(() => box.remove(), 140);
 }

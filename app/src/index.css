@@ -455,48 +455,66 @@ details[open] > summary::before {
   padding: 12px 16px 16px;
   margin-bottom: 18px;
 }
-/* Неоновая трубка под верхней панелью: светится, по ней медленно бежит блик, изредка «подмигивает» */
-.topbar::after {
-  content: '';
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 3px;
-  height: 2px;
+/* Бегущая строка рынка под верхней панелью (App.tsx · Ticker): LED-табло биржи с самыми заметными движениями цен */
+.topbar {
+  margin-bottom: 0;
+}
+.ticker {
+  position: relative;
+  height: 24px;
+  margin: 4px 0 16px;
+  overflow: hidden;
   background:
-    linear-gradient(90deg, transparent, #ffffffcc 50%, transparent) 0 0 / 22% 100% no-repeat,
-    linear-gradient(90deg, var(--cyan), var(--magenta) 50%, var(--cyan));
-  box-shadow:
-    0 0 6px var(--magenta),
-    0 0 14px #00f0ff88;
-  animation:
-    tube-sweep 6s linear infinite,
-    tube-wink 7s steps(1) infinite;
+    radial-gradient(circle, #ffffff10 0.6px, transparent 1px) 0 0 / 3px 3px,
+    #07060c;
+  border: 2px solid var(--line);
+  border-top-color: #000;
+  font-family: var(--font-px);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  -webkit-mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
 }
-@keyframes tube-sweep {
-  from {
-    background-position: -30% 0, 0 0;
-  }
+.ticker-track {
+  display: inline-flex;
+  animation: ticker-run 90s linear infinite;
+  will-change: transform;
+}
+.ticker:hover .ticker-track {
+  animation-play-state: paused;
+}
+.ticker-run {
+  display: inline-flex;
+  gap: 28px;
+  padding-right: 28px;
+}
+.ticker-item {
+  display: inline-flex;
+  gap: 7px;
+  color: var(--muted);
+}
+.ticker-item b {
+  color: var(--text);
+  font-weight: normal;
+}
+.ticker-item .up {
+  color: var(--green);
+  text-shadow: 0 0 6px #39ff8866;
+}
+.ticker-item .down {
+  color: var(--red);
+  text-shadow: 0 0 6px #ff3b5c66;
+}
+.ticker-item.news {
+  color: var(--yellow);
+}
+.ticker-item .sep {
+  color: var(--magenta);
+}
+@keyframes ticker-run {
   to {
-    background-position: 130% 0, 0 0;
-  }
-}
-@keyframes tube-wink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  83% {
-    opacity: 0.35;
-  }
-  84% {
-    opacity: 1;
-  }
-  86% {
-    opacity: 0.6;
-  }
-  87% {
-    opacity: 1;
+    transform: translateX(-50%);
   }
 }
 .logo {
@@ -1178,35 +1196,35 @@ details[open] > summary::before {
 .glitch .g-live {
   display: none;
 }
-.glitch.on .g-size {
+.glitch[data-on] .g-size {
   visibility: hidden;
 }
-.glitch.on .g-live {
+.glitch[data-on] .g-live {
   display: inline;
 }
 .glitch .g-live,
-.glitch.on::before,
-.glitch.on::after {
+.glitch[data-on]::before,
+.glitch[data-on]::after {
   position: absolute;
   left: 0;
   top: 0;
   white-space: nowrap;
   pointer-events: none;
 }
-.glitch.on .g-live {
+.glitch[data-on] .g-live {
   animation: glitch-flash 0.3s linear;
 }
-.glitch.on::before,
-.glitch.on::after {
+.glitch[data-on]::before,
+.glitch[data-on]::after {
   content: attr(data-text);
   text-shadow: none;
   opacity: 0.85;
 }
-.glitch.on::before {
+.glitch[data-on]::before {
   color: var(--cyan);
   animation: glitch-slice-a 0.3s steps(4) infinite;
 }
-.glitch.on::after {
+.glitch[data-on]::after {
   color: var(--magenta);
   animation: glitch-slice-b 0.3s steps(4) infinite;
 }
@@ -1228,9 +1246,9 @@ details[open] > summary::before {
 }
 /* Если человек просит меньше движения — без тряски и мерцания */
 @media (prefers-reduced-motion: reduce) {
-  .glitch.on .g-live,
-  .glitch.on::before,
-  .glitch.on::after,
+  .glitch[data-on] .g-live,
+  .glitch[data-on]::before,
+  .glitch[data-on]::after,
   .logo,
   .logo::before,
   .logo::after,
@@ -2453,7 +2471,7 @@ html.cy-on input:not([type]) {
 @media (prefers-reduced-motion: reduce) {
   .cy-arrow .gm,
   .cy-arrow .gc,
-  .cy-hit *,
+  .cy-glitch *,
   #cursor-glow i,
   .g-halo::before {
     animation: none !important;
@@ -2661,77 +2679,75 @@ html.cy-on input:not([type]) {
   fill: #39ff141f;
 }
 
-/* ---------- удар клика: две «стрелы» в стороны (ui/fx.ts) ---------- */
-.cy-hit {
+/* ---------- удар клика: «глич сигнала» (ui/fx.ts) — резкая версия ---------- */
+.cy-glitch {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 2147482999;
   pointer-events: none;
 }
-.cy-hit .ray {
+/* срезы-«иглы»: толстые в середине и остро сходят на нет к концам; сквозь них виден интерфейс со сдвигом цвета */
+.cy-glitch .slice {
   position: absolute;
-  top: -2px;
-  height: 4px;
-  width: var(--len);
-  /* игла: толстая у точки клика, острая на конце */
-  background: linear-gradient(90deg, #ffffff 0%, #bff9ff 25%, var(--cyan) 60%, transparent 100%);
-  filter: drop-shadow(0 0 3px var(--cyan)) drop-shadow(0 0 6px #00f0ff88);
-  animation: cy-ray 0.22s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+  clip-path: polygon(0% 50%, 30% 22%, 50% 0%, 70% 22%, 100% 50%, 70% 78%, 50% 100%, 30% 78%);
+  -webkit-backdrop-filter: hue-rotate(var(--h)) saturate(2.8) brightness(1.5) contrast(1.4);
+  backdrop-filter: hue-rotate(var(--h)) saturate(2.8) brightness(1.5) contrast(1.4);
+  background:
+    linear-gradient(90deg, transparent 10%, #ffffffaa 50%, transparent 90%) center / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--edge) 55%, transparent) 50%, transparent);
+  animation: cy-slice 0.11s steps(1) forwards;
 }
-.cy-hit .ray.r {
-  left: 2px;
-  transform-origin: left center;
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
+@keyframes cy-slice {
+  0% { transform: translateX(var(--x1)); }
+  35% { transform: translateX(var(--x2)); }
+  70% { transform: translateX(calc(var(--x1) * -1)); opacity: 0.6; }
+  100% { opacity: 0; }
 }
-.cy-hit .ray.l {
-  right: 2px;
-  transform-origin: right center;
-  clip-path: polygon(100% 0, 0 50%, 100% 100%);
-  background: linear-gradient(270deg, #ffffff 0%, #bff9ff 25%, var(--cyan) 60%, transparent 100%);
-}
-/* розовый след чуть ниже — едва заметное расслоение */
-.cy-hit .ray.trail {
-  top: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #ff2a8a99, transparent);
-  filter: none;
-  animation-duration: 0.26s;
-}
-.cy-hit .ray.l.trail {
-  background: linear-gradient(270deg, #ff2a8a99, transparent);
-}
-@keyframes cy-ray {
-  0% {
-    transform: scaleX(0.15);
-    opacity: 1;
-  }
-  45% {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-  100% {
-    transform: scaleX(1.25) scaleY(0.4);
-    opacity: 0;
-  }
-}
-.cy-hit .spark {
+/* RGB-расслоение: голубая и розовая рамки, разъехавшиеся в стороны */
+.cy-glitch .rgb {
   position: absolute;
-  left: -4px;
+  left: -24px;
   top: -4px;
-  width: 8px;
+  width: 48px;
   height: 8px;
-  background: #fff;
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  filter: drop-shadow(0 0 4px var(--cyan));
-  animation: cy-spark-d 0.14s ease-out forwards;
+  border: 1px solid;
+  clip-path: polygon(0% 50%, 14% 0%, 86% 0%, 100% 50%, 86% 100%, 14% 100%);
+  animation: cy-rgb 0.09s steps(2) forwards;
+  opacity: 0.8;
 }
-@keyframes cy-spark-d {
-  to {
-    transform: scale(0.2);
-    opacity: 0;
-  }
+.cy-glitch .rgb.c { border-color: var(--cyan); --dx: -3px; }
+.cy-glitch .rgb.m { border-color: var(--magenta); --dx: 3px; }
+@keyframes cy-rgb {
+  0% { transform: translateX(var(--dx)) scale(0.8); }
+  50% { transform: translateX(calc(var(--dx) * 2)) scale(1.3); }
+  100% { transform: translateX(calc(var(--dx) * 3)) scale(1.7); opacity: 0; }
 }
+/* «цифровая пыль» */
+.cy-glitch .dust {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  animation: cy-dust 0.1s steps(1) forwards;
+}
+@keyframes cy-dust {
+  20% { opacity: 1; }
+  65% { opacity: 0.7; transform: translateX(3px); }
+  100% { opacity: 0; }
+}
+/* инверсия ровно в точке удара — на один кадр */
+.cy-glitch .inv {
+  position: absolute;
+  left: -7px;
+  top: -3px;
+  width: 14px;
+  height: 6px;
+  -webkit-backdrop-filter: invert(1);
+  backdrop-filter: invert(1);
+  animation: cy-inv 0.045s steps(1) forwards;
+}
+@keyframes cy-inv { to { opacity: 0; } }
 
 /* ---------- загрузочный экран «ламповый телевизор» (ui/Boot.tsx) ---------- */
 .boot {
