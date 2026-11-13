@@ -1,9 +1,10 @@
-// Правила состава команды: 8 роботов, лимит 24 энергии, не больше 2 одной модели, без сломанных.
-import { MAX_SAME_MODEL, TEAM_ENERGY_CAP, TEAM_SIZE, model, type Robot } from './robots';
+// Правила состава команды: 10–15 роботов, лимит 42 энергии, не больше 2 одной модели, без сломанных.
+import { MAX_SAME_MODEL, TEAM_ENERGY_CAP, TEAM_MAX, TEAM_MIN, model, type Robot } from './robots';
 import type { Rng } from './rng';
 
 export function teamError(team: Robot[]): string | null {
-  if (team.length !== TEAM_SIZE) return `A team needs ${TEAM_SIZE} robots (now ${team.length})`;
+  if (team.length < TEAM_MIN || team.length > TEAM_MAX)
+    return `A deck needs ${TEAM_MIN}–${TEAM_MAX} robots (now ${team.length})`;
   const energy = teamEnergy(team);
   if (energy > TEAM_ENERGY_CAP) return `Team limit is ${TEAM_ENERGY_CAP} energy (now ${energy})`;
   const counts: Record<string, number> = {};
@@ -17,7 +18,7 @@ export function teamError(team: Robot[]): string | null {
 
 /** Проверка неполной команды (пока игрок собирает её в Ангаре): всё, кроме «ровно 8». */
 export function partialTeamError(team: Robot[]): string | null {
-  if (team.length > TEAM_SIZE) return `A team holds at most ${TEAM_SIZE} robots`;
+  if (team.length > TEAM_MAX) return `A deck holds at most ${TEAM_MAX} robots`;
   if (new Set(team.map((r) => r.uid)).size !== team.length) return 'This robot is already in the team';
   const energy = teamEnergy(team);
   if (energy > TEAM_ENERGY_CAP) return `Over the limit: would be ${energy} of ${TEAM_ENERGY_CAP} energy`;
@@ -52,10 +53,11 @@ function buildGreedy(pool: Robot[], value: (r: Robot) => number): Robot[] | null
       .map((r) => model(r.modelId).cost)
       .sort((a, b) => a - b);
   for (const r of usable) {
-    if (team.length === TEAM_SIZE) break;
+    if (team.length === TEAM_MAX) break;
     const c = model(r.modelId).cost;
     if ((counts[r.modelId] ?? 0) >= MAX_SAME_MODEL) continue;
-    const slotsLeft = TEAM_SIZE - team.length - 1;
+    // keep enough energy to still reach the minimum deck size with the cheapest robots left
+    const slotsLeft = Math.max(0, TEAM_MIN - team.length - 1);
     const taken = new Set([...team.map((t) => t.uid), r.uid]);
     const reserve = cheapest(taken).slice(0, slotsLeft).reduce((s, x) => s + x, 0);
     if (energy + c + reserve > TEAM_ENERGY_CAP) continue;
@@ -63,7 +65,7 @@ function buildGreedy(pool: Robot[], value: (r: Robot) => number): Robot[] | null
     counts[r.modelId] = (counts[r.modelId] ?? 0) + 1;
     energy += c;
   }
-  return team.length === TEAM_SIZE && !teamError(team) ? team : null;
+  return team.length >= TEAM_MIN && !teamError(team) ? team : null;
 }
 
 let tmpSerial = 0;
@@ -71,7 +73,7 @@ let tmpSerial = 0;
 export function randomTeam(rng: Rng, modelIds: string[]): Robot[] {
   for (;;) {
     const pool: Robot[] = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
       const id = rng.pick(modelIds);
       pool.push({ uid: `${id}#t${tmpSerial++}`, modelId: id, durability: 10 });
     }

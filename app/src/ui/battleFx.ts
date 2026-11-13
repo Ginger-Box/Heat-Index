@@ -74,13 +74,14 @@ const ZAP_COLORS = ['#ffffff', '#d9b3ff', '#b46bff', '#00f0ff'];
 export function sparks(x: number, y: number, dmg: number, opts: { core?: boolean; kind?: 'hit' | 'heal' | 'zap' } = {}) {
   if (reduce()) return;
   ensureCanvas();
-  const power = Math.min(1, Math.max(0.08, dmg / 10)) * (opts.core ? 1.35 : 1);
-  const n = Math.round(6 + power * (opts.core ? 90 : 60));
+  // attacks go up to ~5, so 5 damage = full power
+  const power = Math.min(1.2, Math.max(0.1, dmg / 5)) * (opts.core ? 1.3 : 1);
+  const n = Math.round(8 + power * power * (opts.core ? 150 : 110));
   const colors = opts.kind === 'heal' ? HEAL_COLORS : opts.kind === 'zap' ? ZAP_COLORS : HIT_COLORS;
   for (let i = 0; i < n; i++) {
     const a = opts.kind === 'heal' ? -Math.PI / 2 + (Math.random() - 0.5) * 1.6 : Math.random() * Math.PI * 2;
-    const sp = (opts.kind === 'heal' ? 120 : 160) + Math.random() * (220 + power * 620);
-    const life = 0.25 + Math.random() * (0.25 + power * 0.5);
+    const sp = (opts.kind === 'heal' ? 120 : 140) + Math.random() * (180 + power * 760);
+    const life = 0.22 + Math.random() * (0.2 + power * 0.6);
     parts.push({
       x,
       y,
@@ -88,7 +89,7 @@ export function sparks(x: number, y: number, dmg: number, opts: { core?: boolean
       vy: Math.sin(a) * sp - (opts.kind === 'heal' ? 0 : 140 * power),
       life,
       max: life,
-      size: 2 + Math.round(Math.random() * (1 + power * 3)),
+      size: 2 + Math.round(Math.random() * (1 + power * 4)),
       color: colors[Math.floor(Math.random() * colors.length)],
     });
   }
@@ -227,3 +228,34 @@ export function createAim(kind: AimKind, x0: number, y0: number) {
   };
 }
 export type Aim = ReturnType<typeof createAim>;
+
+/**
+ * A slash streak across the target: a bright tapered band at an angle, with a thin cyan/magenta echo.
+ * power 0..1 sets its length and thickness.
+ */
+export function slash(x: number, y: number, angle: number, power: number) {
+  if (reduce()) return;
+  const el = document.createElement('div');
+  el.className = 'fx-slash';
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  el.style.setProperty('--len', `${110 + power * 260}px`);
+  el.style.setProperty('--th', `${4 + power * 14}px`);
+  el.style.setProperty('--ang', `${angle}rad`);
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 360);
+}
+
+/** A short RGB-split + punch-in of the whole battle table, for the heaviest blows. */
+export function chroma(el: Element | null, power: number) {
+  if (!el || reduce()) return;
+  const a = 2 + power * 6;
+  (el as HTMLElement).animate(
+    [
+      { filter: `drop-shadow(${a}px 0 0 #ff2a8a) drop-shadow(${-a}px 0 0 #00f0ff)`, transform: `scale(${1 + power * 0.02})` },
+      { filter: `drop-shadow(${-a / 2}px 0 0 #ff2a8a) drop-shadow(${a / 2}px 0 0 #00f0ff)`, offset: 0.4 },
+      { filter: 'none', transform: 'none' },
+    ],
+    { duration: 220 + power * 120, easing: 'steps(5)' },
+  );
+}

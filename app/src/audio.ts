@@ -29,8 +29,12 @@ type Sfx =
   | 'charge'
   | 'destroy'
   | 'blast'
-  | 'victory'
-  | 'defeat'
+  | 'core-break'
+  | 'glitch-spread'
+  | 'shutdown'
+  | 'confetti-pop'
+  | 'sparkle'
+  | 'fanfare'
   | 'fast-forward'
   | 'card-pick'
   | 'card-drop'
@@ -52,7 +56,7 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   // row select: a click with a faint metallic ring
   'ui-select': { files: ['ui-select-m1', 'ui-select-m2'], vol: 0.32, spread: 0.2 },
   // ratchet tick while box/Shift-selecting rows; the pitch rises with each added row (opts.rate)
-  'ui-scroll': { files: ['ui-scroll'], vol: 0.22, spread: 0.04 },
+  'ui-scroll': { files: ['ui-scroll'], vol: 0.16, spread: 0.04 },
   'ui-hover': { files: ['ui-hover'], vol: 0.12 },
   'ui-error': { files: ['ui-error'], vol: 0.28 },
   'ui-buy': { files: ['ui-buy'], vol: 0.55 },
@@ -61,18 +65,23 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   deploy: { files: ['deploy'], vol: 0.35 },
   repair: { files: ['repair'], vol: 0.45 },
   shock: { files: ['shock-1', 'shock-2'], vol: 0.45 },
-  hit: { files: ['hit-1', 'hit-2', 'hit-3'], vol: 0.6 },
-  'core-hit': { files: ['core-hit-1', 'core-hit-2'], vol: 0.6 },
-  block: { files: ['block'], vol: 0.5 },
+  hit: { files: ['hit-1', 'hit-2', 'hit-3'], vol: 0.5, spread: 0.1 },
+  'core-hit': { files: ['core-hit-1', 'core-hit-2'], vol: 0.5, spread: 0.08 },
+  block: { files: ['block'], vol: 0.4 },
   charge: { files: ['charge-1', 'charge-2'], vol: 0.7 },
-  destroy: { files: ['destroy-1', 'destroy-2'], vol: 0.6 },
-  blast: { files: ['blast'], vol: 0.7 },
-  victory: { files: ['victory'], vol: 0.6 },
-  defeat: { files: ['defeat'], vol: 0.6 },
+  destroy: { files: ['destroy-1', 'destroy-2'], vol: 0.42, spread: 0.08 },
+  blast: { files: ['blast'], vol: 0.5 },
+  // end of battle (8-bit, Juhani Junkala CC0); the victory / defeat melodies themselves are synthesized (jingle())
+  'core-break': { files: ['core-break'], vol: 0.45, spread: 0.02 },
+  'glitch-spread': { files: ['glitch-spread'], vol: 0.3, spread: 0.02 },
+  shutdown: { files: ['shutdown'], vol: 0.3, spread: 0.02 },
+  'confetti-pop': { files: ['confetti-pop'], vol: 0.4, spread: 0.15 },
+  sparkle: { files: ['sparkle'], vol: 0.25, spread: 0.1 },
+  fanfare: { files: ['fanfare'], vol: 0.3, spread: 0.01 },
   'fast-forward': { files: ['fast-forward'], vol: 0.4 },
   // battle: impacts by damage (light / medium = 'hit' / heavy), deploy clank, turn gong, card draw, target lock
-  'hit-light': { files: ['hit-light-1', 'hit-light-2'], vol: 0.45, spread: 0.16 },
-  'hit-heavy': { files: ['hit-heavy-1', 'hit-heavy-2'], vol: 0.7, spread: 0.1 },
+  'hit-light': { files: ['hit-light-1', 'hit-light-2'], vol: 0.4, spread: 0.16 },
+  'hit-heavy': { files: ['hit-heavy-1', 'hit-heavy-2'], vol: 0.55, spread: 0.08 },
   'b-deploy': { files: ['deploy-1', 'deploy-2'], vol: 0.55, spread: 0.12 },
   'turn-start': { files: ['turn-start'], vol: 0.4, spread: 0.02 },
   'end-turn': { files: ['end-turn'], vol: 0.3, spread: 0.06 },
@@ -344,7 +353,7 @@ export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'ready' | 
     return b;
   };
   if (kind === 'power-on') {
-    // soft: a low hum swelling up as the tube warms, a muffled relay click and a faint high whine
+    // soft: a low hum swelling up as the tube warms and a muffled relay click (no high whine — it was piercing)
     const o = c.createOscillator();
     o.type = 'sine';
     o.frequency.setValueAtTime(55, t);
@@ -365,30 +374,19 @@ export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'ready' | 
     env(ng, 0.12, 0.002, 0.04);
     n.connect(nf).connect(ng).connect(out);
     n.start(t);
-    const w = c.createOscillator();
-    w.type = 'sine';
-    w.frequency.value = 11000;
-    const wg = c.createGain();
-    env(wg, 0.012, 0.2, 1.2, t + 0.1);
-    w.connect(wg).connect(out);
-    w.start(t);
-    w.stop(t + 1.6);
   } else if (kind === 'beep') {
-    // the classic BIOS POST beep
+    // the BIOS POST beep — kept soft and low, a short rounded blip instead of a square-wave screech
     const o = c.createOscillator();
-    o.type = 'square';
-    o.frequency.value = 880;
+    o.type = 'triangle';
+    o.frequency.value = 520;
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.12, t + 0.005);
-    g.gain.setValueAtTime(0.12, t + 0.13);
-    g.gain.linearRampToValueAtTime(0.0001, t + 0.15);
-    const f = c.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = 3000;
-    o.connect(f).connect(g).connect(out);
+    g.gain.linearRampToValueAtTime(0.045, t + 0.01);
+    g.gain.setValueAtTime(0.045, t + 0.09);
+    g.gain.linearRampToValueAtTime(0.0001, t + 0.13);
+    o.connect(g).connect(out);
     o.start(t);
-    o.stop(t + 0.16);
+    o.stop(t + 0.14);
   } else if (kind === 'tick') {
     // a disk/relay click
     const n = c.createBufferSource();
@@ -639,5 +637,76 @@ export function battleSynth(kind: 'whoosh' | 'steam' | 'alarm' | 'thump' | 'weld
     o.connect(g).connect(out);
     o.start(t);
     o.stop(t + 0.18);
+  }
+}
+
+// ---------- 8-bit jingles (synthesized: square / triangle "chip" voices, kept quiet) ----------
+
+/** victory: a rising arpeggio and a held major chord with vibrato; defeat: a falling minor line ending in a low drone. */
+export function jingle(kind: 'victory' | 'defeat') {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const c = ctx;
+  const t0 = c.currentTime + 0.03;
+  const out = c.createGain();
+  out.gain.value = 0.55;
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 5200;
+  out.connect(lp).connect(sfxBus ?? master);
+  const hz = (semi: number) => 440 * 2 ** ((semi - 9) / 12); // semitones from C4
+  const note = (semi: number, at: number, dur: number, type: OscillatorType, vol: number, vib = 0) => {
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.value = hz(semi);
+    if (vib) {
+      const l = c.createOscillator();
+      l.frequency.value = 6;
+      const lg = c.createGain();
+      lg.gain.value = hz(semi) * vib;
+      l.connect(lg).connect(o.frequency);
+      l.start(t0 + at);
+      l.stop(t0 + at + dur + 0.05);
+    }
+    const g = c.createGain();
+    const s = t0 + at;
+    g.gain.setValueAtTime(0.0001, s);
+    g.gain.linearRampToValueAtTime(vol, s + 0.008);
+    g.gain.setValueAtTime(vol * 0.8, s + dur * 0.7);
+    g.gain.linearRampToValueAtTime(0.0001, s + dur);
+    o.connect(g).connect(out);
+    o.start(s);
+    o.stop(s + dur + 0.02);
+  };
+  if (kind === 'victory') {
+    const step = 0.085;
+    [0, 4, 7, 12, 7, 12, 16].forEach((n, i) => note(n + 12, i * step, step * 0.9, 'square', 0.07));
+    const at = 7 * step + 0.04;
+    // a short "ta-da": two stabs, then the held chord
+    note(19, at, 0.12, 'square', 0.07);
+    note(19, at + 0.16, 0.08, 'square', 0.07);
+    for (const [n, v] of [
+      [24, 0.065],
+      [19, 0.05],
+      [16, 0.05],
+    ] as const)
+      note(n, at + 0.3, 0.9, 'square', v, 0.008);
+    note(0, at + 0.3, 0.9, 'triangle', 0.16); // bass
+    [12, 7, 0].forEach((n, i) => note(n - 12, i * step * 2, step * 1.8, 'triangle', 0.14));
+  } else {
+    const step = 0.2;
+    [7, 6, 5, 3].forEach((n, i) => note(n + 12, i * step, step * 0.92, 'square', 0.06, i === 3 ? 0.012 : 0));
+    [-5, -6, -7].forEach((n, i) => note(n, i * step, step * 0.92, 'triangle', 0.13));
+    // the final low note slides down like a dying machine
+    const o = c.createOscillator();
+    o.type = 'triangle';
+    const s = t0 + 4 * step;
+    o.frequency.setValueAtTime(hz(-12), s);
+    o.frequency.exponentialRampToValueAtTime(hz(-24), s + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.16, s);
+    g.gain.linearRampToValueAtTime(0.0001, s + 1);
+    o.connect(g).connect(out);
+    o.start(s);
+    o.stop(s + 1.05);
   }
 }

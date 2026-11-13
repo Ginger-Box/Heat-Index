@@ -3257,7 +3257,7 @@ html.cy-on input:not([type]) {
 /* поле: 4 слота на сторону */
 .b-board {
   display: grid;
-  grid-template-columns: repeat(4, 132px);
+  grid-template-columns: repeat(5, 132px);
   justify-content: center;
   gap: 18px;
   padding: 12px 10px 18px;
@@ -3871,4 +3871,229 @@ html.cy-on input:not([type]) {
     border-left: 0;
     padding-left: 0;
   }
+}
+
+/* Analytics: выбор моделей — крупные кнопки и поиск */
+.pick-search {
+  margin-top: 14px;
+  width: min(360px, 100%);
+  font-size: 16px;
+  padding: 9px 12px;
+}
+.pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+button.pick {
+  font-size: 16px;
+  padding: 9px 14px;
+}
+
+/* удары: полоса-разрез, средний и тяжёлый урон, огромная цифра (screens/Arena.tsx, ui/battleFx.ts) */
+.fx-slash {
+  position: fixed;
+  z-index: 2147482902;
+  width: var(--len);
+  height: var(--th);
+  margin: calc(var(--th) / -2) 0 0 calc(var(--len) / -2);
+  pointer-events: none;
+  transform: rotate(var(--ang)) scaleX(0.2);
+  clip-path: polygon(0 50%, 12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%);
+  background: linear-gradient(90deg, transparent, #fff 30%, #fff 70%, transparent);
+  box-shadow: 0 0 18px #fff;
+  filter: drop-shadow(0 3px 0 #ff2a8a) drop-shadow(0 -3px 0 #00f0ff);
+  animation: fx-slash 0.32s steps(6) forwards;
+}
+@keyframes fx-slash {
+  20% {
+    transform: rotate(var(--ang)) scaleX(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(var(--ang)) scaleX(1.15) scaleY(0.2);
+    opacity: 0;
+  }
+}
+.b-unit.fx-hurt-mid .card,
+.b-core.fx-hurt-mid {
+  animation: hurt-mid 0.5s steps(8);
+}
+@keyframes hurt-mid {
+  0% {
+    filter: brightness(3) saturate(0);
+    transform: translateX(-6px) scale(0.96);
+  }
+  25% {
+    filter: brightness(1.5) hue-rotate(-30deg);
+    transform: translateX(6px);
+  }
+  50% {
+    transform: translateX(-3px);
+  }
+  100% {
+    filter: none;
+    transform: none;
+  }
+}
+.b-unit.fx-hurt-big .card {
+  animation: hurt-big 0.7s steps(12);
+}
+@keyframes hurt-big {
+  0% {
+    filter: invert(1) brightness(2);
+    transform: scale(0.9) rotate(-4deg);
+  }
+  12% {
+    filter: brightness(3) saturate(0);
+    transform: translate(10px, -4px) scale(1.08) rotate(3deg);
+  }
+  30% {
+    filter: brightness(1.6) hue-rotate(-40deg) saturate(3);
+    transform: translate(-8px, 3px) rotate(-2deg);
+  }
+  55% {
+    transform: translate(4px, 0);
+  }
+  100% {
+    filter: none;
+    transform: none;
+  }
+}
+.float.huge {
+  color: #fff;
+  -webkit-text-stroke: 2px var(--red);
+  text-shadow:
+    4px 4px 0 #000,
+    0 0 18px var(--red);
+  animation: floatHuge 1.3s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+@keyframes floatHuge {
+  0% {
+    transform: translate(-50%, 10px) scale(2.4) rotate(-8deg);
+    opacity: 0;
+  }
+  12% {
+    transform: translate(-50%, -6px) scale(1) rotate(3deg);
+    opacity: 1;
+  }
+  20% {
+    transform: translate(-48%, -8px) scale(1.1) rotate(-2deg);
+  }
+  100% {
+    transform: translate(-50%, -70px) scale(1);
+    opacity: 0;
+  }
+}
+
+/* конец боя: конфетти / глич-захват и полноэкранный итог (ui/battleEnd.ts, screens/Arena.tsx) */
+.fx-end-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482950;
+  pointer-events: none;
+}
+.fx-end-canvas.glitch {
+  z-index: 2147482930;
+}
+.end-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482940;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 40%, #12101ecc, #050409f2);
+  animation: end-in 0.35s steps(6);
+}
+.end-overlay.lose {
+  background: radial-gradient(circle at 50% 40%, #1a050a99, #050409cc);
+}
+@keyframes end-in {
+  from {
+    opacity: 0;
+  }
+}
+.end-title {
+  position: relative;
+  font-family: var(--font-px);
+  font-size: clamp(48px, 9vw, 120px);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--yellow);
+  text-shadow:
+    6px 6px 0 #000,
+    0 0 40px #ffe600aa;
+  animation: end-title-win 0.7s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+@keyframes end-title-win {
+  from {
+    transform: scale(2.6);
+    opacity: 0;
+    filter: brightness(3);
+  }
+}
+.end-overlay.lose .end-title {
+  color: var(--red);
+  text-shadow:
+    6px 6px 0 #000,
+    0 0 40px #ff3b4eaa;
+  animation: end-title-lose 1.4s steps(14);
+}
+.end-overlay.lose .end-title::before,
+.end-overlay.lose .end-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  text-shadow: none;
+}
+.end-overlay.lose .end-title::before {
+  color: var(--cyan);
+  animation: glitch-slice-a 0.5s steps(4) infinite;
+  opacity: 0.8;
+}
+.end-overlay.lose .end-title::after {
+  color: var(--magenta);
+  animation: glitch-slice-b 0.5s steps(4) infinite;
+  opacity: 0.8;
+}
+@keyframes end-title-lose {
+  0% {
+    clip-path: inset(48% 0 48% 0);
+    transform: translateX(-20px) skewX(-20deg);
+  }
+  20% {
+    clip-path: inset(0 0 0 0);
+    transform: translateX(12px) skewX(10deg);
+  }
+  40% {
+    transform: translateX(-6px);
+  }
+  100% {
+    transform: none;
+  }
+}
+.end-overlay.draw .end-title {
+  color: var(--cyan);
+}
+.end-body {
+  width: min(980px, 100%);
+  max-height: 55vh;
+  overflow: auto;
+  animation: end-body-in 0.5s 0.45s both cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes end-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+.end-continue {
+  padding: 12px 28px;
+  font-size: 16px;
+  animation: end-body-in 0.4s 0.8s both;
 }

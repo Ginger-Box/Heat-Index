@@ -6,7 +6,7 @@ import { Rng } from './rng';
 import { model, type Robot } from './robots';
 
 export const CORE_HP = 20;
-export const BOARD_SLOTS = 4;
+export const BOARD_SLOTS = 5;
 export const MAX_TURNS = 10; // turns per side; after that the bigger Core wins
 export const START_HAND = 3;
 export const MAX_HAND = 6;

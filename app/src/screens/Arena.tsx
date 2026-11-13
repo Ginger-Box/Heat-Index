@@ -5,8 +5,9 @@
 // (or click the robot, then the target). Repair/Shock robots ask for a target with a green/violet arrow.
 // Effects (sparks, shockwaves, shake, aiming arrow) are in ui/battleFx.ts, sounds in audio.ts.
 
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { battleSynth, sfx } from '../audio';
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { battleSynth, jingle, sfx } from '../audio';
 import { planTurn } from '../engine/ai';
 import {
   BOARD_SLOTS,
@@ -39,7 +40,8 @@ import {
   type World,
 } from '../engine/world';
 import { act } from '../store';
-import { centerOf, createAim, flashScreen, ring, shake, sparks, type Aim, type AimKind } from '../ui/battleFx';
+import { confetti, glitchTakeover } from '../ui/battleEnd';
+import { centerOf, chroma, createAim, flashScreen, ring, shake, slash, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
 import { EnergyIcon } from '../ui/icons';
@@ -137,6 +139,7 @@ export function Arena({ w }: { w: World }) {
   const [floats, setFloats] = useState<Float[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<null | {
+    fresh: boolean; // just finished: show it as the full-screen end overlay
     st: BattleState;
     oppName: string;
     durBefore: Record<string, number>;
@@ -149,6 +152,7 @@ export function Arena({ w }: { w: World }) {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const aimRef = useRef<AimState | null>(null);
   const dragDeploy = useRef<string | null>(null);
+  const endFx = useRef<() => void>(() => {});
   const dropRef = useRef<(uid: string, target: string | null) => boolean | 'cancel'>(() => 'cancel');
   const drag = useCardDrag((uid, target) => dropRef.current(uid, target));
 
@@ -158,6 +162,7 @@ export function Arena({ w }: { w: World }) {
       alive.current = false;
       aimRef.current?.aim.destroy();
       aimRef.current = null;
+      endFx.current();
     };
   }, []);
 
@@ -281,7 +286,19 @@ export function Arena({ w }: { w: World }) {
   if (!fight) {
     return (
       <div className="grid">
-        {result && <ResultPanel w={w} {...result} onClose={() => setResult(null)} />}
+        {result && !result.fresh && <ResultPanel w={w} {...result} onClose={() => setResult(null)} />}
+        {result?.fresh && (
+          <EndOverlay
+            winner={result.st.winner}
+            onClose={() => {
+              endFx.current();
+              endFx.current = () => {};
+              setResult({ ...result, fresh: false });
+            }}
+          >
+            <ResultPanel w={w} {...result} onClose={() => {}} bare />
+          </EndOverlay>
+        )}
         <div className="panel">
           <h2>Arena</h2>
           <div className="row" style={{ alignItems: 'flex-start', gap: 24 }}>
@@ -393,14 +410,19 @@ export function Arena({ w }: { w: World }) {
     const s = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const dx = ((rb.left + rb.width / 2 - (ra.left + ra.width / 2)) * 0.7) / s;
     const dy = ((rb.top + rb.height / 2 - (ra.top + ra.height / 2)) * 0.7) / s;
+    // a bigger wind-up for heavy hitters, and the attacker "sticks" at the contact point for a beat (hit-stop)
+    const dur = 460 + power * 160;
+    const hit = 230 / dur;
+    const hitT = `translate(${dx}px, ${dy}px) scale(${1.1 + power * 0.1}) rotate(${dx > 0 ? 3 : -3}deg)`;
     a.animate(
       [
         { transform: 'none', zIndex: 30 },
-        { transform: `translate(${-dx * 0.08}px, ${-dy * 0.08}px) scale(1.04)`, offset: 0.25, zIndex: 30 },
-        { transform: `translate(${dx}px, ${dy}px) scale(${1.1 + power * 0.08}) rotate(${dx > 0 ? 3 : -3}deg)`, offset: 0.5, zIndex: 30 },
+        { transform: `translate(${-dx * (0.08 + power * 0.14)}px, ${-dy * (0.08 + power * 0.14)}px) scale(1.05)`, offset: hit * 0.5, zIndex: 30 },
+        { transform: hitT, offset: hit, zIndex: 30 },
+        { transform: hitT, offset: Math.min(0.9, hit + (power * 160) / dur), zIndex: 30 },
         { transform: 'none', zIndex: 30 },
       ],
-      { duration: 460, easing: 'cubic-bezier(.3,.7,.4,1)' },
+      { duration: dur, easing: 'cubic-bezier(.3,.7,.4,1)' },
     );
   };
 
@@ -419,8 +441,12 @@ export function Arena({ w }: { w: World }) {
       );
     });
 
-  /** Sparks + sound + shake for a hit on `key` with `dmg` damage. */
-  const impact = (key: string, dmg: number, opts: { core?: boolean; shockHit?: boolean } = {}) => {
+  /**
+   * Hit on `key` with `dmg` damage. Everything scales with damage (attacks go up to ~5):
+   * 1–2 — sparks and a light knock; 3–4 — a slash, a ring and a shake; 5+ — a heavy slash, a double shockwave,
+   * a white flash, an RGB split of the whole table, a strong shake and a sub-bass hit.
+   */
+  const impact = (key: string, dmg: number, opts: { core?: boolean; shockHit?: boolean; from?: string } = {}) => {
     const el = unitEl(key);
     if (!el) return;
     const c = centerOf(el);
@@ -429,36 +455,73 @@ export function Arena({ w }: { w: World }) {
       sfx('block');
       return;
     }
+    const p = Math.min(1, dmg / 5) * (opts.core ? 1.15 : 1);
+    const src = opts.from ? unitEl(opts.from) : null;
+    const s0 = src ? centerOf(src) : { x: c.x, y: c.y + 100 };
+    const ang = Math.atan2(c.y - s0.y, c.x - s0.x) + (Math.random() - 0.5) * 0.5 + Math.PI / 2.6;
     sparks(c.x, c.y, dmg, { core: opts.core });
+    if (dmg >= 2) slash(c.x, c.y, ang, p);
     if (opts.shockHit) {
       sparks(c.x, c.y, 3, { kind: 'zap' });
       sfx('shock-hit');
     }
+    if (dmg >= 3) ring(c.x, c.y, 90 + p * 220, opts.core ? '#ffe600' : '#ffffff');
+    if (dmg >= 5) {
+      setTimeout(() => ring(c.x, c.y, 200 + p * 260, '#ff3b4e'), 70);
+      flashScreen(0.22);
+      chroma(tableRef.current, p);
+    }
+    shake(tableRef.current, dmg <= 1 ? 0 : dmg === 2 ? 2.5 : dmg <= 4 ? 4 + dmg * 1.5 : 15);
     if (opts.core) {
-      ring(c.x, c.y, 120 + dmg * 26, dmg >= 6 ? '#ff3b4e' : '#ffe600');
-      shake(tableRef.current, 3 + dmg * 1.4);
-      flashScreen(dmg >= 5 ? dmg * 0.03 : 0);
-      sfx('core-hit', { volume: 0.6 + Math.min(1, dmg / 8) * 0.6 });
-      battleSynth('thump', Math.min(1, dmg / 10));
+      sfx('core-hit', { volume: 0.7 + p * 0.5 });
+      battleSynth('thump', p);
     } else {
       sfx(dmg >= 5 ? 'hit-heavy' : dmg >= 3 ? 'hit' : 'hit-light');
-      if (dmg >= 4) {
-        shake(tableRef.current, dmg * 0.7);
-        battleSynth('thump', Math.min(1, dmg / 12));
-      }
+      if (dmg >= 3) battleSynth('thump', p * 0.85);
     }
   };
 
+  /**
+   * End of the battle. Victory: confetti cannons from both sides + a chiptune fanfare.
+   * Defeat: your Core cracks, a glitch spreads from it over the whole screen, the machine powers down.
+   * Then the full-screen result (VICTORY / DEFEAT + rewards and wear) appears.
+   */
   const finish = async (final: BattleState) => {
-    const text = final.winner === null ? 'DRAW' : final.winner === 0 ? 'VICTORY' : 'DEFEAT';
     setCaption(final.winner === null ? 'Draw!' : final.winner === 0 ? 'Victory!' : 'Defeat');
-    showBanner(text, final.winner === 0 ? 'win' : 'lose');
-    sfx(final.winner === 0 ? 'victory' : 'defeat');
-    await sleep(1900);
+    endFx.current();
+    if (final.winner === 0) {
+      endFx.current = confetti();
+      sfx('confetti-pop');
+      sfx('confetti-pop', { delay: 0.06, volume: 0.8 });
+      sfx('sparkle', { delay: 0.2 });
+      setTimeout(() => sfx('confetti-pop', { volume: 0.6 }), 380);
+      jingle('victory');
+      await sleep(1000);
+    } else if (final.winner === 1) {
+      const el = unitEl(coreKey(0));
+      const c = el ? centerOf(el) : { x: innerWidth / 2, y: innerHeight * 0.8 };
+      sfx('core-break');
+      battleSynth('thump', 1);
+      shake(tableRef.current, 16);
+      chroma(tableRef.current, 1);
+      flashScreen(0.3);
+      ring(c.x, c.y, 300, '#ff3b4e');
+      sparks(c.x, c.y, 7, { core: true });
+      await sleep(320);
+      endFx.current = glitchTakeover(c.x, c.y);
+      sfx('glitch-spread');
+      await sleep(1100);
+      sfx('shutdown');
+      jingle('defeat');
+      await sleep(400);
+    } else {
+      sfx('fanfare', { volume: 0.6 });
+      await sleep(700);
+    }
     if (!alive.current) return;
     const f = fightRef.current!;
     act((w) => applyMatch(w, PLAYER_ID, f.oppId, final));
-    setResult({ st: final, oppName: opp.name, durBefore: f.durBefore, eloBefore: f.eloBefore });
+    setResult({ fresh: true, st: final, oppName: opp.name, durBefore: f.durBefore, eloBefore: f.eloBefore });
     setFight(null);
     setView(null);
     setBusy(false);
@@ -492,7 +555,7 @@ export function Arena({ w }: { w: World }) {
     const attack = ev.find((e) => e.t === 'attack') as Extract<BattleEvent, { t: 'attack' }> | undefined;
     if (attack) {
       const tk = keyOf(1 - side, attack.to);
-      const power = Math.min(1, attack.dmg / 8);
+      const power = Math.min(1, attack.dmg / 5);
       // the opponent's attacks are announced with a red arrow first, so you see who hits whom
       if (side === 1) {
         const from = unitEl(attack.from);
@@ -529,10 +592,12 @@ export function Arena({ w }: { w: World }) {
       lunge(attack.from, tk, power);
       battleSynth('whoosh', power);
       await sleep(230);
+      // hit-stop: heavy blows freeze for a beat at the moment of contact
+      if (attack.dmg >= 4) await sleep(attack.dmg >= 5 ? 90 : 45);
       setView(withDying);
       const shockHit = model(before.modelOf[attack.from]).ability?.kind === 'shock' && attack.to !== 'core';
-      impact(tk, attack.dmg, { core: attack.to === 'core', shockHit });
-      const size = (d: number) => Math.min(46, 18 + d * 3);
+      impact(tk, attack.dmg, { core: attack.to === 'core', shockHit, from: attack.from });
+      const size = (d: number) => Math.min(64, 16 + d * 9);
       const fl: Omit<Float, 'id'>[] = [
         attack.dmg > 0
           ? { key: tk, text: `−${attack.dmg}`, kind: 'dmg', size: size(attack.dmg) }
@@ -540,7 +605,7 @@ export function Arena({ w }: { w: World }) {
       ];
       if (attack.counter > 0) fl.push({ key: attack.from, text: `−${attack.counter}`, kind: 'dmg', size: size(attack.counter) });
       const hurt: Record<string, string> = {};
-      if (attack.dmg > 0) hurt[tk] = attack.to === 'core' && attack.dmg >= 5 ? 'fx-hurt-big' : 'fx-hurt';
+      if (attack.dmg > 0) hurt[tk] = attack.dmg >= 5 ? 'fx-hurt-big' : attack.dmg >= 3 ? 'fx-hurt-mid' : 'fx-hurt';
       if (attack.counter > 0) hurt[attack.from] = 'fx-hurt';
       flash(hurt, 520);
       addFloats(fl);
@@ -765,7 +830,11 @@ export function Arena({ w }: { w: World }) {
       .filter((f) => f.key === key)
       .slice(-3)
       .map((f, i) => (
-        <span key={f.id} className={`float ${f.kind}`} style={{ marginLeft: i * 22, fontSize: f.size }}>
+        <span
+          key={f.id}
+          className={`float ${f.kind} ${f.size && f.size >= 50 ? 'huge' : ''}`}
+          style={{ marginLeft: i * 22, fontSize: f.size }}
+        >
           {f.text}
         </span>
       ));
@@ -1002,6 +1071,7 @@ function ResultPanel({
   durBefore,
   eloBefore,
   onClose,
+  bare,
 }: {
   w: World;
   st: BattleState;
@@ -1009,6 +1079,8 @@ function ResultPanel({
   durBefore: Record<string, number>;
   eloBefore: number;
   onClose: () => void;
+  /** inside the end overlay: no title row (the overlay has its own) */
+  bare?: boolean;
 }) {
   const me = getManager(w, PLAYER_ID);
   const res = st.winner === null ? 'Draw' : st.winner === 0 ? 'Victory!' : 'Defeat';
@@ -1017,12 +1089,16 @@ function ResultPanel({
   const uids = Object.keys(durBefore);
   return (
     <div className="panel" style={{ borderColor: st.winner === 0 ? 'var(--green)' : 'var(--line)' }}>
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>
-          {res} <span className="muted">vs {oppName}</span>
-        </h2>
-        <button onClick={onClose}>Close</button>
-      </div>
+      {bare ? (
+        <div className="muted">vs {oppName}</div>
+      ) : (
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>
+            {res} <span className="muted">vs {oppName}</span>
+          </h2>
+          <button onClick={onClose}>Close</button>
+        </div>
+      )}
       <p>
         Core: {st.sides[0].core} : {st.sides[1].core} · Reward <span className="cr">+{reward} CR</span> · ELO {eloBefore} →{' '}
         <b>{me.elo}</b>
@@ -1046,5 +1122,28 @@ function ResultPanel({
         })}
       </div>
     </div>
+  );
+}
+
+/** Full-screen end of battle: the big VICTORY / DEFEAT / DRAW title, then the result card underneath. */
+function EndOverlay({ winner, onClose, children }: { winner: number | null | undefined; onClose: () => void; children: ReactNode }) {
+  const kind = winner === 0 ? 'win' : winner === 1 ? 'lose' : 'draw';
+  const title = winner === 0 ? 'VICTORY' : winner === 1 ? 'DEFEAT' : 'DRAW';
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+  return createPortal(
+    <div className={`end-overlay ${kind}`}>
+      <div className="end-title" data-text={title}>
+        {title}
+      </div>
+      <div className="end-body">{children}</div>
+      <button className="primary end-continue" onClick={onClose}>
+        CONTINUE
+      </button>
+    </div>,
+    document.getElementById('root') ?? document.body,
   );
 }

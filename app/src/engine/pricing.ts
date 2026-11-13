@@ -15,7 +15,7 @@ export const ECON = {
   scrapShare: 0.15, // сдать сломанного на запчасти = 15%; изношенный робот у брокера стоит почти столько же
   // Призовой фонд боя = purseRate × (стоимость обеих команд по базовым ценам).
   // Победитель забирает winShare, ничья — drawShare каждому, проигравший — lossShare.
-  purseRate: 0.03,
+  purseRate: 0.02,
   winShare: 0.75,
   drawShare: 0.5,
   lossShare: 0.25,

@@ -134,8 +134,11 @@ export const model = (id: string): RobotModel => {
 export const maxDurability = (modelId: string) => model(modelId).maxDur;
 /** Доля оставшейся прочности 0..1. */
 export const durFrac = (r: { modelId: string; durability: number }) => Math.max(0, r.durability) / maxDurability(r.modelId);
-export const TEAM_SIZE = 8;
-export const TEAM_ENERGY_CAP = 24;
+/** A deck holds 10–15 robots (TEAM_SIZE = the most, used for the Hangar slots). */
+export const TEAM_MIN = 10;
+export const TEAM_MAX = 15;
+export const TEAM_SIZE = TEAM_MAX;
+export const TEAM_ENERGY_CAP = 42;
 export const MAX_SAME_MODEL = 2;
 
 /** Конкретный робот (экземпляр). В блокчейне это токен NEP-245 с тиражом 1. */

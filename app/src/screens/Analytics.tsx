@@ -18,6 +18,7 @@ export function Analytics({ w }: { w: World }) {
   const [metric, setMetric] = useState<'price' | 'rel'>('rel');
   const [mode, setMode] = useState<'models' | 'classes'>('models');
   const [hl, setHl] = useState<string | null>(null);
+  const [q, setQ] = useState('');
   const hist = w.history;
   // По умолчанию — 6 моделей с самым большим размахом
   const swing = (id: string) => {
@@ -92,15 +93,26 @@ export function Analytics({ w }: { w: World }) {
         labels={hist.map((h) => `day ${h.day} · ${String(8 + (h.hour % 12)).padStart(2, '0')}:00`)}
         highlight={hl}
       />
-      <div className="row" style={{ marginTop: 12, gap: 6 }} onMouseLeave={() => setHl(null)}>
+      {mode === 'models' && (
+        <input
+          className="pick-search"
+          placeholder="Search a robot or class…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      )}
+      <div className="pick-row" onMouseLeave={() => setHl(null)}>
         {mode === 'models'
-          ? MODELS.map((m) => {
+          ? MODELS.filter((m) => {
+              const s = q.trim().toLowerCase();
+              return !s || m.name.toLowerCase().includes(s) || CLASS_LABEL[classOf(m.id)].toLowerCase().includes(s);
+            }).map((m) => {
               const i = shown.indexOf(m.id);
               return (
                 <button
                   key={m.id}
                   data-sfx="toggle"
-                  className={`small ${i >= 0 ? 'primary' : ''}`}
+                  className={`pick ${i >= 0 ? 'primary' : ''}`}
                   style={i >= 0 ? { boxShadow: `inset 0 -3px 0 ${LINE_COLORS[i % LINE_COLORS.length]}` } : undefined}
                   onMouseEnter={() => setHl(m.name)}
                   onClick={() => toggle(m.id)}
@@ -115,7 +127,7 @@ export function Analytics({ w }: { w: World }) {
                 <button
                   key={c}
                   data-sfx="toggle"
-                  className={`small ${on ? 'primary' : ''}`}
+                  className={`pick ${on ? 'primary' : ''}`}
                   style={on ? { boxShadow: `inset 0 -3px 0 ${CLASS_COLOR[c]}` } : undefined}
                   onMouseEnter={() => setHl(CLASS_LABEL[c])}
                   onClick={() => setHiddenCls((h) => (on ? [...h, c] : h.filter((x) => x !== c)))}

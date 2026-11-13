@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CLASSES, TEAM_ENERGY_CAP, TEAM_SIZE, classOf, maxDurability, model } from '../engine/robots';
+import { CLASSES, TEAM_ENERGY_CAP, TEAM_MIN, TEAM_SIZE, classOf, maxDurability, model } from '../engine/robots';
 import { buildTeam, teamEnergy, teamError } from '../engine/team';
 import {
   PLAYER_ID,
@@ -89,7 +89,7 @@ export function Hangar({ w }: { w: World }) {
       if (from >= 0) return false; // уже в команде
       if (next.length >= TEAM_SIZE) {
         sfx('ui-error');
-        setMsg('All 8 slots are full — remove someone or drop the robot onto a taken slot');
+        setMsg(`All ${TEAM_SIZE} slots are full — remove someone or drop the robot onto a taken slot`);
         return false;
       }
       next.push(uid);
@@ -142,7 +142,7 @@ export function Hangar({ w }: { w: World }) {
           <h2 style={{ margin: 0 }}>Team</h2>
           <div className="row">
             <span>
-              Robots <b>{team.length}</b>/{TEAM_SIZE}
+              Deck <b className={team.length < TEAM_MIN ? 'down' : ''}>{team.length}</b> ({TEAM_MIN}–{TEAM_SIZE})
             </span>
             <span>
               Energy <b className={energy > TEAM_ENERGY_CAP ? 'down' : ''}>{energy}</b>/{TEAM_ENERGY_CAP}
@@ -185,7 +185,7 @@ export function Hangar({ w }: { w: World }) {
                     <div className="slot-actions">{repairBtn(r)}</div>
                   </>
                 ) : (
-                  <span className="muted">slot {i + 1}</span>
+                  <span className="muted">{i < TEAM_MIN ? `slot ${i + 1}` : `slot ${i + 1} · optional`}</span>
                 )}
               </div>
             );
@@ -194,7 +194,7 @@ export function Hangar({ w }: { w: World }) {
         <small className="muted">
           Drag robots between the Hangar and the slots (drop on a taken slot to swap), or just click them. Changes save
           instantly.
-          Limit: {TEAM_ENERGY_CAP} energy, at most 2 of the same model.
+          A deck is {TEAM_MIN}–{TEAM_SIZE} robots, {TEAM_ENERGY_CAP} energy at most, at most 2 of the same model.
         </small>
         {canClaimLoaner(w, PLAYER_ID) && (
           <div className="panel" style={{ marginTop: 10, borderColor: 'var(--yellow)' }}>

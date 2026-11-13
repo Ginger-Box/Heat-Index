@@ -20,7 +20,7 @@ import {
   type ModelStats,
 } from './pricing';
 import { Rng } from './rng';
-import { CLASSES, MAX_SAME_MODEL, MODELS, classOf, durFrac, maxDurability, model, type Robot, type RobotClass } from './robots';
+import { CLASSES, MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurability, model, type Robot, type RobotClass } from './robots';
 import { buildTeam, partialTeamError, teamError } from './team';
 
 export const PLAYER_ID = 'player';
@@ -622,7 +622,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
   // 2а. Добрать роботов своего класса (хотим не меньше 6 рабочих)
   const focusModels = m.focus ? MODELS.filter((x) => classOf(x.id) === m.focus) : [];
   const focusOwned = owned().filter((r) => r.durability > 0 && classOf(r.modelId) === m.focus).length;
-  if (m.focus && focusOwned < 6 && m.credits > 160) {
+  if (m.focus && focusOwned < 8 && m.credits > 160) {
     const options = focusModels
       .filter((x) => countOwned(w, m, x.id) < MAX_SAME_MODEL)
       .map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
@@ -672,7 +672,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     const working = owned().filter((r) => r.durability > 0);
     const mostExpensive = [...working].sort((x, y) => model(y.modelId).cost - model(x.modelId).cost)[0];
     // Роботов хватает, но не влезают в лимит — продаём самого дорогого
-    if (working.length >= 8) {
+    if (working.length >= TEAM_MIN) {
       if (!mostExpensive || sell(w, m.id, mostExpensive.uid)) break;
       continue;
     }
@@ -931,7 +931,7 @@ const NPC_TEAMS: [string, Strategy][] = [
   ['Dead Pixel', 'thrifty'],
 ];
 
-export const STARTER_TEAM = ['spark', 'scout', 'bolt', 'ram', 'welder', 'volt', 'wall', 'dozer'];
+export const STARTER_TEAM = ['spark', 'scout', 'bolt', 'ram', 'welder', 'volt', 'wall', 'dozer', 'drone', 'cracker', 'dash', 'plate'];
 
 export function createWorld(seed: number, playerName = 'You', warmupHours = HOURS_PER_DAY): World {
   const w: World = {
@@ -1007,7 +1007,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
       let team: Robot[] | null = null;
       while (!team) {
         const own = MODELS.filter((x) => classOf(x.id) === focus);
-        const pool = Array.from({ length: 14 }, (_, j) => mint(w, rng.pick(j < 8 ? own : MODELS).id, m.id));
+        const pool = Array.from({ length: 22 }, (_, j) => mint(w, rng.pick(j < 12 ? own : MODELS).id, m.id));
         team = buildTeam(pool, (r) => rng.next() + (classOf(r.modelId) === focus ? 1 : 0));
         if (!team) for (const r of pool) delete w.robots[r.uid];
         else for (const r of pool) if (!team.includes(r)) delete w.robots[r.uid];
