@@ -10,6 +10,38 @@ A robot's market price follows its **relevance** (how often it wins and how many
 > **Play:** https://ginger-box.github.io/Heat-Index/ (wallet login) · locally on `http://localhost:3000` (email login).
 > Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet) on NEAR testnet.
 
+## For judges: 2 minutes
+
+1. Open the game (public site, or `cd app && npm install && npm run dev` → `http://localhost:3000`).
+   Pick **Continue with email** (localhost only), **Connect NEAR wallet**, or **Play as a guest** (off-chain).
+2. A short **training battle** starts → you see the Overheat combat: deploy into slots, drag an arrow to attack,
+   heat pips, screen cracks on heavy hits.
+3. **Market** tab → hover a price: the tooltip explains it (relevance × stock × the broker's markup). The **BUY /
+   SELL** signal is actual relevance vs what brokers price in — they notice the meta with a delay.
+4. **Brokers** tab → three AI brokers with their own cash, stock, reaction speed and a live remark; invest in one and
+   get a cut of its daily profit.
+5. ⚙ (top right) → **Fast-forward a week** → 7 game days in ~35 s: prices, relevance and broker fortunes move;
+   **Analytics** shows the history by robot and by class.
+6. Logged in on NEAR? The **NEAR** cell in the top bar lists every move you make as a testnet transaction with an
+   explorer link. Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet).
+
+### What is on-chain and what is simulated
+
+| | Where | Proof |
+|---|---|---|
+| Player credits (`cr`) and every player robot (`robot:<model>:<serial>`) | **NEAR testnet, NEP-245** | `mt_balance_of`, `mt_tokens_for_owner` |
+| Registration: 12 starter robots + 1000 CR | **on-chain** | [register tx](https://testnet.nearblocks.io/txns/9LkHUBch9gbU1rBH9TQAz8WzgFVaFnuo8fdkPHmGpgnk) |
+| Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
+| Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
+| Sales and repairs | **on-chain** | `sell_robot`, `repair_robot` + `heat_index` events |
+| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 9 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| Email login → a NEAR account owned by the player's NEAR Auth (MPC) key | **on-chain** (account factory in the contract) | `account_for_owner_key` |
+| The 3 brokers' cash and stock, the 12 NPC teams, hourly prices, relevance, the battles themselves | **simulated in the browser** (deterministic engine in `app/src/engine/`) | — |
+
+Honest limits: brokers and NPC teams have **in-game** wallets, not NEAR accounts; battle outcomes are computed in the
+client and only bounded by the contract (the seed is recorded so a verifier can replay them — not built yet); email
+login runs on `localhost:3000` because the shared testnet NEAR Auth app only allows that origin.
+
 ## On NEAR
 
 The game's economy runs in the browser (12 NPC teams, 3 AI brokers, hourly prices), and **the player's side of it is
@@ -33,9 +65,13 @@ on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is 
 - The HUD's NEAR cell shows the account, on-chain credits, robots on-chain and the latest transactions with explorer
   links.
 
-**Trust model (hackathon):** battles and prices are computed in the client, so the contract accepts results within
-sanity limits (bounded rewards and prices, robots must belong to the caller, durability can only go down in a battle,
-no overspending). Battles are recorded with their seed so a verifier can replay them — the next step.
+**Trust model:** battles and market prices are computed in the client, so the contract checks every reported value
+against the game's own rules, kept on-chain: each model's base price and durability come from a table in the
+contract; a purchase must lie in the market's possible range for that model (30–280% of base), a sale can't exceed
+what a broker could pay at that wear, a repair can't be cheaper than the game's minimum for the restored durability,
+a battle reward is capped (≤ 25% of the player's robots' base value, ≤ 400 CR) and limited to one battle per 30 s,
+durability only goes down in battle, and nobody can spend credits they don't have. Battles are recorded with their
+seed so a verifier can replay them — the next step.
 
 ## Two ways to play
 
@@ -55,10 +91,12 @@ battles ──► wins / picks ──► relevance ──► price
 
 - **Price curve** 30 → 560 CR by energy cost; expensive robots last longer (durability 6 → 16) and pay off when
   played to the end; worn robots resell for scrap.
-- **Battle purse** = 2% of both decks' value (winner takes 75%), so stakes grow with what you bring.
-- **3 AI brokers** with wallets, stock and different reaction speeds (a steady corp, a volatile black market,
-  a scrap dealer). **12 NPC teams**, each focused on a class, with their own strategies (hype / contrarian / thrifty).
-- Every trade, repair and battle result goes into a ledger — the part that will be written on-chain.
+- **Battle purse** = a share of both decks' value (2.5% between NPCs, 6% in the player's battles; the winner takes
+  75%), so stakes grow with what you bring.
+- **3 AI brokers** with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
+  a scrap dealer), each with a face and a voice. **12 NPC teams**, each focused on a class, with their own strategies
+  (hype / contrarian / thrifty).
+- Every trade, repair and battle goes into the world's ledger; the player's side of it is written on NEAR.
 - All tuning was done with simulations in `app/scripts/` (economy over a week on several worlds, class balance
   matrix, payoff of each robot). Numbers are in [DEVLOG.md](DEVLOG.md).
 
@@ -81,7 +119,7 @@ Contract (Rust, near-sdk 5):
 
 ```bash
 cd contract
-cargo test                              # unit tests: full loop, overspending, wear
+cargo test                              # 9 unit tests: full loop + every price / reward / wear limit
 cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
 ```
 
@@ -108,6 +146,7 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 - [ ] Battle verifier (replay from the recorded seed), second-device email login
 - [ ] Card art
 - [ ] Demo video
+- [ ] Brokers as NEAR accounts with their own wallets
 
 ## Credits
 
