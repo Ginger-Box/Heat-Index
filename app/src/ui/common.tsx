@@ -152,11 +152,17 @@ export function Glitch({
   volume?: number;
 }) {
   const value = String(text);
-  const [noise, setNoise] = useState<string | null>(null);
+  const root = useRef<HTMLSpanElement | null>(null);
+  const live = useRef<HTMLSpanElement | null>(null);
   const prev = useRef(value);
+  // Шум рисуется напрямую в DOM (без перерисовок React) — иначе при массовом обновлении цен
+  // сотни перерисовок в секунду забивают главный поток и курсор начинает подлагивать.
   useEffect(() => {
     if (prev.current === value) return;
     prev.current = value;
+    const el = root.current;
+    const lv = live.current;
+    if (!el || !lv) return;
     if (volume > 0) sfx('glitch', { volume });
     const FRAMES = 9;
     let frame = 0;
@@ -164,28 +170,30 @@ export function Glitch({
       [...value]
         .map((ch, i) => (i < reveal || ch === ' ' ? ch : GLYPHS[Math.floor(Math.random() * GLYPHS.length)]))
         .join('');
-    setNoise(scramble(0));
+    const paint = (t: string) => {
+      lv.textContent = t;
+      el.setAttribute('data-text', t);
+    };
+    el.classList.add('on');
+    paint(scramble(0));
     const id = setInterval(() => {
       frame++;
       if (frame >= FRAMES) {
         clearInterval(id);
-        setNoise(null);
+        el.classList.remove('on');
         return;
       }
-      setNoise(scramble(Math.floor((frame / FRAMES) * (value.length + 1))));
+      paint(scramble(Math.floor((frame / FRAMES) * (value.length + 1))));
     }, 34);
     return () => {
       clearInterval(id);
-      setNoise(null);
+      el.classList.remove('on');
     };
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (noise === null) return <span className={`glitch ${className ?? ''}`}>{value}</span>;
   return (
-    <span className={`glitch on ${className ?? ''}`} data-text={noise}>
-      <span className="g-size" aria-hidden>
-        {value}
-      </span>
-      <span className="g-live">{noise}</span>
+    <span ref={root} className={`glitch ${className ?? ''}`}>
+      <span className="g-size">{value}</span>
+      <span className="g-live" ref={live} aria-hidden />
     </span>
   );
 }
@@ -229,16 +237,25 @@ export function Spark({ data, width = 110, height = 28, color = 'var(--cyan)' }:
 
 export const LINE_COLORS = ['#00f0ff', '#ff2a8a', '#ffe600', '#39ff14', '#ff8a00', '#b46bff', '#ff3b4e', '#9aa3c7'];
 
-/** Линейный график нескольких серий. */
+/**
+ * Line chart of several series. Interactive: hovering a line highlights it and dims the rest,
+ * a crosshair shows the values at that point, clicking a line or its legend item pins the highlight.
+ */
 export function LineChart({
   series,
   height = 260,
   yLabel,
+  labels,
 }: {
   series: { name: string; color: string; data: number[] }[];
   height?: number;
   yLabel?: string;
+  /** caption for each point (e.g. "day 3 · 14:00") for the tooltip */
+  labels?: string[];
 }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [hoverName, setHoverName] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
   const width = 800;
   const pad = { l: 44, r: 10, t: 10, b: 22 };
   const all = series.flatMap((s) => s.data);
@@ -247,43 +264,148 @@ export function LineChart({
   const max = Math.max(...all);
   const span = max - min || 1;
   const n = Math.max(...series.map((s) => s.data.length));
-  const x = (i: number) => pad.l + (i / Math.max(1, n - 1)) * (width - pad.l - pad.r);
+  const plotW = width - pad.l - pad.r;
+  const x = (i: number) => pad.l + (i / Math.max(1, n - 1)) * plotW;
   const y = (v: number) => pad.t + (1 - (v - min) / span) * (height - pad.t - pad.b);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + span * f);
+  const focus = pinned ?? hoverName;
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const sx = ((e.clientX - r.left) / r.width) * width;
+    const sy = ((e.clientY - r.top) / r.height) * height;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((sx - pad.l) / plotW) * (n - 1))));
+    setHoverIdx(i);
+    // the nearest line to the cursor (within ~16 px) gets highlighted
+    let best: { name: string; d: number } | null = null;
+    for (const s of series) {
+      const v = s.data[i];
+      if (v === undefined) continue;
+      const d = Math.abs(y(v) - sy);
+      if (!best || d < best.d) best = { name: s.name, d };
+    }
+    setHoverName(best && best.d < 16 ? best.name : null);
+  };
+  const togglePin = (name: string) => {
+    sfx('ui-select');
+    setPinned((p) => (p === name ? null : name));
+  };
+
+  const rows =
+    hoverIdx === null
+      ? []
+      : series
+          .filter((s) => s.data[hoverIdx] !== undefined)
+          .map((s) => ({ s, v: s.data[hoverIdx] }))
+          .sort((a, b) => (a.s.name === focus ? -1 : b.s.name === focus ? 1 : b.v - a.v));
+  const tipLeft = hoverIdx !== null && x(hoverIdx) > width * 0.6;
+
   return (
-    <div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }}>
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke="#3b3156" strokeDasharray="4 4" shapeRendering="crispEdges" />
-            <text x={pad.l - 6} y={y(t) + 4} fill="#9389b4" fontSize="13" fontFamily="Tiny5" textAnchor="end">
-              {Math.round(t)}
+    <div className="chart">
+      <div className="chart-box">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ width: '100%', height: 'auto' }}
+          onMouseMove={onMove}
+          onMouseLeave={() => {
+            setHoverIdx(null);
+            setHoverName(null);
+          }}
+          onClick={() => hoverName && togglePin(hoverName)}
+        >
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke="#3b3156" strokeDasharray="4 4" shapeRendering="crispEdges" />
+              <text x={pad.l - 6} y={y(t) + 4} fill="#9389b4" fontSize="13" fontFamily="Tiny5" textAnchor="end">
+                {Math.round(t)}
+              </text>
+            </g>
+          ))}
+          {yLabel && (
+            <text x={pad.l} y={height - 4} fill="#9389b4" fontSize="13" fontFamily="Tiny5">
+              {yLabel}
             </text>
-          </g>
-        ))}
-        {yLabel && (
-          <text x={pad.l} y={height - 4} fill="#9389b4" fontSize="13" fontFamily="Tiny5">
-            {yLabel}
-          </text>
+          )}
+          {hoverIdx !== null && (
+            <line
+              x1={x(hoverIdx)}
+              x2={x(hoverIdx)}
+              y1={pad.t}
+              y2={height - pad.b}
+              stroke="#ffe60088"
+              strokeDasharray="3 3"
+              shapeRendering="crispEdges"
+            />
+          )}
+          {/* the highlighted line is drawn last, on top */}
+          {[...series]
+            .sort((a, b) => (a.name === focus ? 1 : b.name === focus ? -1 : 0))
+            .map((s) => {
+              const on = !focus || s.name === focus;
+              return (
+                <polyline
+                  key={s.name}
+                  fill="none"
+                  stroke={s.color}
+                  strokeLinejoin="miter"
+                  className="chart-line"
+                  style={{
+                    opacity: on ? 1 : 0.16,
+                    filter: s.name === focus ? `drop-shadow(0 0 5px ${s.color})` : on ? `drop-shadow(0 0 3px ${s.color})` : 'none',
+                  }}
+                  strokeWidth={s.name === focus ? 3.5 : 2}
+                  points={s.data.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
+                />
+              );
+            })}
+          {hoverIdx !== null &&
+            series.map((s) =>
+              s.data[hoverIdx] === undefined ? null : (
+                <rect
+                  key={s.name}
+                  x={x(hoverIdx) - (s.name === focus ? 4 : 3)}
+                  y={y(s.data[hoverIdx]) - (s.name === focus ? 4 : 3)}
+                  width={s.name === focus ? 8 : 6}
+                  height={s.name === focus ? 8 : 6}
+                  fill={s.color}
+                  opacity={!focus || s.name === focus ? 1 : 0.25}
+                  shapeRendering="crispEdges"
+                />
+              ),
+            )}
+        </svg>
+        {hoverIdx !== null && (
+          <div
+            className="chart-tip"
+            style={{
+              left: `${(x(hoverIdx) / width) * 100}%`,
+              transform: tipLeft ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)',
+            }}
+          >
+            {labels?.[hoverIdx] && <div className="muted">{labels[hoverIdx]}</div>}
+            {rows.map(({ s, v }) => (
+              <div key={s.name} className={s.name === focus ? 'on' : focus ? 'off' : ''}>
+                <span style={{ color: s.color }}>■</span> {s.name} <b>{Math.round(v)}</b>
+              </div>
+            ))}
+          </div>
         )}
+      </div>
+      <div className="row chart-legend">
         {series.map((s) => (
-          <polyline
+          <button
             key={s.name}
-            fill="none"
-            stroke={s.color}
-            strokeLinejoin="miter"
-            style={{ filter: `drop-shadow(0 0 3px ${s.color})` }}
-            strokeWidth="2"
-            points={s.data.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
-          />
-        ))}
-      </svg>
-      <div className="row" style={{ fontSize: 13 }}>
-        {series.map((s) => (
-          <span key={s.name}>
+            data-sfx="none"
+            className={`legend-item ${s.name === pinned ? 'pinned' : ''} ${focus && s.name !== focus ? 'dim' : ''}`}
+            onMouseEnter={() => setHoverName(s.name)}
+            onMouseLeave={() => setHoverName(null)}
+            onClick={() => togglePin(s.name)}
+            title={s.name === pinned ? 'Click to unpin' : 'Click to pin the highlight'}
+          >
             <span style={{ color: s.color }}>■</span> {s.name}
-          </span>
+          </button>
         ))}
+        {pinned && <span className="muted">· click again to unpin</span>}
       </div>
     </div>
   );

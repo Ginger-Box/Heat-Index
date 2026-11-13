@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MODELS } from '../engine/robots';
 import { DAYS_PER_SEASON, HOURS_PER_DAY, advanceHours, dayOf, refPrice, type World } from '../engine/world';
-import { act, getWorld } from '../store';
+import { actBackground, getWorld } from '../store';
 import { Cr, Delta, LINE_COLORS, LineChart } from './common';
 
 const TOTAL_HOURS = HOURS_PER_DAY * DAYS_PER_SEASON;
@@ -26,10 +26,10 @@ export function FastForward({ onClose }: { onClose: () => void }) {
     const step = () => {
       if (!alive) return;
       if (skip.current) {
-        act((w) => advanceHours(w, TOTAL_HOURS - h));
+        actBackground((w) => advanceHours(w, TOTAL_HOURS - h));
         h = TOTAL_HOURS;
       } else {
-        act((w) => advanceHours(w, 1));
+        actBackground((w) => advanceHours(w, 1));
         h++;
       }
       setDone(h);

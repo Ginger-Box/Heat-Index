@@ -15,7 +15,7 @@ import { Brokers } from './screens/Brokers';
 import { Hangar } from './screens/Hangar';
 import { Market } from './screens/Market';
 import { Ratings } from './screens/Ratings';
-import { act, resetGame, startGame, useWorld } from './store';
+import { actBackground, resetGame, startGame, useWorld } from './store';
 import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soundVolume } from './audio';
 import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
@@ -42,7 +42,7 @@ export default function App() {
 
   useEffect(() => {
     if (!w || !live || ff) return;
-    const t = setInterval(() => act((w) => playNpcMatch(w)), LIVE_MS);
+    const t = setInterval(() => actBackground((w) => playNpcMatch(w)), LIVE_MS);
     return () => clearInterval(t);
   }, [!!w, live, ff]);
 

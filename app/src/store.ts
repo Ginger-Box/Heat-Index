@@ -1,6 +1,6 @@
 // Хранилище мира на клиенте: один объект World + счётчик версий для перерисовки React.
 // Позже этот слой заменяется на сервер, который пишет сделки и бои в NEAR.
-import { useEffect, useReducer } from 'react';
+import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
 import { createWorld, type World } from './engine/world';
 
@@ -86,10 +86,21 @@ export function act(fn: (w: World) => string | null | void): string | null {
   return res;
 }
 
-export function notify() {
+export function notify(background = false) {
   version++;
   save();
-  for (const l of listeners) l();
+  // Фоновые изменения (бои NPC, перемотка) рендерятся с низким приоритетом: React дробит работу
+  // и уступает вводу — курсор и клики не подлагивают. Действия игрока — сразу.
+  if (background) startTransition(() => listeners.forEach((l) => l()));
+  else for (const l of listeners) l();
+}
+
+/** Как act(), но для фоновых обновлений мира (живой мир, перемотка). */
+export function actBackground(fn: (w: World) => void) {
+  const w = getWorld();
+  if (!w) return;
+  fn(w);
+  notify(true);
 }
 
 export function useWorld(): World | null {

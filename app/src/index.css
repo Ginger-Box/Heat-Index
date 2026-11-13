@@ -47,10 +47,9 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.5s;
-  mix-blend-mode: screen;
-  /* строки развёртки внутри света */
-  -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 2px, #0007 2px 4px);
-  mask-image: repeating-linear-gradient(to bottom, #000 0 2px, #0007 2px 4px);
+  /* слой стоит позади полупрозрачных панелей; маску и смешивание убрали — они дорого перерисовывались
+     на весь экран. Строки развёртки и так дают оверлей body::after. */
+  contain: strict;
 }
 #cursor-glow i {
   position: absolute;
@@ -169,8 +168,8 @@ body::after {
   z-index: 1000;
   background:
     repeating-linear-gradient(to bottom, transparent 0 2px, #0000002e 2px 3px),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  mix-blend-mode: overlay;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* без mix-blend-mode: смешивание с целой страницей заставляло перерисовывать всё окно при любом изменении */
 }
 body::before {
   content: '';
@@ -1175,9 +1174,15 @@ details[open] > summary::before {
   display: inline-block;
   white-space: nowrap;
 }
-/* Место занимает новое значение (невидимое), шум лежит поверх и на вёрстку не влияет */
-.glitch .g-size {
+/* Место занимает новое значение; во время глича оно скрыто, а шум лежит поверх и на вёрстку не влияет */
+.glitch .g-live {
+  display: none;
+}
+.glitch.on .g-size {
   visibility: hidden;
+}
+.glitch.on .g-live {
+  display: inline;
 }
 .glitch .g-live,
 .glitch.on::before,
@@ -3007,4 +3012,59 @@ html.cy-on input:not([type]) {
   50% {
     opacity: 0.35;
   }
+}
+
+/* ---------- интерактивный график ---------- */
+.chart-box {
+  position: relative;
+}
+.chart-box svg {
+  cursor: var(--cur-target);
+  --ck: target;
+}
+.chart-line {
+  transition:
+    opacity 0.15s,
+    stroke-width 0.15s;
+}
+.chart-tip {
+  position: absolute;
+  top: 8px;
+  z-index: 20;
+  pointer-events: none;
+  min-width: 150px;
+  padding: 6px 10px;
+  background: #050409ee;
+  border: 2px solid var(--line);
+  box-shadow: 4px 4px 0 #000;
+  font-size: 15px;
+  white-space: nowrap;
+}
+.chart-tip .on {
+  color: var(--text);
+  font-size: 17px;
+}
+.chart-tip .off {
+  opacity: 0.55;
+}
+.chart-tip b {
+  float: right;
+  margin-left: 12px;
+  font-weight: 400;
+}
+.chart-legend {
+  gap: 2px;
+  margin-top: 6px;
+}
+.legend-item {
+  font-size: 14px;
+  padding: 2px 8px;
+  background-color: transparent;
+}
+.legend-item.dim {
+  opacity: 0.4;
+}
+.legend-item.pinned {
+  --b: var(--yellow);
+  color: var(--yellow);
 }

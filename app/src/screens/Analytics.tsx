@@ -34,7 +34,7 @@ export function Analytics({ w }: { w: World }) {
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
         Each point is one game hour. {metric === 'rel' ? 'Relevance 0–100.' : 'Average fair price across brokers, CR.'}{' '}
-        Pick models below (up to 8).
+        Hover a line to highlight it, click to pin. Pick models below (up to 8).
       </p>
       <LineChart
         series={shown.map((id, i) => ({
@@ -42,10 +42,16 @@ export function Analytics({ w }: { w: World }) {
           color: LINE_COLORS[i % LINE_COLORS.length],
           data: hist.map((h) => (metric === 'price' ? h.price[id] : h.rel[id])),
         }))}
+        labels={hist.map((h) => `day ${h.day} · ${String(8 + (h.hour % 12)).padStart(2, '0')}:00`)}
       />
       <div className="row" style={{ marginTop: 12, gap: 6 }}>
         {MODELS.map((m) => (
-          <button key={m.id} className={`small ${shown.includes(m.id) ? 'primary' : ''}`} onClick={() => toggle(m.id)}>
+          <button
+            key={m.id}
+            data-sfx="toggle"
+            className={`small ${shown.includes(m.id) ? 'primary' : ''}`}
+            onClick={() => toggle(m.id)}
+          >
             {m.name}
           </button>
         ))}
