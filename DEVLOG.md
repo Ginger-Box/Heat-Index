@@ -1,4 +1,4 @@
-# NEON PIT — development log
+# HEAT INDEX (formerly NEON PIT) — development log
 
 A reconstructed history of how the game was built, written from the working sessions.
 The project was not under version control until Nov 13, 2026, so intermediate code states are not preserved —

@@ -1,4 +1,4 @@
-# NEON PIT — game client
+# HEAT INDEX — game client
 
 An underground cyberpunk robot arena where **the economy is the gameplay**: robots wear out in battle,
 their prices follow how well they perform, and AI brokers trade them with a delay you can profit from.
