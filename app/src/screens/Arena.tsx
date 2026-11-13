@@ -18,6 +18,7 @@ import {
   createBattle,
   deployTargets,
   heatCap,
+  isFlanker,
   isGuard,
   wearLoss,
   type Action,
@@ -493,10 +494,15 @@ export function Arena({ w }: { w: World }) {
     endFx.current();
     if (final.winner === 0) {
       endFx.current = confetti();
-      sfx('confetti-pop');
-      sfx('confetti-pop', { delay: 0.06, volume: 0.8 });
-      sfx('sparkle', { delay: 0.2 });
-      setTimeout(() => sfx('confetti-pop', { volume: 0.6 }), 380);
+      // two poppers (left, right), the paper rustling down, a glitter sparkle, a second smaller volley
+      battleSynth('popper', 1);
+      setTimeout(() => battleSynth('popper', 0.9), 45);
+      setTimeout(() => battleSynth('rustle'), 250);
+      sfx('sparkle', { delay: 0.15 });
+      setTimeout(() => {
+        battleSynth('popper', 0.6);
+        setTimeout(() => battleSynth('popper', 0.5), 40);
+      }, 650);
       jingle('victory');
       await sleep(1000);
     } else if (final.winner === 1) {
@@ -607,6 +613,10 @@ export function Arena({ w }: { w: World }) {
           : { key: tk, text: 'BLOCK', kind: 'block' },
       ];
       if (attack.counter > 0) fl.push({ key: attack.from, text: `−${attack.counter}`, kind: 'dmg', size: size(attack.counter) });
+      // a Maneuver robot slipping past guards: say so, otherwise it looks like the guard rule broke
+      const atk = before.sides[side].board.find((u) => u.uid === attack.from);
+      if (atk && isFlanker(atk) && before.sides[1 - side].board.some(isGuard))
+        fl.push({ key: attack.from, text: 'FLANK — ignores guards', kind: 'block' });
       const hurt: Record<string, string> = {};
       if (attack.dmg > 0) hurt[tk] = attack.dmg >= 5 ? 'fx-hurt-big' : attack.dmg >= 3 ? 'fx-hurt-mid' : 'fx-hurt';
       if (attack.counter > 0) hurt[attack.from] = 'fx-hurt';
@@ -858,6 +868,11 @@ export function Arena({ w }: { w: World }) {
         </div>
         <div className="b-core-label">
           <span>{side === 0 ? 'YOUR CORE' : 'ENEMY CORE'}</span>
+          {v.sides[side].board.some(isGuard) && (
+            <em className="b-guarded" title="A guard stands: only Maneuver robots can hit this Core now">
+              GUARDED
+            </em>
+          )}
           <small>
             {core}/{CORE_HP}
           </small>
@@ -1138,15 +1153,18 @@ function EndOverlay({ winner, onClose, children }: { winner: number | null | und
     return () => window.removeEventListener('keydown', key);
   }, [onClose]);
   return createPortal(
+    // on <body>, above the end-of-battle canvases (#root is its own layer); the inner box carries the UI zoom
     <div className={`end-overlay ${kind}`}>
-      <div className="end-title" data-text={title}>
-        {title}
+      <div className="end-inner">
+        <div className="end-title" data-text={title}>
+          {title}
+        </div>
+        <div className="end-body">{children}</div>
+        <button className="primary end-continue" onClick={onClose}>
+          CONTINUE
+        </button>
       </div>
-      <div className="end-body">{children}</div>
-      <button className="primary end-continue" onClick={onClose}>
-        CONTINUE
-      </button>
     </div>,
-    document.getElementById('root') ?? document.body,
+    document.body,
   );
 }

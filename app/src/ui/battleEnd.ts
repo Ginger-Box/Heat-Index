@@ -58,22 +58,41 @@ export function confetti(): () => void {
       });
     }
   };
-  burst(true, 240);
-  burst(false, 240);
-  const t2 = setTimeout(() => {
-    burst(true, 160);
-    burst(false, 160);
-  }, 380);
-  const t3 = setTimeout(() => {
-    burst(true, 100);
-    burst(false, 100);
-  }, 800);
+  // two cannons in the bottom corners: a muzzle flash, then a stream that tapers off over ~0.7 s,
+  // and a second smaller volley — the confetti pours out instead of appearing all at once
+  const flashes: { x: number; t: number }[] = [];
+  const volley = (at: number, total: number) =>
+    setTimeout(() => {
+      flashes.push({ x: 0, t: performance.now() }, { x: c.width, t: performance.now() });
+      let left = total;
+      const pour = () => {
+        const n = Math.max(4, Math.round(left * 0.16));
+        burst(true, n);
+        burst(false, n);
+        left -= n;
+        if (left > 0) timers.push(setTimeout(pour, 33));
+      };
+      pour();
+    }, at);
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  timers.push(volley(0, 300), volley(650, 180));
   let last = performance.now();
   let raf = 0;
   const step = (now: number) => {
     const dt = Math.min(0.04, (now - last) / 1000);
     last = now;
     g.clearRect(0, 0, c.width, c.height);
+    for (const f of flashes) {
+      const k = (now - f.t) / 260;
+      if (k > 1) continue;
+      const r = 40 + k * 160;
+      const grd = g.createRadialGradient(f.x, c.height, 0, f.x, c.height, r);
+      grd.addColorStop(0, `rgba(255,255,255,${0.9 * (1 - k)})`);
+      grd.addColorStop(0.4, `rgba(255,230,0,${0.5 * (1 - k)})`);
+      grd.addColorStop(1, 'rgba(255,42,138,0)');
+      g.fillStyle = grd;
+      g.fillRect(f.x - r, c.height - r, r * 2, r);
+    }
     for (const b of bits) {
       b.vy += G * dt;
       b.vx *= 1 - 0.9 * dt;
@@ -94,12 +113,11 @@ export function confetti(): () => void {
       g.restore();
     }
     for (let i = bits.length - 1; i >= 0; i--) if (bits[i].y > c.height + 40) bits.splice(i, 1);
-    if (bits.length) raf = requestAnimationFrame(step);
+    if (bits.length || timers.length) raf = requestAnimationFrame(step);
   };
   raf = requestAnimationFrame(step);
   return () => {
-    clearTimeout(t2);
-    clearTimeout(t3);
+    timers.forEach(clearTimeout);
     cancelAnimationFrame(raf);
     c.remove();
   };
@@ -113,7 +131,6 @@ export const GLITCH_TOTAL = 1900;
 const SPREAD_MS = 1100;
 const CHURN_MS = 1450;
 
-const TEAR = ['#ff2a8a', '#00f0ff', '#ffffff', '#ff3b4e', '#b46bff', '#ffe600', '#14101f', '#000000'];
 
 export function glitchTakeover(x: number, y: number): () => void {
   const { c, g } = makeCanvas('fx-end-canvas glitch');
@@ -122,75 +139,69 @@ export function glitchTakeover(x: number, y: number): () => void {
     g.fillRect(0, 0, c.width, c.height);
     return () => c.remove();
   }
+  // The screen is split into pixel cells. A clean wave runs out of the Core: each cell lights up when the front
+  // reaches it (a white flash → a cyan/magenta glitch tone), so the glitch visibly "pours" from the Core.
+  // When everything is covered the cells churn as whole scanline bands, then rows switch off to black.
   const W = c.width;
   const H = c.height;
-  const maxR = Math.hypot(Math.max(x, W - x), Math.max(y, H - y)) + 60;
+  const CW = 24;
+  const CH = 12;
+  const cols = Math.ceil(W / CW);
+  const rows = Math.ceil(H / CH);
+  const maxD = Math.hypot(Math.max(x, W - x), Math.max(y, H - y));
+  const on = new Float32Array(cols * rows); // the moment (ms) each cell gets hit by the front
+  const tone = new Uint8Array(cols * rows);
+  for (let j = 0; j < rows; j++)
+    for (let i = 0; i < cols; i++) {
+      const d = Math.hypot(i * CW + CW / 2 - x, (j * CH + CH / 2 - y) * 1.15);
+      // a slightly ragged, blocky front: noise per cell and per row
+      on[j * cols + i] = (d / maxD) * SPREAD_MS * 0.92 + Math.random() * 70 + ((j * 7) % 5) * 8;
+      tone[j * cols + i] = Math.floor(Math.random() * 4);
+    }
+  const TONES = ['#ff2a8a', '#00f0ff', '#2a0f3a', '#0b2a3a'];
+  const rowOff = new Int16Array(rows); // horizontal tear of a whole row
+  const offRow = new Float32Array(rows).map(() => CHURN_MS + Math.random() * (GLITCH_TOTAL - CHURN_MS - 60));
   const start = performance.now();
-  const rows = Math.ceil(H / 6);
-  const blackRows = new Set<number>();
-  const pick = () => TEAR[Math.floor(Math.random() * TEAR.length)];
   let raf = 0;
-
   const step = (now: number) => {
     const t = now - start;
-    if (t < SPREAD_MS) {
-      // 1) glitches pour out of the Core: tears and pixel blocks accumulate (the canvas is not cleared),
-      //    the front moves outward and the blocks get bigger, so the screen fills up from the Core
-      const k = t / SPREAD_MS;
-      const r = maxR * (k * k * (3 - 2 * k));
-      const n = 14 + Math.floor(k * k * 260);
-      for (let i = 0; i < n; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = r * Math.sqrt(Math.random());
-        const bx = x + Math.cos(a) * d;
-        const by = y + Math.sin(a) * d * 0.9;
-        const bw = 12 + Math.random() * (40 + k * 520);
-        const bh = [2, 3, 4, 6, 8, 12, 18][Math.floor(Math.random() * (3 + k * 4))];
-        const col = pick();
-        g.globalAlpha = 0.75 + Math.random() * 0.25;
+    g.clearRect(0, 0, W, H);
+    for (let j = 0; j < rows; j++) {
+      if (Math.random() < 0.08) rowOff[j] = (Math.random() - 0.5) * 60;
+      else if (Math.random() < 0.2) rowOff[j] = 0;
+      const yy = j * CH;
+      if (t >= offRow[j]) {
+        g.fillStyle = '#050409';
+        g.fillRect(0, yy, W, CH);
+        continue;
+      }
+      for (let i = 0; i < cols; i++) {
+        const k = j * cols + i;
+        const since = t - on[k];
+        if (since < 0) continue;
+        let col: string;
+        if (since < 60) col = '#ffffff'; // the front: a bright edge
+        else if (since < 140) col = since % 40 < 20 ? '#ff2a8a' : '#00f0ff';
+        else {
+          // settled: dark glitch with sparse bright flickers
+          const r = Math.random();
+          col = r < 0.06 ? '#ffffff' : r < 0.2 ? TONES[(tone[k] + (t > SPREAD_MS ? 1 : 0)) % 2] : TONES[2 + (tone[k] % 2)];
+        }
         g.fillStyle = col;
-        g.fillRect(bx - bw / 2, by, bw, bh);
-        // RGB echo of the tear
-        if (Math.random() < 0.35) {
-          g.globalAlpha = 0.6;
-          g.fillStyle = col === '#00f0ff' ? '#ff2a8a' : '#00f0ff';
-          g.fillRect(bx - bw / 2 + 6, by + bh, bw * 0.6, 2);
-        }
+        g.fillRect(i * CW + rowOff[j], yy, CW - 1, CH - 1);
       }
-      // the Core itself flickers white at the source
-      g.globalAlpha = 1;
+      // past full coverage: occasional full-width scanline bands
+      if (t > SPREAD_MS && Math.random() < 0.05) {
+        g.fillStyle = Math.random() < 0.5 ? '#ff2a8a' : '#00f0ff';
+        g.fillRect(0, yy + CH / 2 - 1, W, 2);
+      }
+    }
+    // the Core keeps spitting at the source while the wave runs
+    if (t < SPREAD_MS) {
       g.fillStyle = Math.random() < 0.5 ? '#ffffff' : '#ff2a8a';
-      g.fillRect(x - 20, y - 6, 40, 12);
-    } else if (t < CHURN_MS) {
-      // 2) the whole screen is glitch: full-width bars churn every frame
-      g.globalAlpha = 1;
-      let yy = 0;
-      while (yy < H) {
-        const bh = 2 + Math.floor(Math.random() * 16);
-        g.fillStyle = pick();
-        g.fillRect(0, yy, W, bh);
-        if (Math.random() < 0.4) {
-          g.fillStyle = pick();
-          const sx = Math.random() * W;
-          g.fillRect(sx, yy, 40 + Math.random() * 300, bh);
-        }
-        yy += bh;
-      }
-    } else if (t < GLITCH_TOTAL) {
-      // 3) cut to black: rows go dark in random order (the rest keeps glitching)
-      const k = (t - CHURN_MS) / (GLITCH_TOTAL - CHURN_MS);
-      while (blackRows.size < Math.floor(rows * k * k)) blackRows.add(Math.floor(Math.random() * rows));
-      for (let r = 0; r < rows; r++) {
-        if (blackRows.has(r)) {
-          g.fillStyle = '#050409';
-          g.fillRect(0, r * 6, W, 6);
-        } else if (Math.random() < 0.5) {
-          g.fillStyle = pick();
-          g.fillRect(Math.random() * W * 0.5, r * 6, W * (0.3 + Math.random() * 0.7), 6);
-        }
-      }
-    } else {
-      g.globalAlpha = 1;
+      g.fillRect(x - 18, y - 5, 36, 10);
+    }
+    if (t >= GLITCH_TOTAL) {
       g.fillStyle = '#050409';
       g.fillRect(0, 0, W, H);
       return; // stays black under the DEFEAT screen

@@ -528,7 +528,7 @@ export function faxSound(): () => void {
  * whoosh — the attacker's swing; steam — venting heat; alarm — overheat; thump — a sub-bass hit under heavy
  * blows (power 0..1 scales it); weld — the crackle of a repair; aim — a soft rising blip when an arrow is drawn.
  */
-export function battleSynth(kind: 'whoosh' | 'steam' | 'alarm' | 'thump' | 'weld' | 'aim', power = 0.5) {
+export function battleSynth(kind: 'whoosh' | 'steam' | 'alarm' | 'thump' | 'weld' | 'aim' | 'popper' | 'rustle', power = 0.5) {
   if (!ctx || !master || !enabled || volume === 0 || !live()) return;
   const c = ctx;
   const t = c.currentTime;
@@ -625,6 +625,43 @@ export function battleSynth(kind: 'whoosh' | 'steam' | 'alarm' | 'thump' | 'weld
       n.connect(g).connect(f);
       n.start(at);
     }
+  } else if (kind === 'popper') {
+    // party popper: a sharp paper crack + a short low "pomf" of air
+    const n = noise(0.08);
+    const f = c.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 1200;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5 * power + 0.2, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.12);
+    const og = c.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.3, t + 0.004);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(og).connect(out);
+    o.start(t);
+    o.stop(t + 0.15);
+  } else if (kind === 'rustle') {
+    // falling paper: soft band-passed noise with a fluttering amplitude
+    const dur = 1.8;
+    const n = noise(dur);
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 5200;
+    f.Q.value = 0.7;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    for (let i = 0; i < 36; i++) g.gain.setValueAtTime((0.02 + Math.random() * 0.05) * (1 - i / 40), t + 0.05 + (i * dur) / 36);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
   } else {
     const o = c.createOscillator();
     o.type = 'triangle';

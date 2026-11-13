@@ -42,22 +42,22 @@ export const CLASS_ICON: Record<RobotClass, string> = {
   shock: '🌩️',
 };
 export const CLASS_HELP: Record<RobotClass, string> = {
-  none: 'No abilities: simple and reliable, nothing to think about.',
-  armor: 'Tough tanks: hold the lane and barely wear out.',
-  maneuver: 'Dodge dangerous enemies and hit empty lanes.',
-  repair: 'Fix their allies and the Core — win long fights.',
-  blast: 'Take revenge on death: the blast hurts enemies in three lanes.',
-  charge: 'A heavy first hit on the round they deploy — for fast attacks.',
-  shock: 'Stun the robot across: it skips its attack that round.',
+  none: 'No abilities, but they run cool: overheat only at 6 heat instead of 4.',
+  armor: 'Guards: while one stands, enemies must hit it first — except Maneuver robots, which slip past.',
+  maneuver: 'Flankers: ignore enemy guards and can strike any robot or the Core.',
+  repair: 'Medics: fix and cool your robots or the Core, and patch a little every turn.',
+  blast: 'Walking bombs: when destroyed, they hurt every enemy robot.',
+  charge: 'Rushers: strike on the turn they arrive, with extra force.',
+  shock: 'Stunners: knock an enemy robot offline and overheat targets fast.',
 };
 
 export const ABILITY_HELP: Record<AbilityKind, string> = {
-  armor: 'Takes N less damage from every hit.',
-  maneuver: 'Once per battle, can move to an adjacent free lane.',
-  repair: 'When deployed, repairs N HP of a damaged neighbor or your Core — you choose which.',
-  blast: 'When destroyed, deals N damage to enemy robots in its lane and the adjacent ones.',
-  charge: 'On the round it is deployed, hits with +N attack.',
-  shock: 'When deployed, stuns the robot across: it deals no damage this round.',
+  armor: 'Guard: enemies must attack it before your other robots or your Core (Maneuver robots ignore guards). Takes N less damage from every hit.',
+  maneuver: 'Flanker: ignores enemy guards — can attack any robot or the Core.',
+  repair: 'When deployed: repairs N HP and fully cools a robot of yours, or repairs your Core — you choose. Then at the start of every one of your turns it patches 1 HP of your most damaged robot (or the Core).',
+  blast: 'When destroyed: deals N damage to every enemy robot.',
+  charge: 'Attacks on the turn it is deployed, with +N attack (robots only, not the Core).',
+  shock: 'When deployed: stuns an enemy robot — it skips its next turn. Its attacks add +2 heat to the target.',
 };
 
 /**

@@ -4002,12 +4002,11 @@ button.pick {
   position: fixed;
   inset: 0;
   z-index: 2147482940;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  padding: 24px;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  font-family: var(--font);
+  color: var(--text);
   background: radial-gradient(circle at 50% 40%, #12101ecc, #050409f2);
   animation: end-in 0.35s steps(6);
 }
@@ -4020,6 +4019,15 @@ button.pick {
   from {
     opacity: 0;
   }
+}
+.end-inner {
+  zoom: var(--ui-scale, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  padding: 24px;
+  width: min(1020px, 100%);
 }
 .end-title {
   position: relative;
@@ -4164,4 +4172,12 @@ button.pick {
   display: grid;
   grid-template-columns: repeat(5, max-content);
   gap: 12px;
+}
+.b-guarded {
+  font-style: normal;
+  font-size: 8px;
+  color: #050409;
+  background: var(--cyan);
+  padding: 2px 4px;
+  justify-self: start;
 }
