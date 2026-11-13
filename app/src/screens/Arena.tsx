@@ -129,12 +129,60 @@ function HeatBar({ u }: { u: Unit }) {
   );
 }
 
-export function Arena({ w }: { w: World }) {
+/** The first-launch training battle: a tiny scripted fight with step-by-step hints (see TUT_STEPS). */
+export interface TutorialProps {
+  onDone: () => void;
+}
+
+// Training: your hand Bolt / Dash / Spark vs a weak bot with a cracked Core (8 HP) — 2–3 turns.
+const TUT_MINE = ['bolt', 'dash', 'spark'];
+const TUT_ENEMY = ['spark', 'dash', 'drone', 'spark']; // no guards here, so the Core is always open
+const TUT_ENEMY_CORE = 8;
+type TutWait = 'next' | 'deploy' | 'end' | 'attack' | 'free';
+const TUT_STEPS: { text: string; wait: TutWait; focus: string }[] = [
+  {
+    text: 'Welcome to the pit. Break the enemy Core (top) before they break yours (bottom). The ring shows how much is left.',
+    wait: 'next',
+    focus: 'cores',
+  },
+  {
+    text: 'Drag a robot from your hand into any slot. Deploying costs energy — the number in the card corner. You have 2 this turn, +1 every turn.',
+    wait: 'deploy',
+    focus: 'hand',
+  },
+  {
+    text: 'Every robot has Attack (orange) and HP (green). A freshly deployed robot waits a turn before attacking. Press END TURN.',
+    wait: 'end',
+    focus: 'end',
+  },
+  {
+    text: 'Your turn. Drag an arrow from your robot to an enemy robot or straight to the enemy Core — or click the robot, then the target. Robots you hit strike back.',
+    wait: 'attack',
+    focus: 'enemy',
+  },
+  {
+    text: 'See the pips under your robot? That is heat: every attack +2. At the limit it overheats — skips a turn and wears out. ❄ COOL on a robot cools it instead of attacking.',
+    wait: 'next',
+    focus: 'heat',
+  },
+  {
+    text: 'Every class has a special ability. Hover any robot to read what it can do — Dash, for example, attacks on the turn it lands.',
+    wait: 'next',
+    focus: 'hand',
+  },
+  { text: 'Now finish the job: break the enemy Core!', wait: 'free', focus: '' },
+];
+
+export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
   const me = getManager(w, PLAYER_ID);
   const [oppId, setOppId] = useState(() => pickOpponentForPlayer(w).id);
   const [fight, setFight] = useState<Fight | null>(null);
   const [view, setView] = useState<BattleState | null>(null); // what is drawn (during animations may differ from fight.st)
   const [handSel, setHandSel] = useState<string | null>(null);
+  const [tut, setTut] = useState(0); // training step
+  const tutRef = useRef(0);
+  tutRef.current = tut;
+  const [tutEnd, setTutEnd] = useState<number | null | undefined>(undefined); // training result → its end screen
   const [deckOpen, setDeckOpen] = useState<number | null>(() => getManager(w, PLAYER_ID).activeDeck ?? 0);
   const [pending, setPending] = useState<{ uid: string; slot: number; targets: Target[] } | null>(null);
   const [aimLegal, setAimLegal] = useState<Set<string> | null>(null);
@@ -289,9 +337,60 @@ export function Arena({ w }: { w: World }) {
 
   const myTeam = teamOf(w, me);
   const teamErr = teamError(myTeam);
-  const opp = getManager(w, oppId);
+  const opp = tutorial ? { ...getManager(w, oppId), name: 'Training Bot', elo: 0, focus: undefined } : getManager(w, oppId);
+
+  // training: start the scripted fight right away (robots made just for it, not from your Hangar)
+  useEffect(() => {
+    if (!tutorial || fight || tutEnd !== undefined) return;
+    const mk = (ids: string[], tag: string) => ids.map((id, i) => ({ uid: `${id}#tut-${tag}${i}`, modelId: id, durability: 10 }));
+    const st = createBattle(mk(TUT_MINE, 'a'), mk(TUT_ENEMY, 'b'), 4242);
+    st.sides[1].core = TUT_ENEMY_CORE;
+    setFight({ oppId, st, durBefore: {}, eloBefore: me.elo });
+    setView(st);
+    setCaption('Your turn');
+    setTut(0);
+    setBanner({ text: 'TRAINING', kind: 'mine', id: Date.now() });
+    sfx('turn-start');
+  }, [tutorial, fight, tutEnd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Training: advance when the player does what the current step asks. */
+  const tutEvent = (ev: BattleEvent[]) => {
+    if (!tutorial) return;
+    const step = TUT_STEPS[tutRef.current];
+    if (!step) return;
+    const did =
+      (step.wait === 'deploy' && ev.some((e) => e.t === 'deploy' && e.side === 0)) ||
+      (step.wait === 'end' && ev.some((e) => e.t === 'turn' && e.side === 1)) ||
+      (step.wait === 'attack' && ev.some((e) => e.t === 'attack' && e.side === 0));
+    if (did) {
+      setTut(tutRef.current + 1);
+      sfx('ui-open', { volume: 0.7 });
+    }
+  };
 
   // ---------- lobby ----------
+  if (!fight && tutorial) {
+    return tutEnd !== undefined ? (
+      <EndOverlay
+        winner={tutEnd}
+        onClose={() => {
+          endFx.current();
+          endFx.current = () => {};
+          tutorial.onDone();
+        }}
+      >
+        <div className="panel tut-end">
+          <h3 style={{ marginTop: 0 }}>{tutEnd === 0 ? 'Training complete' : 'Training over'}</h3>
+          <p>
+            That's the whole loop: deploy, attack, watch the heat. Real battles cost <b>durability</b> — repairs cost
+            credits, and robots that win get more expensive on the Market. Next: a quick look around.
+          </p>
+        </div>
+      </EndOverlay>
+    ) : (
+      <div className="panel">Loading training…</div>
+    );
+  }
   if (!fight) {
     return (
       <div className="grid">
@@ -553,6 +652,14 @@ export function Arena({ w }: { w: World }) {
       await sleep(700);
     }
     if (!alive.current) return;
+    if (tutorial) {
+      setTutEnd(final.winner);
+      setFight(null);
+      setView(null);
+      setBusy(false);
+      setBanner(null);
+      return;
+    }
     const f = fightRef.current!;
     act((w) => applyMatch(w, PLAYER_ID, f.oppId, final));
     setResult({ fresh: true, st: final, oppName: opp.name, durBefore: f.durBefore, eloBefore: f.eloBefore });
@@ -745,6 +852,7 @@ export function Arena({ w }: { w: World }) {
     const f = { ...fightRef.current!, st: after };
     fightRef.current = f;
     setFight(f);
+    tutEvent(ev);
     if (after.winner !== undefined) await finish(after);
     return after;
   };
@@ -754,7 +862,7 @@ export function Arena({ w }: { w: World }) {
     await sleep(700);
     let cur = fightRef.current!.st;
     // opponents in the demo are a bit sloppy: about one move in five is not the best one
-    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: OPP_SLOPPY }, dur);
+    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: tutorial ? 0.7 : OPP_SLOPPY }, dur);
     for (const a of plan) {
       if (!alive.current || cur.winner !== undefined) return;
       const uid = a.t === 'deploy' ? a.uid : a.t === 'attack' ? a.from : a.t === 'vent' ? a.uid : null;
@@ -1001,8 +1109,25 @@ export function Arena({ w }: { w: World }) {
 
   return (
     <div className="grid">
-      <div className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''}`} ref={tableRef}>
+      <div
+        className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''} ${tutorial && TUT_STEPS[tut]?.focus ? `tut-${TUT_STEPS[tut].focus}` : ''}`}
+        ref={tableRef}
+      >
         <div className="b-table">
+          {tutorial && TUT_STEPS[tut] && (
+            <div className="tut-coach" key={tut}>
+              <span className="tut-step">
+                TRAINING {tut + 1}/{TUT_STEPS.length}
+              </span>
+              <p>{TUT_STEPS[tut].text}</p>
+              {TUT_STEPS[tut].wait === 'next' && (
+                <button className="primary small" onClick={() => setTut(tut + 1)}>
+                  Got it ▶
+                </button>
+              )}
+              {TUT_STEPS[tut].wait !== 'next' && TUT_STEPS[tut].wait !== 'free' && <span className="tut-wait">waiting for you…</span>}
+            </div>
+          )}
           {/* opponent */}
           <div className="b-top">
             {renderCore(1)}

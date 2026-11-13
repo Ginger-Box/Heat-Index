@@ -71,6 +71,7 @@ export function resetGame() {
   try {
     localStorage.removeItem(KEY);
     localStorage.removeItem(NAME_KEY);
+    localStorage.removeItem('heat-index-tutorial'); // starting over replays the training
   } catch {
     /* ignore */
   }

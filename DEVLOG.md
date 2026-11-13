@@ -139,6 +139,19 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   used to sit under the glitch canvas). Victory: confetti pours from two corner cannons with popper and paper sounds.
 - Typing sound in text fields; a cyber "crunch" for row selection; the cool-down button is labelled.
 
+### Tutorial and demo balance (Nov 13–14)
+- **First launch tutorial**: a short scripted training battle (your Bolt / Dash / Spark vs a weak bot with a cracked
+  Core) with step-by-step hints — Cores, deploying and energy, attack and HP, ending the turn, aiming, heat and
+  cooling, abilities on hover — then a tour of the tabs with a spotlight and an arrow. City Feed tab removed.
+- Heavy hits (4+) crack the screen glass at the point of impact (more and longer cracks the bigger the hit) with a
+  glass-break sound; 1–3 stay as sparks.
+- Demo balance (the author lost three battles in a row and could not afford a replacement): Arena opponents play a
+  random reasonable move ~1 time in 5 (`sloppy` in `ai.ts`), NPC decks are capped at 28 deck cost, the player's
+  battles pay a 6% purse, the player's robots wear only when destroyed or overheated, start with 1000 CR.
+  Simulated: a perfectly played starter deck wins 68% against NPC decks; NPC money over a week ×1.4 (stable).
+- Market: tighter columns, 2× card preview; a static "market today" line replaced the scrolling ticker;
+  Reset uses an in-app confirmation (the browser dialog was blocked in the embedded browser).
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results

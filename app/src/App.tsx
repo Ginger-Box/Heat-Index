@@ -20,6 +20,18 @@ import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
 import { FastForward } from './ui/FastForward';
 import { Ticker } from './ui/Ticker';
+import { Tour } from './ui/Tour';
+
+const TUTORIAL_KEY = 'heat-index-tutorial';
+type TutorialStage = 'battle' | 'tour' | 'done';
+function readTutorial(): TutorialStage {
+  try {
+    const v = localStorage.getItem(TUTORIAL_KEY);
+    return v === 'tour' || v === 'done' ? v : 'battle';
+  } catch {
+    return 'done';
+  }
+}
 
 const TABS = [
   ['arena', 'Arena'],
@@ -36,6 +48,16 @@ const LIVE_MS = 2500; // в живом режиме NPC играют матч к
 export default function App() {
   const w = useWorld();
   const [tab, setTab] = useState<Tab>('arena');
+  // first launch: a training battle, then a tour of the tabs (remembered in localStorage)
+  const [tutorial, setTutorial] = useState<TutorialStage>(readTutorial);
+  const advanceTutorial = (next: TutorialStage) => {
+    setTutorial(next);
+    try {
+      localStorage.setItem(TUTORIAL_KEY, next);
+    } catch {
+      /* no storage — the tutorial just won't be remembered */
+    }
+  };
   const [ff, setFf] = useState(false);
   const [live, setLive] = useState(true);
 
@@ -57,7 +79,14 @@ export default function App() {
         </div>
         <div className="nav">
           {TABS.map(([id, label]) => (
-            <button key={id} data-sfx="tab" className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+            <button
+              key={id}
+              data-sfx="tab"
+              data-tab={id}
+              className={tab === id ? 'active' : ''}
+              disabled={tutorial === 'battle'}
+              onClick={() => setTab(id)}
+            >
               {label}
             </button>
           ))}
@@ -106,10 +135,16 @@ export default function App() {
 
       <Ticker w={w} />
 
+      {tutorial === 'tour' && <Tour onTab={(t) => setTab(t as Tab)} onDone={() => advanceTutorial('done')} />}
+
       {/* key={tab}: при смене вкладки блок пересоздаётся и проигрывает «включение кинескопа» */}
       <div className="content tab-crt" key={tab}>
-        {tab === 'arena' && <Arena w={w} />}
-        {tab === 'hangar' && <Hangar w={w} />}
+        {tutorial === 'battle' ? (
+          <Arena w={w} tutorial={{ onDone: () => advanceTutorial('tour') }} key="training" />
+        ) : (
+          tab === 'arena' && <Arena w={w} />
+        )}
+        {tutorial !== 'battle' && tab === 'hangar' && <Hangar w={w} />}
         {tab === 'market' && <Market w={w} />}
         {tab === 'brokers' && <Brokers w={w} />}
         {tab === 'analytics' && <Analytics w={w} />}

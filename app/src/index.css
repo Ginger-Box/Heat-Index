@@ -4243,3 +4243,114 @@ button.pick {
   z-index: 2147482903;
   pointer-events: none;
 }
+
+/* ---------- обучение: подсказки в учебном бою (Arena.tsx) и тур по вкладкам (ui/Tour.tsx) ---------- */
+.tut-coach {
+  position: absolute;
+  z-index: 35;
+  left: 50%;
+  top: 41%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 92%);
+  padding: 12px 16px;
+  background: #050409f2;
+  border: 2px solid var(--yellow);
+  box-shadow:
+    0 0 0 3px #050409,
+    0 0 24px #ffe60055;
+  animation: end-body-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.tut-coach p {
+  margin: 6px 0 10px;
+  font-size: 16px;
+  line-height: 1.4;
+}
+.tut-step {
+  font-family: var(--font-px);
+  font-size: 9px;
+  color: var(--yellow);
+  letter-spacing: 0.08em;
+}
+.tut-wait {
+  font-size: 13px;
+  color: var(--muted);
+  animation: blink 1.4s steps(1) infinite;
+}
+@keyframes tut-glow {
+  50% {
+    box-shadow:
+      0 0 0 3px var(--yellow),
+      0 0 26px #ffe600aa;
+  }
+}
+.arena3.tut-cores .b-core,
+.arena3.tut-hand .b-hand,
+.arena3.tut-end .b-end,
+.arena3.tut-enemy .b-core.side-1,
+.arena3.tut-enemy .b-board.side-1,
+.arena3.tut-heat .b-board.side-0 .heat {
+  animation: tut-glow 1s steps(2) infinite;
+}
+.tut-end p {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.tour-dim {
+  position: fixed;
+  z-index: 2147482800;
+  pointer-events: none;
+  border: 3px solid var(--yellow);
+  box-shadow:
+    0 0 0 9999px #050409c4,
+    0 0 26px #ffe600aa;
+  transition:
+    left 0.3s cubic-bezier(0.2, 0.8, 0.3, 1),
+    top 0.3s cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 0.3s,
+    height 0.3s;
+}
+.tour-arrow {
+  position: fixed;
+  z-index: 2147482801;
+  pointer-events: none;
+  overflow: visible;
+}
+.tour-arrow path {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 4;
+  stroke-dasharray: 10 6;
+  animation: aim-march 0.5s linear infinite;
+  filter: drop-shadow(0 0 4px #ffe600);
+}
+.tour-arrow polygon {
+  fill: var(--yellow);
+}
+.tour-box {
+  position: fixed;
+  z-index: 2147482802;
+  zoom: var(--ui-scale, 1);
+  width: 420px;
+  padding: 14px 18px;
+  color: var(--text);
+  font-family: var(--font);
+  background: #0b0912;
+  border: 2px solid var(--yellow);
+  box-shadow: 0 0 0 3px #050409;
+  animation: end-body-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.tour-box h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-px);
+  font-size: 15px;
+  color: var(--yellow);
+}
+.tour-box p {
+  margin: 0 0 12px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.tour-box .row {
+  justify-content: space-between;
+}
