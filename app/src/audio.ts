@@ -710,3 +710,52 @@ export function jingle(kind: 'victory' | 'defeat') {
     o.stop(s + 1.05);
   }
 }
+
+// ---------- selection "crunch": a soft scroll-wheel/gravel tick, synthesized ----------
+
+let lastCrunch = 0;
+/**
+ * One soft crunchy tick for row selection (box / Shift). `step` (row count) nudges the tone up a little.
+ * Fast streams are thinned out and get quieter, so dragging quickly sounds like a smooth scroll, not a buzz.
+ */
+export function crunch(step = 0, delay = 0) {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const c = ctx;
+  const now = performance.now() + delay * 1000;
+  const gap = now - lastCrunch;
+  if (gap < 28) return;
+  lastCrunch = now;
+  const busy = gap < 70 ? 0.55 : 1; // rapid ticks are quieter
+  const t = c.currentTime + delay;
+  const out = c.createGain();
+  out.gain.value = 0.9 * busy;
+  out.connect(sfxBus ?? master);
+  // two tiny grains a few ms apart — the "crunch" of a detent
+  for (const [i, at] of [0, 0.005 + Math.random() * 0.004].entries()) {
+    const len = 0.016;
+    const b = c.createBuffer(1, Math.floor(c.sampleRate * len), c.sampleRate);
+    const d = b.getChannelData(0);
+    for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * (1 - j / d.length) ** 3;
+    const n = c.createBufferSource();
+    n.buffer = b;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = (i ? 3200 : 1900) + Math.min(step, 30) * 35 + Math.random() * 300;
+    f.Q.value = 1.1;
+    const g = c.createGain();
+    g.gain.value = i ? 0.09 : 0.14;
+    n.connect(f).connect(g).connect(out);
+    n.start(t + at);
+  }
+  // a faint low body so it isn't only hiss
+  const o = c.createOscillator();
+  o.type = 'sine';
+  o.frequency.value = 180 + Math.min(step, 30) * 4;
+  const og = c.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.035, t + 0.002);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+  o.connect(og).connect(out);
+  o.start(t);
+  o.stop(t + 0.035);
+}

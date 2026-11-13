@@ -40,7 +40,7 @@ import {
   type World,
 } from '../engine/world';
 import { act } from '../store';
-import { confetti, glitchTakeover } from '../ui/battleEnd';
+import { GLITCH_TOTAL, confetti, glitchTakeover } from '../ui/battleEnd';
 import { centerOf, chroma, createAim, flashScreen, ring, shake, slash, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
@@ -343,8 +343,10 @@ export function Arena({ w }: { w: World }) {
               {teamErr && <div className="error">Team not ready: {teamErr}. Go to the Hangar.</div>}
             </div>
             <div style={{ flex: 1 }}>
-              <h3>Your team</h3>
-              <div className="row" style={{ gap: 14 }}>
+              <h3>
+                Your deck <span className="muted">· {myTeam.length} robots</span>
+              </h3>
+              <div className="lobby-deck">
                 {myTeam.map((r) => (
                   <RobotCard key={r.uid} modelId={r.modelId} durability={r.durability} />
                 ))}
@@ -508,12 +510,13 @@ export function Arena({ w }: { w: World }) {
       ring(c.x, c.y, 300, '#ff3b4e');
       sparks(c.x, c.y, 7, { core: true });
       await sleep(320);
+      // glitches pour out of the Core, cover the screen and cut to black; DEFEAT then appears on the black screen
       endFx.current = glitchTakeover(c.x, c.y);
       sfx('glitch-spread');
-      await sleep(1100);
+      await sleep(1450);
       sfx('shutdown');
+      await sleep(GLITCH_TOTAL - 1450 + 250);
       jingle('defeat');
-      await sleep(400);
     } else {
       sfx('fanfare', { volume: 0.6 });
       await sleep(700);

@@ -1104,7 +1104,8 @@ details[open] > summary::before {
 /* ---------- ангар ---------- */
 .slots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  /* a deck is up to 15 robots: 3 rows of 5 */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 14px 0 8px;
 }
@@ -4011,7 +4012,9 @@ button.pick {
   animation: end-in 0.35s steps(6);
 }
 .end-overlay.lose {
-  background: radial-gradient(circle at 50% 40%, #1a050a99, #050409cc);
+  /* the glitch has already cut the screen to black — DEFEAT sits on clean black */
+  background: #050409;
+  animation: none;
 }
 @keyframes end-in {
   from {
@@ -4154,4 +4157,11 @@ button.pick {
   .robot-sprite .rs-b {
     opacity: 0;
   }
+}
+
+/* лобби арены: колода тоже 3 ряда по 5 */
+.lobby-deck {
+  display: grid;
+  grid-template-columns: repeat(5, max-content);
+  gap: 12px;
 }

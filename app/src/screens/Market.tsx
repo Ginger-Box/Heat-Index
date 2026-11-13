@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { winRate } from '../engine/pricing';
 import { CLASSES, CLASS_HELP, CLASS_ICON, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
 import { PLAYER_ID, actualRelevance, buy, getManager, quote, refPrice, robotsOf, type World } from '../engine/world';
-import { sfx } from '../audio';
+import { crunch, sfx } from '../audio';
 import { act, worldVersion } from '../store';
 import { setCursorMode } from '../ui/fx';
 import { COST_COLOR, ClassTag, Cr, Delta, Glitch, RobotCard, Spark, Tip } from '../ui/common';
@@ -164,7 +164,7 @@ export function Market({ w }: { w: World }) {
       setCursorMode('scan', `SCAN ×${count}`);
       // a ratchet tick for every row the box gains or loses; the pitch follows the count
       if (count !== lastCount) {
-        sfx('ui-scroll', { rate: 0.85 + Math.min(count, 28) * 0.03 });
+        crunch(count);
         lastCount = count;
       }
     };
@@ -588,10 +588,10 @@ function CardPeek({ modelId, children }: { modelId: string; children: React.Reac
 
 type Row = ReturnType<typeof computeRows>[number];
 
-/** A run of ratchet ticks (Shift-range selection): one per row, rising in pitch, at most 14 audible ticks. */
+/** A quick run of soft crunches for a Shift-range selection: one per row (at most 10), tone rising a little. */
 function ratchet(rows: number) {
-  const n = Math.min(rows, 14);
-  for (let i = 0; i < n; i++) sfx('ui-scroll', { delay: 0.012 + i * 0.026, rate: 0.85 + i * 0.045 });
+  const n = Math.min(rows, 10);
+  for (let i = 0; i < n; i++) crunch(i, 0.01 + i * 0.034);
 }
 
 function computeRows(w: World) {
