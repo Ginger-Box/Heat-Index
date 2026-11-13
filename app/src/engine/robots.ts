@@ -146,4 +146,6 @@ export interface Robot {
   uid: string; // "<model>#<serial>"
   modelId: string;
   durability: number;
+  /** battle record — wins make a veteran (engine/veteran.ts) */
+  vet?: { b: number; w: number };
 }

@@ -27,8 +27,9 @@ import {
   type Target,
   type Unit,
 } from '../engine/battle';
-import { ECON, battleReward } from '../engine/pricing';
-import { CLASS_HELP, CLASS_ICON, CLASS_LABEL, maxDurability, model } from '../engine/robots';
+import { DIVISIONS, KING_TITLE, divisionPrize } from '../engine/league';
+import { CLASS_HELP, CLASS_ICON, CLASS_LABEL, maxDurability, model, type RobotClass } from '../engine/robots';
+import { VET_NAME, vetRank, vetStars } from '../engine/veteran';
 import { teamError } from '../engine/team';
 import {
   PLAYER_ID,
@@ -39,7 +40,11 @@ import {
   selectDeck,
   getManager,
   pickOpponentForPlayer,
+  divisionTeams,
+  leagueOf,
+  playerReward,
   sideTeamValues,
+  type Manager,
   teamOf,
   type World,
 } from '../engine/world';
@@ -57,6 +62,15 @@ interface Fight {
   st: BattleState;
   durBefore: Record<string, number>;
   eloBefore: number;
+  /** veteran rank of each of your robots before the battle */
+  rankBefore?: Record<string, number>;
+}
+
+/** What the league did after a battle: a division won (promotion) or the crown. */
+interface Promo {
+  div: number;
+  prize: number;
+  crowned: boolean;
 }
 
 interface Float {
@@ -80,8 +94,9 @@ interface AimState {
   onCancel: () => void;
 }
 
-/** How often the Arena opponent plays a random reasonable move instead of the best one (easier demo opponents). */
-const OPP_SLOPPY = 0.2;
+/** The opponent's class(es) as a short label: "Armor + Repair". */
+const classesOf = (m: Pick<Manager, 'focus' | 'focus2' | 'div'>) =>
+  [m.focus, (m.div ?? 0) >= 2 ? m.focus2 : undefined].filter(Boolean) as RobotClass[];
 
 const coreKey = (side: number) => `core-${side}`;
 const keyOf = (side: number, to: string | 'core') => (to === 'core' ? coreKey(side) : to);
@@ -199,8 +214,11 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     fresh: boolean; // just finished: show it as the full-screen end overlay
     st: BattleState;
     oppName: string;
+    oppId: string;
     durBefore: Record<string, number>;
     eloBefore: number;
+    rankBefore: Record<string, number>;
+    promo?: Promo;
   }>(null);
   const alive = useRef(true);
   const fid = useRef(0);
@@ -337,7 +355,10 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
 
   const myTeam = teamOf(w, me);
   const teamErr = teamError(myTeam);
-  const opp = tutorial ? { ...getManager(w, oppId), name: 'Training Bot', elo: 0, focus: undefined } : getManager(w, oppId);
+  const opp = tutorial
+    ? { ...getManager(w, oppId), name: 'Training Bot', elo: 0, focus: undefined, focus2: undefined, div: 0 }
+    : getManager(w, oppId);
+  const oppDiv = DIVISIONS[opp.div ?? 0];
 
   // training: start the scripted fight right away (robots made just for it, not from your Hangar)
   useEffect(() => {
@@ -409,23 +430,33 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
         )}
         <div className="panel">
           <h2>Arena</h2>
+          <LeagueLadder w={w} onPick={(id) => setOppId(id)} current={oppId} />
           <div className="row" style={{ alignItems: 'flex-start', gap: 24 }}>
             <div>
               <h3>Opponent</h3>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{opp.name}</div>
-              <div className="muted">
-                ELO {opp.elo} · {STRATEGY_LABEL[opp.strategy]}
+              <div style={{ fontSize: 22, fontWeight: 700 }}>
+                {opp.name}
+                {leagueOf(w).beaten.includes(opp.id) && <span className="up" style={{ fontSize: 13 }}> ✔ beaten</span>}
               </div>
-              {opp.focus && (
-                <div style={{ marginTop: 6 }} title={CLASS_HELP[opp.focus]}>
-                  Plays the class:{' '}
-                  <b style={{ color: 'var(--cyan)' }}>
-                    {CLASS_ICON[opp.focus]} {CLASS_LABEL[opp.focus]}
-                  </b>
+              <div className="muted">
+                <span style={{ color: oppDiv.color }}>{oppDiv.name}</span> · ELO {opp.elo} · {STRATEGY_LABEL[opp.strategy]}
+              </div>
+              {classesOf(opp).length > 0 && (
+                <div style={{ marginTop: 6 }} title={classesOf(opp).map((c) => CLASS_HELP[c]).join(' ')}>
+                  {classesOf(opp).length > 1 ? 'Plays the combo: ' : 'Plays the class: '}
+                  {classesOf(opp).map((c, i) => (
+                    <b key={c} style={{ color: 'var(--cyan)' }}>
+                      {i ? ' + ' : ''}
+                      {CLASS_ICON[c]} {CLASS_LABEL[c]}
+                    </b>
+                  ))}
                 </div>
               )}
+              <div className="muted" style={{ marginTop: 4 }}>
+                Purse ×{oppDiv.purse} · deck up to {oppDiv.cap} energy
+              </div>
               <div className="row" style={{ marginTop: 10 }}>
-                <button onClick={() => setOppId(pickOpponentForPlayer(w).id)}>Another opponent</button>
+                <button onClick={() => setOppId(pickOpponentForPlayer(w, oppId).id)}>Another opponent</button>
                 <button
                   className="primary"
                   disabled={!!teamErr || !!teamError(teamOf(w, opp))}
@@ -433,7 +464,8 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
                     const seed = (w.tick * 7919 + w.hour * 104729 + Date.now()) % 2 ** 31;
                     const st = createBattle(myTeam, teamOf(w, opp), seed);
                     const durBefore = Object.fromEntries(myTeam.map((r) => [r.uid, r.durability]));
-                    setFight({ oppId, st, durBefore, eloBefore: me.elo });
+                    const rankBefore = Object.fromEntries(myTeam.map((r) => [r.uid, vetRank(r)]));
+                    setFight({ oppId, st, durBefore, eloBefore: me.elo, rankBefore });
                     setView(st);
                     setCaption('Your turn');
                     setResult(null);
@@ -473,7 +505,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
                         .map((u) => w.robots[u])
                         .filter(Boolean)
                         .map((r) => (
-                          <RobotCard key={r.uid} modelId={r.modelId} durability={r.durability} />
+                          <RobotCard key={r.uid} modelId={r.modelId} durability={r.durability} vet={r.vet} />
                         ))}
                     </div>
                   ) : (
@@ -661,8 +693,24 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
       return;
     }
     const f = fightRef.current!;
-    act((w) => applyMatch(w, PLAYER_ID, f.oppId, final));
-    setResult({ fresh: true, st: final, oppName: opp.name, durBefore: f.durBefore, eloBefore: f.eloBefore });
+    let promo: Promo | undefined;
+    act((w) => {
+      const L = leagueOf(w);
+      const before = { div: L.div, crowns: L.crowns };
+      applyMatch(w, PLAYER_ID, f.oppId, final);
+      if (L.div > before.div) promo = { div: before.div, prize: divisionPrize(before.div, before.crowns), crowned: false };
+      else if (L.crowns > before.crowns) promo = { div: L.div, prize: divisionPrize(L.div, before.crowns), crowned: true };
+    });
+    setResult({
+      fresh: true,
+      st: final,
+      oppName: opp.name,
+      oppId: f.oppId,
+      durBefore: f.durBefore,
+      eloBefore: f.eloBefore,
+      rankBefore: f.rankBefore ?? {},
+      promo,
+    });
     setFight(null);
     setView(null);
     setBusy(false);
@@ -864,7 +912,8 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     await sleep(700);
     let cur = fightRef.current!.st;
     // opponents in the demo are a bit sloppy: about one move in five is not the best one
-    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: tutorial ? 0.7 : OPP_SLOPPY }, dur);
+    // lower leagues play sloppier (Scrap: 4 moves in 10 are not the best one; Apex: always the best)
+    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: tutorial ? 0.7 : oppDiv.sloppy }, dur);
     for (const a of plan) {
       if (!alive.current || cur.winner !== undefined) return;
       const uid = a.t === 'deploy' ? a.uid : a.t === 'attack' ? a.from : a.t === 'vent' ? a.uid : null;
@@ -1068,7 +1117,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
                 ].join(' ')}
                 onPointerDown={side === 0 ? (e) => startAttackAim(e, u) : undefined}
               >
-                <RobotCard modelId={u.modelId} hp={Math.max(0, u.hp)} token atkBonus={u.chargeBonus} />
+                <RobotCard modelId={u.modelId} hp={Math.max(0, u.hp)} token atkBonus={u.chargeBonus} vet={w.robots[u.uid]?.vet} />
                 <HeatBar u={u} />
                 {isGuard(u) && (
                   <span className="b-badge guard" title="Guard: enemies must attack it first">
@@ -1137,8 +1186,8 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
             <div className="b-opp">
               <b>{opp.name}</b>
               <small className="muted">
-                ELO {opp.elo}
-                {opp.focus ? ` · ${CLASS_LABEL[opp.focus]}` : ''}
+                {tutorial ? 'Training' : oppDiv.name}
+                {classesOf(opp).length ? ` · ${classesOf(opp).map((c) => CLASS_LABEL[c]).join(' + ')}` : ''}
               </small>
             </div>
             <div className="b-backs" title={`${theirs.hand.length} cards in hand`}>
@@ -1170,6 +1219,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
                     <RobotCard
                       modelId={md.id}
                       durability={w.robots[uid]?.durability}
+                      vet={w.robots[uid]?.vet}
                       selected={handSel === uid}
                       className={can ? 'playable' : 'dim'}
                       onClick={can ? () => setHandSel(handSel === uid ? null : uid) : undefined}
@@ -1242,20 +1292,84 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
   );
 }
 
+/** The Pit League: 4 divisions, your progress in the current one; click a team of your division to face it. */
+function LeagueLadder({ w, onPick, current }: { w: World; onPick: (id: string) => void; current: string }) {
+  const L = leagueOf(w);
+  return (
+    <>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <div>
+          <b>The Pit League</b>{' '}
+          <span className="muted">
+            · beat every team of your division once to move up · higher leagues pay a bigger purse
+          </span>
+        </div>
+        {L.crowns > 0 && (
+          <b className="league-crown">
+            👑 {KING_TITLE} ×{L.crowns}
+          </b>
+        )}
+      </div>
+      <div className="league">
+        {DIVISIONS.map((d, di) => {
+          const state = di < L.div ? 'done' : di === L.div ? 'current' : 'locked';
+          return (
+            <div key={d.id} className={`league-div ${state}`} style={{ ['--dc' as string]: d.color }}>
+              {state === 'current' && <span className="league-tag">YOU</span>}
+              {state === 'done' && <span className="league-tag">WON</span>}
+              <h4>
+                {state === 'locked' ? '🔒 ' : ''}
+                {d.name}
+              </h4>
+              <div className="lt">
+                {d.style} · deck ≤{d.cap} · purse ×{d.purse} · prize {d.prize} CR
+              </div>
+              {divisionTeams(w, di).map((t) => {
+                const beaten = di < L.div || (di === L.div && L.beaten.includes(t.id));
+                return (
+                  <div
+                    key={t.id}
+                    className={`league-team ${beaten ? 'beaten' : ''}`}
+                    style={state === 'current' ? { cursor: 'var(--cur-pointer)', fontWeight: t.id === current ? 800 : 400 } : undefined}
+                    onClick={state === 'current' ? () => onPick(t.id) : undefined}
+                    title={state === 'current' ? 'Face this team' : undefined}
+                  >
+                    <span>
+                      {t.id === current && state === 'current' ? '▶ ' : ''}
+                      {t.name}
+                    </span>
+                    <span className="cls">{classesOf(t).map((c) => CLASS_ICON[c]).join(' + ')}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function ResultPanel({
   w,
   st,
   oppName,
+  oppId,
   durBefore,
   eloBefore,
+  rankBefore,
+  promo,
   onClose,
   bare,
 }: {
   w: World;
   st: BattleState;
   oppName: string;
+  oppId: string;
   durBefore: Record<string, number>;
   eloBefore: number;
+  rankBefore: Record<string, number>;
+  promo?: Promo;
   onClose: () => void;
   /** inside the end overlay: no title row (the overlay has its own) */
   bare?: boolean;
@@ -1263,7 +1377,7 @@ function ResultPanel({
   const me = getManager(w, PLAYER_ID);
   const res = st.winner === null ? 'Draw' : st.winner === 0 ? 'Victory!' : 'Defeat';
   const values = sideTeamValues(st);
-  const reward = battleReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0, ECON.playerPurseRate);
+  const reward = playerReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0, getManager(w, oppId));
   const uids = Object.keys(durBefore);
   return (
     <div className="panel" style={{ borderColor: st.winner === 0 ? 'var(--green)' : 'var(--line)' }}>
@@ -1281,6 +1395,13 @@ function ResultPanel({
         Core: {st.sides[0].core} : {st.sides[1].core} · Reward <span className="cr">+{reward} CR</span> · ELO {eloBefore} →{' '}
         <b>{me.elo}</b>
       </p>
+      {promo && (
+        <div className="promo-banner">
+          {promo.crowned
+            ? `👑 ${KING_TITLE}! You beat the whole Apex League · +${promo.prize} CR`
+            : `▲ ${DIVISIONS[promo.div].name} won · +${promo.prize} CR · welcome to the ${DIVISIONS[promo.div + 1].name}`}
+        </div>
+      )}
       <h3>Robot wear</h3>
       <div className="row" style={{ gap: 18 }}>
         {uids.map((u) => {
@@ -1295,6 +1416,11 @@ function ResultPanel({
                 {before} → {now} {loss ? `(−${loss})` : '(no loss)'}
                 {st.wear[u]?.overheated ? ' · overheated' : ''}
               </small>
+              {w.robots[u] && vetRank(w.robots[u]) > (rankBefore[u] ?? 0) && (
+                <div className="vet-up">
+                  {vetStars(vetRank(w.robots[u]))} {VET_NAME[vetRank(w.robots[u])]}!
+                </div>
+              )}
             </div>
           );
         })}

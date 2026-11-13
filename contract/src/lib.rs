@@ -45,6 +45,14 @@ const REWARD_MAX_PCT: u128 = 25;
 const MAX_REWARD: u128 = 400;
 /// One battle result per account per this many milliseconds (a real battle takes minutes).
 const BATTLE_COOLDOWN_MS: u64 = 30_000;
+/// Veteran ranks (same as the game's engine/veteran.ts): wins needed for ★ / ★★ / ★★★, and how much more a broker
+/// may pay for a robot of that rank (% of the normal sell limit).
+const VET_WINS: [u32; 3] = [3, 8, 15];
+const VET_PRICE_PCT: [u128; 4] = [100, 115, 135, 160];
+
+fn vet_rank(wins: u32) -> usize {
+    VET_WINS.iter().filter(|&&w| wins >= w).count()
+}
 
 fn model_cost(model_id: &str) -> u32 {
     MODELS
@@ -71,6 +79,7 @@ enum Key {
     OwnedSet { account_hash: Vec<u8> },
     OwnerKeys,
     LastBattle,
+    Records,
 }
 
 /// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
@@ -100,6 +109,16 @@ pub struct Player {
     pub registered_at_ms: u64,
 }
 
+/// A robot's battle record: every battle it fought on-chain and how many of them its team won.
+/// Wins make a robot a veteran (★ 3, ★★ 8, ★★★ 15), and brokers pay more for veterans.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Default)]
+pub struct Record {
+    pub battles: u32,
+    pub wins: u32,
+    pub rank: u8,
+}
+
 /// One robot's wear after a battle, as reported by the client.
 #[near(serializers = [json])]
 pub struct Wear {
@@ -113,6 +132,8 @@ pub struct TokenView {
     pub token_id: String,
     pub owner_id: Option<AccountId>,
     pub metadata: Option<Robot>,
+    /// the robot's battle record (veteran rank); none for credits and for robots that never fought
+    pub record: Option<Record>,
 }
 
 #[near(contract_state)]
@@ -135,11 +156,13 @@ pub struct Contract {
     created_this_hour: u32,
     /// when each player last recorded a battle (rate limit)
     last_battle: LookupMap<AccountId, u64>,
+    /// robot token id -> battle record (veterans)
+    records: LookupMap<String, Record>,
 }
 
-/// State layout of v0.2 (before the on-chain price checks) — used once by `migrate`.
+/// State layout of v0.3 (before veteran records) — used once by `migrate`.
 #[near(serializers = [borsh])]
-struct ContractV2 {
+struct ContractV3 {
     owner_id: AccountId,
     balances: LookupMap<String, u128>,
     supply: LookupMap<String, u128>,
@@ -152,6 +175,7 @@ struct ContractV2 {
     owner_keys: LookupMap<String, AccountId>,
     hour_bucket: u64,
     created_this_hour: u32,
+    last_battle: LookupMap<AccountId, u64>,
 }
 
 fn bal_key(token_id: &str, account: &AccountId) -> String {
@@ -183,14 +207,15 @@ impl Contract {
             hour_bucket: 0,
             created_this_hour: 0,
             last_battle: LookupMap::new(Key::LastBattle),
+            records: LookupMap::new(Key::Records),
         }
     }
 
-    /// One-off upgrade from v0.2: keeps all balances, robots and players, adds the battle rate limit.
+    /// One-off upgrade from v0.3: keeps all balances, robots and players, adds the robots' battle records.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: ContractV2 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.2 state"));
+        let old: ContractV3 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.3 state"));
         Self {
             owner_id: old.owner_id,
             balances: old.balances,
@@ -204,7 +229,8 @@ impl Contract {
             owner_keys: old.owner_keys,
             hour_bucket: old.hour_bucket,
             created_this_hour: old.created_this_hour,
-            last_battle: LookupMap::new(Key::LastBattle),
+            last_battle: old.last_battle,
+            records: LookupMap::new(Key::Records),
         }
     }
 
@@ -327,7 +353,8 @@ impl Contract {
         let max_d = max_durability(&r.model_id) as u128;
         let d = (r.durability as u128).min(max_d);
         // wear factor 15% … 100%, like the game's durabilityFactor (which is never above the linear one)
-        let limit = base_price(&r.model_id) * SELL_MAX_PCT * (15 * max_d + 85 * d) / (100 * 100 * max_d) + 1;
+        let vet = VET_PRICE_PCT[self.records.get(&token_id).map(|x| x.rank as usize).unwrap_or(0)];
+        let limit = base_price(&r.model_id) * SELL_MAX_PCT * vet * (15 * max_d + 85 * d) / (100 * 100 * 100 * max_d) + 1;
         require!(price.0 <= limit, "Price is above what any broker would pay for this robot");
         self.burn_robot(&who, &token_id, "sold to a broker");
         self.mint_credits(&who, price.0, "robot sold");
@@ -378,6 +405,18 @@ impl Contract {
             require!(w.durability <= r.durability, "Durability can only go down in a battle");
             r.durability = w.durability;
             self.robots.insert(w.token_id.clone(), r);
+            // the robot's battle record: a win counts for every robot that fought
+            let mut rec = self.records.get(&w.token_id).cloned().unwrap_or_default();
+            rec.battles += 1;
+            if result == 1 {
+                rec.wins += 1;
+            }
+            let rank = vet_rank(rec.wins) as u8;
+            if rank > rec.rank {
+                event("heat_index", "1.0.0", "veteran", json!([{ "account_id": who, "token_id": w.token_id, "rank": rank, "wins": rec.wins }]));
+            }
+            rec.rank = rank;
+            self.records.insert(w.token_id.clone(), rec);
         }
         if reward.0 > 0 {
             self.mint_credits(&who, reward.0, "battle reward");
@@ -456,12 +495,13 @@ impl Contract {
             .into_iter()
             .map(|t| {
                 if t == CREDITS {
-                    return Some(TokenView { token_id: t, owner_id: None, metadata: None });
+                    return Some(TokenView { token_id: t, owner_id: None, metadata: None, record: None });
                 }
                 self.robots.get(&t).map(|r| TokenView {
                     token_id: t.clone(),
                     owner_id: Some(r.owner_id.clone()),
                     metadata: Some(r.clone()),
+                    record: self.records.get(&t).cloned(),
                 })
             })
             .collect()
@@ -479,6 +519,7 @@ impl Contract {
                     token_id: t.clone(),
                     owner_id: Some(r.owner_id.clone()),
                     metadata: Some(r.clone()),
+                    record: self.records.get(t).cloned(),
                 })
             })
             .collect()
@@ -565,6 +606,7 @@ impl Contract {
         self.sub(token_id, from, 1);
         self.change_supply(token_id, -1);
         self.robots.remove(token_id);
+        self.records.remove(token_id);
         self.untrack(from, token_id);
         event("nep245", "1.0.0", "mt_burn", json!([{ "owner_id": from, "token_ids": [token_id], "amounts": ["1"], "memo": memo }]));
     }
@@ -696,6 +738,27 @@ mod tests {
     fn reward_is_capped() {
         let (mut c, _) = setup("hal.testnet");
         c.record_battle("npc1".into(), 1, U128(2_000), 1, vec![]);
+    }
+
+    #[test]
+    fn veterans_earn_rank_and_price() {
+        let (mut c, ids) = setup("jon.testnet");
+        let volt = ids[5].clone(); // Volt-7, cost 3, base 100
+        for i in 0..8u64 {
+            ctx_at("jon.testnet", 1_000 + i * 31_000);
+            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }]);
+        }
+        let rec = c.mt_token(vec![volt.clone()])[0].as_ref().unwrap().record.clone().unwrap();
+        assert_eq!((rec.battles, rec.wins, rec.rank), (8, 8, 2));
+        // a normal Volt sells for at most 240 at full durability; an Elite (★★) for up to 135% of that
+        c.sell_robot(volt, U128(320), "magpie".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "above what any broker would pay")]
+    fn rookies_get_no_veteran_price() {
+        let (mut c, ids) = setup("kim.testnet");
+        c.sell_robot(ids[5].clone(), U128(320), "magpie".into());
     }
 
     #[test]

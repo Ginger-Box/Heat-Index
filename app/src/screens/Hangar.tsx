@@ -187,6 +187,7 @@ export function Hangar({ w }: { w: World }) {
                   <RobotCard
                     modelId={r.modelId}
                     durability={r.durability}
+                    vet={r.vet}
                     onClick={() => remove(r.uid)}
                     badge={<span className="muted">✕</span>}
                   />
@@ -260,6 +261,7 @@ export function Hangar({ w }: { w: World }) {
               <RobotCard
                 modelId={r.modelId}
                 durability={r.durability}
+                vet={r.vet}
                 onClick={r.durability > 0 ? () => place(r.uid) : undefined}
                 badge={r.loaner ? <span title="Arena loaner robot">♻</span> : null}
               />

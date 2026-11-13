@@ -34,7 +34,8 @@ A robot's market price follows its **relevance** (how often it wins and how many
 | Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
 | Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
-| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 9 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
+| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 11 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
 | Email login → a NEAR account owned by the player's NEAR Auth (MPC) key | **on-chain** (account factory in the contract) | `account_for_owner_key` |
 | The 3 brokers' cash and stock, the 12 NPC teams, hourly prices, relevance, the battles themselves | **simulated in the browser** (deterministic engine in `app/src/engine/`) | — |
 
@@ -99,8 +100,19 @@ battles ──► wins / picks ──► relevance ──► price
 - **Battle purse** = a share of both decks' value (2.5% between NPCs, 6% in the player's battles; the winner takes
   75%), so stakes grow with what you bring.
 - **3 AI brokers** with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
-  a scrap dealer), each with a face and a voice. **12 NPC teams**, each focused on a class, with their own strategies
-  (hype / contrarian / thrifty).
+  a scrap dealer), each with a face and a voice. **12 NPC teams** with their own strategies (hype / contrarian /
+  thrifty), playing in **the Pit League** (below).
+- **The Pit League** — the player's progression. Four divisions of three teams: *Scrap* (one class, decks ≤ 24
+  energy, a sloppy AI) → *Chrome* (one class, ≤ 30) → *Neon* (two-class combos, ≤ 36) → *Apex* (top combos at the
+  full 42, a sharp AI; the boss is Armor guards kept alive by Repair medics). Beat every team of your division once
+  to move up; each division pays a bigger purse (×1 → ×2) and a prize, and winning the Apex makes you *King of the
+  Pit*. NPC teams play inside their league; a league tops up a team that fell far below its level with loaner robots
+  that never reach the market, so each division keeps its strength (`app/scripts/league.ts` checks the decks and
+  win rates per division).
+- **Veterans** — robots remember their battles. Wins make a robot a Veteran ★ / Elite ★★ / Legend ★★★: brokers pay
+  +15 / 35 / 60% for it, and Elite and Legend robots enter battle with +1 / +2 HP. A worn veteran is a real choice:
+  repair it, or cash in the provenance. The record lives on the robot's NEAR token, and the contract allows the
+  higher sale price only for the rank it has recorded itself.
 - Every trade, repair and battle goes into the world's ledger; the player's side of it is written on NEAR.
 - All tuning was done with simulations in `app/scripts/` (economy over a week on several worlds, class balance
   matrix, payoff of each robot). Numbers are in [DEVLOG.md](DEVLOG.md).

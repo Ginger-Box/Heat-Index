@@ -1,3 +1,4 @@
+import { VET_NAME, vetPerks, vetRank, vetStars, winsToNext, type VetRecord } from '../engine/veteran';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { sfx } from '../audio';
 import { AttackIcon, EnergyIcon, HpIcon } from './icons';
@@ -34,7 +35,10 @@ export function RobotCard(props: {
   token?: boolean;
   /** attack bonus shown on the token (Charge on its deploy turn) */
   atkBonus?: number;
+  /** battle record — veterans show their stars */
+  vet?: VetRecord;
 }) {
+  const rank = vetRank(props);
   const md = model(props.modelId);
   const broken = props.durability !== undefined && props.durability <= 0;
   const ab = md.ability;
@@ -91,12 +95,27 @@ export function RobotCard(props: {
         <div className="muted" style={{ marginTop: 6 }}>
           {CLASS_LABEL[classOf(md.id)]} class: {CLASS_HELP[classOf(md.id)]}
         </div>
+        {props.vet && (
+          <div className="tt-vet" style={{ marginTop: 6 }}>
+            <b className={`vet-r${rank}`}>
+              {rank ? `${vetStars(rank)} ${VET_NAME[rank]}` : 'Rookie'}
+            </b>{' '}
+            · {props.vet.w} wins in {props.vet.b} battles
+            {winsToNext(props) !== null ? ` · ${winsToNext(props)} more to ${VET_NAME[rank + 1]}` : ''}
+            <div className="muted">{rank ? vetPerks(rank) : 'Wins make a veteran: brokers pay more, Elite and Legend get extra HP.'}</div>
+          </div>
+        )}
         {props.durability !== undefined && (
           <div className="muted" style={{ marginTop: 6 }}>
             Durability {props.durability}/{maxDurability(md.id)}: every battle −1, destroyed or overheated −1 more.
           </div>
         )}
       </div>
+      {rank > 0 && (
+        <div className={`vet-stars vet-r${rank}`} title={VET_NAME[rank]}>
+          {vetStars(rank)}
+        </div>
+      )}
       {props.token ? (
         <>
           <div className="art">

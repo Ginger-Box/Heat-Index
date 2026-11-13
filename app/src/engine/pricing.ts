@@ -1,6 +1,7 @@
 // PRICES. All broker pricing logic lives in this one file (the track asks for readable pricing rules).
 // The price explanation (explainPrice) is shown in a tooltip in the game.
 
+import { VET_PRICE, vetRank } from './veteran';
 import { durFrac, model, type Robot } from './robots';
 
 // ---------- economy parameters ----------
@@ -86,7 +87,7 @@ export const askPrice = (fair: number, style: BrokerStyle) => Math.round(fair * 
 
 /** A broker buys a working robot: fair price − discount, adjusted for durability. */
 export const bidPrice = (fair: number, style: BrokerStyle, r: Robot) =>
-  Math.round(fair * (1 - style.spread) * durabilityFactor(r));
+  Math.round(fair * (1 - style.spread) * durabilityFactor(r) * VET_PRICE[vetRank(r)]);
 
 /** Only the scrap dealer takes a broken robot. */
 export const scrapPrice = (fair: number) => Math.max(1, Math.round(fair * ECON.scrapShare));

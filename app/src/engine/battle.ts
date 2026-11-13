@@ -4,6 +4,7 @@
 
 import { Rng } from './rng';
 import { model, type Robot } from './robots';
+import { VET_HP, vetRank } from './veteran';
 
 export const CORE_HP = 20;
 export const BOARD_SLOTS = 5;
@@ -68,6 +69,8 @@ export interface BattleState {
   modelOf: Record<string, string>;
   /** whose robot: 0 or 1 (e.g. to value both teams for the battle purse) */
   sideOf: Record<string, number>;
+  /** extra max HP per robot (veterans: Elite +1, Legend +2) */
+  hpBonus?: Record<string, number>;
   wear: Record<string, WearInfo>;
   history: BattleEvent[];
   winner: number | null | undefined; // undefined — ongoing; null — draw
@@ -128,6 +131,7 @@ export function cloneLite(st: BattleState): BattleState {
     ],
     modelOf: st.modelOf,
     sideOf: st.sideOf,
+    hpBonus: st.hpBonus,
     wear: Object.fromEntries(Object.entries(st.wear).map(([k, v]) => [k, { ...v }])),
     history: [],
     winner: st.winner,
@@ -142,10 +146,13 @@ export function createBattle(teamA: Robot[], teamB: Robot[], seed: number): Batt
   const modelOf: Record<string, string> = {};
   const sideOf: Record<string, number> = {};
   const wear: Record<string, WearInfo> = {};
+  const hpBonus: Record<string, number> = {};
   const mkSide = (team: Robot[], extra: number, side: number): SideState => {
     for (const r of team) {
       modelOf[r.uid] = r.modelId;
       sideOf[r.uid] = side;
+      const bonus = VET_HP[vetRank(r)];
+      if (bonus) hpBonus[r.uid] = bonus;
       wear[r.uid] = { fielded: false, damaged: false, destroyed: false, overheated: false };
     }
     const deck = rng.shuffle(team.map((r) => r.uid));
@@ -158,6 +165,7 @@ export function createBattle(teamA: Robot[], teamB: Robot[], seed: number): Batt
     sides: [mkSide(teamA, 0, 0), mkSide(teamB, 1, 1)],
     modelOf,
     sideOf,
+    hpBonus,
     wear,
     history: [],
     winner: undefined,
@@ -310,8 +318,8 @@ export function applyAction(st: BattleState, a: Action, ev: BattleEvent[] | null
       pos,
       uid: a.uid,
       modelId: md.id,
-      hp: md.hp,
-      maxHp: md.hp,
+      hp: md.hp + (st.hpBonus?.[a.uid] ?? 0),
+      maxHp: md.hp + (st.hpBonus?.[a.uid] ?? 0),
       heat: 0,
       ready: ab?.kind === 'charge',
       offline: false,

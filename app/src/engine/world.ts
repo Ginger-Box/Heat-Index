@@ -20,8 +20,10 @@ import {
   type ModelStats,
 } from './pricing';
 import { Rng } from './rng';
-import { CLASSES, MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurability, model, type Robot, type RobotClass } from './robots';
-import { buildTeam, partialTeamError, teamError } from './team';
+import { MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurability, model, type Robot, type RobotClass } from './robots';
+import { buildTeam, partialTeamError, teamEnergy, teamError } from './team';
+import { DIVISIONS, KING_TITLE, NPC_SETUP, divisionPrize, type LeagueState } from './league';
+import { VET_NAME, vetRank, vetStars } from './veteran';
 
 export const PLAYER_ID = 'player';
 
@@ -35,8 +37,8 @@ export const playerHooks: {
   repair?: (r: OwnedRobot, cost: number) => void;
   match?: (st: BattleState, opponentId: string, result: 0 | 1 | 2, reward: number) => void;
 } = {};
-/** NPC decks are cheaper than the player's limit (42) — easier opponents for the demo. */
-export const NPC_DECK_COST = 28;
+/** NPC deck cost limit = their league's (Scrap 24 … Apex 42); the player's limit is always 42. */
+export const npcDeckCost = (m: Manager) => DIVISIONS[m.div ?? 0].cap;
 export const HOUSE = 'house'; // the broker's founders
 export const HOURS_PER_DAY = 12;
 export const MATCHES_PER_HOUR = 12;
@@ -57,6 +59,10 @@ export interface Manager {
   strategy: Strategy;
   careful: number; // AI battle style
   focus?: RobotClass; // the robot class this NPC plays (the player has none)
+  /** second class for the combo teams of the upper leagues (e.g. Armor + Repair) */
+  focus2?: RobotClass;
+  /** league division 0…3 (NPCs; the player's is in World.league) */
+  div?: number;
   credits: number;
   team: string[]; // uid robot uids — the deck that goes into battle (for the player = the active deck from decks)
   /** Player: 5 named decks; a robot can stand in one deck only. activeDeck — the one that goes into battle. */
@@ -159,6 +165,8 @@ export interface World {
   dayStartPrice: Record<string, number>;
   reportedToday: string[];
   seasons: SeasonResult[];
+  /** the player's climb through the Pit League */
+  league?: LeagueState;
 }
 
 export const dayOf = (w: World) => Math.floor(w.hour / HOURS_PER_DAY) + 1;
@@ -614,13 +622,22 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
       const r = w.robots[uid];
       if (!r || r.owner !== m.id || !st.wear[uid].fielded) continue;
       r.durability = Math.max(0, r.durability - wearLoss(st, uid, m.id === PLAYER_ID));
+      // veteran record: a win counts for every robot that fought
+      const rankBefore = vetRank(r);
+      r.vet = { b: (r.vet?.b ?? 0) + 1, w: (r.vet?.w ?? 0) + (res === 1 ? 1 : 0) };
+      const rank = vetRank(r);
+      if (m.id === PLAYER_ID && rank > rankBefore)
+        log(w, 'player', `${model(r.modelId).name} is now ${VET_NAME[rank]} ${vetStars(rank)}`);
       const ms = w.stats[r.modelId];
       ms.recent.push(res);
       if (ms.recent.length > ECON.recentWindow) ms.recent.shift();
       ms.games++;
       if (res === 1) ms.wins++;
     }
-    const reward = battleReward(teamValue[s], teamValue[1 - s], res, m.id === PLAYER_ID ? ECON.playerPurseRate : ECON.purseRate);
+    const reward =
+      m.id === PLAYER_ID
+        ? playerReward(teamValue[s], teamValue[1 - s], res, sides[1 - s])
+        : battleReward(teamValue[s], teamValue[1 - s], res, ECON.purseRate);
     m.credits += reward;
     if (m.id === PLAYER_ID) playerHooks.match?.(st, sides[1 - s].id, res === 1 ? 1 : res === 0 ? 0 : 2, reward);
     ledger(w, { kind: 'reward', from: 'arena', to: m.id, amount: reward });
@@ -651,10 +668,52 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     const opp = sides[1 - me];
     const txt = st.winner === null ? 'draw' : st.winner === me ? 'win' : 'loss';
     log(w, 'match', `Battle vs ${opp.name}: ${txt}`);
+    if (st.winner === me) leagueWin(w, opp);
   }
 }
 
+// ---------- the Pit League ----------
+
+/** The player's purse: the usual one × the opponent's league multiplier (the chain caps a reward at 400 CR). */
+export function playerReward(mine: number, theirs: number, res: number, opp: Manager): number {
+  return Math.min(400, Math.round(battleReward(mine, theirs, res, ECON.playerPurseRate) * DIVISIONS[opp.div ?? 0].purse));
+}
+
+export const leagueOf = (w: World): LeagueState => (w.league ??= { div: 0, beaten: [], crowns: 0 });
+export const divisionTeams = (w: World, div: number) => w.managers.filter((m) => m.id !== PLAYER_ID && (m.div ?? 0) === div);
+
+/** A win over a team of your division counts toward the climb; beat all of them to move up. */
+function leagueWin(w: World, opp: Manager) {
+  const L = leagueOf(w);
+  if ((opp.div ?? 0) !== L.div || L.beaten.includes(opp.id)) return;
+  L.beaten.push(opp.id);
+  const teams = divisionTeams(w, L.div);
+  if (!teams.every((t) => L.beaten.includes(t.id))) return;
+  const d = DIVISIONS[L.div];
+  const prize = divisionPrize(L.div, L.crowns);
+  getManager(w, PLAYER_ID).credits += prize;
+  ledger(w, { kind: 'reward', from: 'arena', to: PLAYER_ID, amount: prize, note: `${d.name} won` });
+  if (L.div < DIVISIONS.length - 1) {
+    L.div++;
+    log(w, 'season', `You won the ${d.name} (+${prize} CR) and move up to the ${DIVISIONS[L.div].name}!`);
+  } else {
+    L.crowns++;
+    log(w, 'season', `${L.crowns > 1 ? 'Crown defended' : `You beat the whole Apex League: ${KING_TITLE}!`} +${prize} CR.`);
+  }
+  L.beaten = [];
+}
+
 // ---------- NPC behaviour ----------
+
+/** Old saves (before the league): put the NPC teams into their divisions; the player starts at the bottom. */
+export function migrateLeague(w: World) {
+  NPC_SETUP.forEach((x, i) => {
+    const m = w.managers.find((mm) => mm.id === `npc${i + 1}`);
+    if (!m || m.div !== undefined) return;
+    Object.assign(m, { div: x.div, focus: x.focus, focus2: x.focus2 });
+  });
+  leagueOf(w);
+}
 
 const power = (modelId: string) => {
   const md = model(modelId);
@@ -663,8 +722,16 @@ const power = (modelId: string) => {
 
 function teamValue(w: World, m: Manager, rel: Record<string, number>) {
   const base = strategyValue(w, m, rel);
-  // Their own class comes first: an NPC builds its team around it
-  return (r: Robot) => base(r) * (m.focus && classOf(r.modelId) === m.focus ? 2 : 1);
+  // An NPC builds its deck around its class(es). Low leagues play one class strictly (basic robots fill the gaps);
+  // upper leagues mix two classes that work together (e.g. Armor guards + Repair medics).
+  const div = m.div ?? 0;
+  return (r: Robot) => {
+    const c = classOf(r.modelId);
+    const own = c === m.focus || (div >= 2 && c === m.focus2);
+    const k = own ? (div <= 1 ? 4 : 3) : c === 'none' ? (div <= 1 ? 0.6 : 0.4) : div <= 1 ? 0.1 : 0.3;
+    // the Apex League fields its strongest robots first
+    return (base(r) + (div >= 3 ? model(r.modelId).cost * 6 : 0)) * k;
+  };
 }
 
 function strategyValue(w: World, m: Manager, rel: Record<string, number>) {
@@ -718,10 +785,12 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     for (const r of owned()) if (durFrac(r) <= 0.6 && m.credits > 200) repair(w, m.id, r.uid);
   }
 
-  // 2a. Top up robots of their own class (want at least 8 working)
-  const focusModels = m.focus ? MODELS.filter((x) => classOf(x.id) === m.focus) : [];
-  const focusOwned = owned().filter((r) => r.durability > 0 && classOf(r.modelId) === m.focus).length;
-  if (m.focus && focusOwned < 8 && m.credits > 160) {
+  // 2a. Top up robots of their own class(es) (want at least 8 working; combo teams 10)
+  const cap = npcDeckCost(m);
+  const myClasses = [m.focus, (m.div ?? 0) >= 2 ? m.focus2 : undefined].filter(Boolean) as RobotClass[];
+  const focusModels = MODELS.filter((x) => myClasses.includes(classOf(x.id)) && x.cost <= Math.ceil(cap / 6));
+  const focusOwned = owned().filter((r) => r.durability > 0 && myClasses.includes(classOf(r.modelId))).length;
+  if (m.focus && focusOwned < (myClasses.length > 1 ? 10 : 8) && m.credits > 160) {
     const options = focusModels
       .filter((x) => countOwned(w, m, x.id) < MAX_SAME_MODEL)
       .map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
@@ -737,7 +806,8 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
   }
 
   // 2b. A deal by strategy (not every time; the rich always trade). More often within their own class.
-  const universe = m.focus && rng.next() < 0.6 ? focusModels : MODELS;
+  // low leagues buy only their own class; combo teams mostly their two classes
+  const universe = m.focus && rng.next() < ((m.div ?? 0) <= 1 ? 1 : 0.8) ? focusModels : MODELS;
   if (m.credits > 400 || rng.next() < 0.35) {
     if (m.strategy === 'hype') {
       const top = [...universe].sort((x, y) => rel[y.id] - rel[x.id]).slice(0, 4);
@@ -747,7 +817,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     } else if (m.strategy === 'contrarian') {
       // Sell what everyone overrates…
       for (const r of owned()) {
-        if (r.durability > 0 && rel[r.modelId] > 62 && rng.next() < 0.5) sell(w, m.id, r.uid);
+        if (r.durability > 0 && rel[r.modelId] > 62 && !m.team.includes(r.uid) && rng.next() < 0.5) sell(w, m.id, r.uid);
       }
       // ……and buy the most underrated: wins often but costs less than its base price
       const underrated = (id: string, price: number) => winRate(w.stats[id]) / (price / model(id).basePrice);
@@ -762,7 +832,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
   // 3. Build the team; if that fails, buy cheap robots
   let hasTeam = false;
   for (let guard = 0; guard < 12; guard++) {
-    const team = buildTeam(owned(), teamValue(w, m, rel), NPC_DECK_COST);
+    const team = buildTeam(owned(), teamValue(w, m, rel), cap);
     if (team) {
       m.team = team.map((r) => r.uid);
       hasTeam = true;
@@ -776,12 +846,18 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
       continue;
     }
     // Too few robots — buy the cheapest
-    const cheap = MODELS.filter((x) => x.cost <= 3 && countOwned(w, m, x.id) < MAX_SAME_MODEL)
+    // low leagues stay one-class: only their class or basic robots
+    const cheap = MODELS.filter(
+      (x) =>
+        x.cost <= 3 &&
+        countOwned(w, m, x.id) < MAX_SAME_MODEL &&
+        ((m.div ?? 0) >= 2 || myClasses.includes(classOf(x.id)) || classOf(x.id) === 'none'),
+    )
       .map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
       .filter((o) => o.offer && o.offer.price <= m.credits)
       .sort(
         (p, q) =>
-          Number(classOf(q.x.id) === m.focus) - Number(classOf(p.x.id) === m.focus) ||
+          Number(myClasses.includes(classOf(q.x.id))) - Number(myClasses.includes(classOf(p.x.id))) ||
           model(p.x.id).cost - model(q.x.id).cost ||
           p.offer!.price - q.offer!.price,
       );
@@ -801,15 +877,20 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
   if (hasTeam && m.credits > 450 && rng.next() < 0.6) {
     const team = owned().filter((r) => m.team.includes(r.uid));
     const cheapest = [...team].sort((x, y) => model(x.modelId).cost - model(y.modelId).cost)[0];
+    const room = cap - teamEnergy(team);
     if (cheapest) {
+      // only an upgrade that still fits the league's deck limit
       const cands = MODELS.filter(
-        (x) => x.cost > model(cheapest.modelId).cost && countOwned(w, m, x.id) < MAX_SAME_MODEL,
+        (x) =>
+          x.cost > model(cheapest.modelId).cost &&
+          x.cost - model(cheapest.modelId).cost <= room &&
+          countOwned(w, m, x.id) < MAX_SAME_MODEL,
       )
         .map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
         .filter((o) => o.offer && m.credits - o.offer.price >= 150)
         .sort(
           (p, q) =>
-            Number(classOf(q.x.id) === m.focus) - Number(classOf(p.x.id) === m.focus) ||
+            Number(myClasses.includes(classOf(q.x.id))) - Number(myClasses.includes(classOf(p.x.id))) ||
             q.x.cost - p.x.cost,
         );
       if (cands.length) buy(w, m.id, cands[0].offer!.broker.id, cands[0].x.id);
@@ -824,11 +905,43 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     for (const r of extra.slice(0, extra.length - 4)) sell(w, m.id, r.uid);
   }
 
+  // 4b. The league keeps its teams in shape: a deck far below the division's level gets sponsor robots
+  leagueSponsor(w, m, myClasses, rel);
+
   // 5. Sometimes NPCs invest in a broker in trouble
   if (m.credits > 500 && rng.next() < 0.05) {
     const poor = w.brokers.filter((b) => b.credits < 300).sort((x, y) => x.credits - y.credits)[0];
     if (poor) invest(w, m.id, poor.id, 150);
   }
+}
+
+/**
+ * League sponsorship: if an NPC's deck is broken or much cheaper than its division's limit (it lost too often and
+ * sold its robots), the league lends it robots of its classes. Sponsor robots are loaners — they can't be sold and
+ * are scrapped when broken — so they never reach the market; they only keep each division at its level.
+ */
+function leagueSponsor(w: World, m: Manager, classes: RobotClass[], rel: Record<string, number>) {
+  const cap = npcDeckCost(m);
+  const cur = teamOf(w, m);
+  if (!teamError(cur) && teamEnergy(cur) >= cap - 6) return;
+  const own = robotsOf(w, m.id).filter((r) => r.durability > 0);
+  const virtual: Robot[] = [];
+  for (const x of MODELS) {
+    if (!classes.includes(classOf(x.id)) && classOf(x.id) !== 'none') continue;
+    for (let i = countOwned(w, m, x.id); i < MAX_SAME_MODEL; i++)
+      virtual.push({ uid: `sponsor:${x.id}:${i}`, modelId: x.id, durability: maxDurability(x.id) });
+  }
+  const val = teamValue(w, m, rel);
+  // the team's own robots first, then sponsor robots; the deck is filled up to the league's limit
+  const team = buildTeam([...own, ...virtual], (r) => val(r) * (r.uid.startsWith('sponsor:') ? 0.9 : 1) + model(r.modelId).cost, cap);
+  if (!team) return;
+  m.team = team.map((r) => {
+    if (!r.uid.startsWith('sponsor:')) return r.uid;
+    const nr = mint(w, r.modelId, m.id);
+    nr.loaner = true;
+    ledger(w, { kind: 'mint', from: 'league', to: m.id, uid: nr.uid, amount: 0, note: 'league sponsor robot' });
+    return nr.uid;
+  });
 }
 
 // ---------- brokers: hour and day ----------
@@ -963,6 +1076,13 @@ function endHour(w: World) {
   snapshot(w, rel);
   if (w.hour % HOURS_PER_DAY === 0) {
     brokerDayEnd(w);
+    // league money: every NPC team gets its division's daily stipend
+    for (const m of w.managers) {
+      if (m.id === PLAYER_ID) continue;
+      const pay = DIVISIONS[m.div ?? 0].stipend;
+      m.credits += pay;
+      ledger(w, { kind: 'reward', from: 'league', to: m.id, amount: pay });
+    }
     w.dayStartPrice = Object.fromEntries(MODELS.map((x) => [x.id, Math.round(refPrice(w, x.id))]));
     w.reportedToday = [];
     if ((w.hour / HOURS_PER_DAY) % DAYS_PER_SEASON === 0) seasonEnd(w);
@@ -978,17 +1098,22 @@ export function findOpponent(pool: Manager[], me: Manager, r: Rng): Manager {
   return r.pick(near);
 }
 
-export function pickOpponentForPlayer(w: World): Manager {
-  const npcs = w.managers.filter((m) => m.id !== PLAYER_ID);
-  return withRng(w, (r) => findOpponent(npcs, getManager(w, PLAYER_ID), r));
+/** The player meets teams of their own division — first the ones not beaten yet on this climb. */
+export function pickOpponentForPlayer(w: World, exclude?: string): Manager {
+  const L = leagueOf(w);
+  const teams = divisionTeams(w, L.div);
+  const fresh = teams.filter((m) => !L.beaten.includes(m.id) && m.id !== exclude);
+  const pool = fresh.length ? fresh : teams.filter((m) => m.id !== exclude);
+  return withRng(w, (r) => r.pick(pool.length ? pool : teams));
 }
 
 /** One match between two NPC teams. */
 export function playNpcMatch(w: World) {
   const npcs = w.managers.filter((m) => m.id !== PLAYER_ID);
+  // NPCs play inside their league (a Scrap team would never face the Apex)
   const [a, b] = withRng(w, (r) => {
     const a = r.pick(npcs);
-    return [a, findOpponent(npcs, a, r)];
+    return [a, findOpponent(npcs.filter((x) => (x.div ?? 0) === (a.div ?? 0)), a, r)];
   });
   for (const m of [a, b]) {
     if (teamError(teamOf(w, m))) withRng(w, (r) => npcManage(w, m, r));
@@ -1015,20 +1140,6 @@ export function advanceHours(w: World, hours: number) {
 
 // ---------- creating the world ----------
 
-const NPC_TEAMS: [string, Strategy][] = [
-  ['Rusty Dogs', 'hype'],
-  ['Neon-17', 'contrarian'],
-  ['Syndicate Zero', 'hype'],
-  ['Steel Rats', 'thrifty'],
-  ['Night Shift', 'contrarian'],
-  ['Glitch', 'hype'],
-  ['Protocol Omega', 'thrifty'],
-  ['Chrome Hawks', 'contrarian'],
-  ['Short Circuit', 'thrifty'],
-  ['Byte Gang', 'hype'],
-  ['Sector 9', 'contrarian'],
-  ['Dead Pixel', 'thrifty'],
-];
 
 export const STARTER_TEAM = ['spark', 'scout', 'bolt', 'ram', 'welder', 'volt', 'wall', 'dozer', 'drone', 'cracker', 'dash', 'plate'];
 
@@ -1087,13 +1198,14 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
   for (const b of w.brokers) for (const x of MODELS) for (let i = 0; i < b.style.targetStock; i++) mint(w, x.id, b.id);
 
   withRng(w, (rng) => {
-    NPC_TEAMS.forEach(([name, strategy], i) => {
-      const focus = CLASSES[i % CLASSES.length];
+    NPC_SETUP.forEach(({ name, strategy, div, focus, focus2 }, i) => {
       const m: Manager = {
         id: `npc${i + 1}`,
         name,
         strategy,
         focus,
+        focus2,
+        div,
         careful: strategy === 'thrifty' ? 0.8 : strategy === 'hype' ? 0.2 : 0.5,
         credits: 300,
         team: [],
@@ -1105,9 +1217,12 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
       w.managers.push(m);
       let team: Robot[] | null = null;
       while (!team) {
-        const own = MODELS.filter((x) => classOf(x.id) === focus);
-        const pool = Array.from({ length: 22 }, (_, j) => mint(w, rng.pick(j < 12 ? own : MODELS).id, m.id));
-        team = buildTeam(pool, (r) => rng.next() + (classOf(r.modelId) === focus ? 1 : 0), NPC_DECK_COST);
+        const classes = div >= 2 && focus2 ? [focus, focus2] : [focus];
+        const own = MODELS.filter((x) => classes.includes(classOf(x.id)));
+        const basic = MODELS.filter((x) => classOf(x.id) === 'none');
+        const pool = Array.from({ length: 22 }, (_, j) => mint(w, rng.pick(j < 14 ? own : basic).id, m.id));
+        const value = teamValue(w, m, Object.fromEntries(MODELS.map((x) => [x.id, 50])));
+        team = buildTeam(pool, (r) => value(r) + rng.next(), DIVISIONS[div].cap);
         if (!team) for (const r of pool) delete w.robots[r.uid];
         else for (const r of pool) if (!team.includes(r)) delete w.robots[r.uid];
       }
@@ -1144,6 +1259,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
     b.dayStartEquity = brokerEquity(w, b);
     b.investedToday = 0;
   }
+  w.league = { div: 0, beaten: [], crowns: 0 };
   for (const m of w.managers) {
     m.elo = 1000;
     m.wins = m.losses = m.draws = 0;

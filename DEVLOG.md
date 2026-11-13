@@ -191,6 +191,27 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Brokers got faces (pixel portraits, names, bios, live remarks) and windows dressed like their owners; the training
   battle now starts right after the first login.
 
+### Progression: the Pit League and veterans (Nov 13, late night)
+- Playtest note: the battles felt good but nothing pulled the player forward. Added two progression systems.
+- **The Pit League**: the 12 NPC teams split into 4 divisions. Lower leagues play one class with cheap decks and a
+  sloppy AI; upper leagues play two-class combos at a higher deck cost with a sharper AI (Apex: Charge + Armor,
+  Shock + Armor, and the boss — Armor guards + Repair medics, the hardest wall to break). Beat every team of your
+  division to move up; purse ×1 → ×2 and a prize per division; the Apex makes you King of the Pit (defending the
+  crown pays less, so it can't be farmed). NPCs play inside their league and get a daily league stipend.
+- The first runs showed the NPC economy could starve a team (Apex decks fell to 13–18 energy, a Scrap team dropped
+  to 5 robots). Fix: a league "sponsor" lends a team loaner robots of its classes when its deck falls far below the
+  division's limit — loaners can't be sold and are scrapped when broken, so the market isn't flooded.
+- `scripts/league.ts`, a perfect-play AI with the starter deck (cost 23) vs each division after 3 and 7 days:
+  Scrap 92–100%, Chrome 75–98%, Neon 52–93%, Apex 30–70%; the Armor + Repair boss is the hardest (28–53%).
+  A human plays worse than this AI, so the lower leagues are a comfortable start and the Apex is a real wall.
+- **Veterans**: every robot keeps battles / wins; 3 / 8 / 15 wins → ★ / ★★ / ★★★. Brokers bid +15 / 35 / 60%,
+  Elite and Legend get +1 / +2 HP in battle. Stars on the cards, the record in the card tooltip, rank-ups in the
+  battle result.
+- **Contract v0.4**: `record_battle` keeps each robot token's record (battles, wins, rank) and emits a `veteran`
+  event on a rank-up; `sell_robot`'s price cap is raised only by the rank recorded on-chain; `mt_token` /
+  `mt_tokens_for_owner` return the record. 11 unit tests. Upgraded in place with a state migration; checked live with
+  the bot players (records appear on their tokens).
+
 ## Next
 - Card art.
 - README for judges, demo video.

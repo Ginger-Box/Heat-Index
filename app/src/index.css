@@ -5220,3 +5220,97 @@ p.tour-swap {
 .persona-scrap h3 {
   color: #ffb36a;
 }
+
+/* ---------- veterans ---------- */
+.vet-stars {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 17px;
+  letter-spacing: 1px;
+  background: #0b0a14;
+  border: 1px solid currentColor;
+  pointer-events: none;
+}
+.vet-r1 { color: var(--cyan); text-shadow: 0 0 6px var(--cyan); }
+.vet-r2 { color: var(--magenta); text-shadow: 0 0 6px var(--magenta); }
+.vet-r3 { color: var(--yellow); text-shadow: 0 0 8px var(--yellow); animation: vet-glow 1.6s ease-in-out infinite; }
+@keyframes vet-glow { 50% { text-shadow: 0 0 14px var(--yellow); } }
+.card.token .vet-stars { top: -7px; font-size: 10px; line-height: 13px; }
+
+/* ---------- the Pit League ---------- */
+.league {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.league-div {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(160deg, var(--panel2), #0b0c18);
+  opacity: 0.55;
+}
+.league-div.done { opacity: 0.8; }
+.league-div.current {
+  opacity: 1;
+  border-color: var(--dc);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--dc) 45%, transparent), inset 0 0 18px color-mix(in srgb, var(--dc) 12%, transparent);
+}
+.league-div h4 {
+  margin: 0 0 4px;
+  color: var(--dc);
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.league-div .lt {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.league-team {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.league-team.beaten { color: var(--green); }
+.league-team.beaten::before { content: '✔ '; }
+.league-team .cls { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.league-tag {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--dc);
+  color: #07060c;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.league-crown { color: var(--yellow); text-shadow: 0 0 8px var(--yellow); }
+.promo-banner {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid var(--yellow);
+  color: var(--yellow);
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 1px;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--yellow) 40%, transparent);
+  animation: promo-in 0.6s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+@keyframes promo-in { from { transform: scale(0.6); opacity: 0; } }
+.vet-up { color: var(--yellow); font-weight: 700; }
+@media (max-width: 900px) { .league { grid-template-columns: repeat(2, 1fr); } }
