@@ -464,10 +464,11 @@ details[open] > summary::before {
   height: 3px;
   margin: 9px 14px 20px;
   border-radius: 2px;
-  background: linear-gradient(90deg, transparent, #00f0ff 12%, #7a5cff 38%, #ff2a8a 62%, #00f0ff 88%, transparent);
+  /* the logo's magenta, fading into the violet of the panel frames at the ends */
+  background: linear-gradient(90deg, transparent, #5b3c9e 10%, #ff2a8a 32%, #ff7ab8 50%, #ff2a8a 68%, #5b3c9e 90%, transparent);
   box-shadow:
-    0 0 6px #ff2a8a88,
-    0 0 16px #00f0ff55;
+    0 0 6px #ff2a8a99,
+    0 0 18px #ff2a8a44;
   animation: neon-breathe 5s ease-in-out infinite;
 }
 /* reflection on the "floor" */
@@ -491,16 +492,16 @@ details[open] > summary::before {
   width: 70px;
   height: 7px;
   border-radius: 4px;
-  background: radial-gradient(ellipse at center, #ffffff 0%, #ffffffaa 30%, transparent 70%);
-  filter: drop-shadow(0 0 6px #ffffff);
+  background: radial-gradient(ellipse at center, #ffffff 0%, #ffd1e6aa 30%, transparent 70%);
+  filter: drop-shadow(0 0 6px #ff7ab8);
   opacity: 0;
   animation: neon-spark 9s cubic-bezier(0.6, 0, 0.4, 1) infinite;
 }
 @keyframes neon-breathe {
   50% {
     box-shadow:
-      0 0 9px #ff2a8aaa,
-      0 0 24px #00f0ff77;
+      0 0 9px #ff2a8acc,
+      0 0 26px #ff2a8a66;
   }
 }
 @keyframes neon-spark {
@@ -4294,22 +4295,27 @@ button.pick {
 
 /* ---------- обучение: подсказки в учебном бою (Arena.tsx) и тур по вкладкам (ui/Tour.tsx) ---------- */
 .tut-coach {
-  position: absolute;
-  z-index: 35;
-  left: 50%;
-  top: 41%;
-  transform: translate(-50%, -50%);
-  width: min(520px, 92%);
-  padding: 12px 16px;
-  background: #050409f2;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: #050409;
   border: 2px solid var(--yellow);
-  box-shadow:
-    0 0 0 3px #050409,
-    0 0 24px #ffe60055;
+  box-shadow: 0 0 18px #ffe60044;
   animation: end-body-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
+.tut-coach .tut-step {
+  flex: none;
+}
 .tut-coach p {
-  margin: 6px 0 10px;
+  flex: 1;
+}
+.tut-coach button {
+  flex: none;
+}
+.tut-coach p {
+  margin: 0;
   font-size: 16px;
   line-height: 1.4;
 }
@@ -4409,4 +4415,27 @@ button.pick {
   50% {
     transform: translateY(-3px) scale(1.12);
   }
+}
+
+/* обучение: кнопка END TURN — заметнее обычной пульсации своего хода */
+.arena3.tut-end.my-turn .b-end:not(:disabled),
+.arena3.tut-end .b-end {
+  outline: 3px solid var(--yellow);
+  outline-offset: 3px;
+  animation: tut-glow 0.8s steps(2) infinite;
+}
+.arena3.tut-end .b-end::after {
+  content: '▼ PRESS HERE';
+  position: absolute;
+  left: 50%;
+  top: -22px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--yellow);
+  animation: blink 0.8s steps(1) infinite;
+}
+.arena3.tut-end .b-end {
+  position: relative;
 }

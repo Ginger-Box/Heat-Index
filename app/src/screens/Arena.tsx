@@ -175,7 +175,7 @@ const TUT_STEPS: { text: string; wait: TutWait; focus: string }[] = [
     wait: 'next',
     focus: '',
   },
-  { text: 'Now finish the job: break the enemy Core!', wait: 'free', focus: 'enemy' },
+  { text: 'Now finish the job: break the enemy Core! (Press Got it to hide the hints.)', wait: 'free', focus: 'enemy' },
 ];
 
 export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
@@ -357,13 +357,6 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     setBanner({ text: 'TRAINING', kind: 'mine', id: Date.now() });
     sfx('turn-start');
   }, [tutorial, fight, tutEnd]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // the last hint ("finish the job") goes away by itself after a few seconds
-  useEffect(() => {
-    if (!tutorial || TUT_STEPS[tut]?.wait !== 'free') return;
-    const id = setTimeout(() => setTut(TUT_STEPS.length), 3500);
-    return () => clearTimeout(id);
-  }, [tut, tutorial]);
 
   /** Training: advance when the player does what the current step asks. */
   const tutEvent = (ev: BattleEvent[]) => {
@@ -1125,21 +1118,22 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
         className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''} ${tutorial && TUT_STEPS[tut]?.focus ? TUT_STEPS[tut].focus.split(' ').map((f) => `tut-${f}`).join(' ') : ''}`}
         ref={tableRef}
       >
+        {/* training hint: its own row above the table, so turn banners and floating numbers never cover it */}
+        {tutorial && TUT_STEPS[tut] && (
+          <div className="tut-coach" key={tut}>
+            <span className="tut-step">
+              TRAINING {tut + 1}/{TUT_STEPS.length}
+            </span>
+            <p>{TUT_STEPS[tut].text}</p>
+            {(TUT_STEPS[tut].wait === 'next' || TUT_STEPS[tut].wait === 'free') && (
+              <button className="primary small" onClick={() => setTut(tut + 1)}>
+                Got it ▶
+              </button>
+            )}
+            {TUT_STEPS[tut].wait !== 'next' && TUT_STEPS[tut].wait !== 'free' && <span className="tut-wait">waiting for you…</span>}
+          </div>
+        )}
         <div className="b-table">
-          {tutorial && TUT_STEPS[tut] && (
-            <div className="tut-coach" key={tut}>
-              <span className="tut-step">
-                TRAINING {tut + 1}/{TUT_STEPS.length}
-              </span>
-              <p>{TUT_STEPS[tut].text}</p>
-              {TUT_STEPS[tut].wait === 'next' && (
-                <button className="primary small" onClick={() => setTut(tut + 1)}>
-                  Got it ▶
-                </button>
-              )}
-              {TUT_STEPS[tut].wait !== 'next' && TUT_STEPS[tut].wait !== 'free' && <span className="tut-wait">waiting for you…</span>}
-            </div>
-          )}
           {/* opponent */}
           <div className="b-top">
             {renderCore(1)}
