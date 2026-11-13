@@ -2,8 +2,8 @@
 
 ## Summary
 
-- **Sound effects:** 32 files in `public/sfx/`. All of them come from five free packs by **Kenney** (kenney.nl), released under **CC0 1.0 (Creative Commons Zero)**.
-- **Background ambience:** not a file. It is synthesized in code (`src/audio.ts`, `startAmbience`) with the Web Audio API, so it is our own work.
+- **Sound effects:** 56 files in `public/sfx/`. All of them come from five free packs by **Kenney** (kenney.nl), released under **CC0 1.0 (Creative Commons Zero)**.
+- **Background ambience, boot-screen sounds (incl. the fax handshake) and some battle sounds (swing, steam, alarm, sub-bass, welding):** not files. It is synthesized in code (`src/audio.ts`, `startAmbience`) with the Web Audio API, so it is our own work.
 - **What we may do with them:** use them in personal and commercial projects, modify them and redistribute them. Attribution is **not required**, but we credit Kenney anyway (see below).
 - The original license text ships next to the sounds: `public/sfx/LICENSE-kenney.txt`.
 
@@ -56,6 +56,17 @@ Downloaded on 12.11.2026 from the official site using the "Continue without dona
 | fast-forward.mp3 | thrusterFire_000.ogg (Sci-fi) | start of the week fast-forward |
 | card-pick-1, card-pick-2.mp3 | card-slide-2/3 (Casino Audio) + quiet impactGlass_light_001/003 (Impact) + glitch_002/004 (Interface), mixed | picking up a card, the card flying back |
 | card-drop-1, card-drop-2.mp3 | card-place-1 (Casino Audio) + quiet impactMetal_light_002/004 (Impact) + glass_002/004 (Interface), mixed | a card landing in a slot or a lane |
+| ui-filter-1, ui-filter-2.mp3 | chip-lay-1/3 (Casino Audio) + quiet impactMetal_light_004/001 (Impact), mixed | filters and toggles |
+| ui-select-m1, ui-select-m2.mp3 | click_003 (Interface) + quiet impactMetal_light_002/004 (Impact), mixed | selecting a row in the Market |
+| ui-scroll.mp3 | tick_004 (Interface) | ratchet ticks during box / Shift selection |
+| hit-light-1, hit-light-2.mp3 | impactMetal_light_000, 003 (Impact) | weak hits (1–2 damage) |
+| hit-heavy-1, hit-heavy-2.mp3 | impactMetal_heavy_001/003 + impactPunch_heavy_002/003 (Impact), mixed | heavy hits (5+ damage) |
+| deploy-1, deploy-2.mp3 | card-place-2/3 (Casino Audio) + doorClose_000/002 (Sci-fi), mixed | a robot deployed to the board |
+| shock-hit.mp3 | laserSmall_002 (Sci-fi) + impactGlass_light_002 (Impact), mixed | a Shock robot's attack |
+| turn-start.mp3 | bong_001 (Interface) | start of a turn |
+| end-turn.mp3 | switch_007 (Interface) | End turn button |
+| draw-1, draw-2.mp3 | card-slide-4, 5 (Casino Audio) | drawing a card |
+| lock.mp3 | select_004 (Interface) | the aiming arrow locks onto a target |
 
 The full original → file mapping is also in `public/sfx/SOURCES.txt`.
 

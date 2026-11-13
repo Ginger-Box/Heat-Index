@@ -100,6 +100,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Result: stable money supply over a simulated week on 3 worlds; expensive robots pay back ×1.1–1.9 for an average
   player, cheap ones are consumables.
 
+### Feel pass (Nov 13)
+- Click effect back to the needle "signal tear", shorter and sharper; number glitches fixed (a re-render could cut them off).
+- The neon tube under the header replaced by a market ticker: the day's biggest price moves and broker headlines.
+- Market sounds: filters click like a casino chip with a light metal tap, row select got a metallic ring,
+  box / Shift selection ticks like a ratchet, rising in pitch with every row.
+- Boot screen: starts right away, a quiet fax/modem handshake while it "dials the market", soft power-on,
+  and a BIOS-style "PRESS ANY BUTTON TO CONTINUE" at the end (browsers only allow sound after the first press).
+- Analytics: hovering a name highlights its line; a Classes mode with class averages.
+- **Arena redesigned** as a card table: opponent on top, your hand fanned at the bottom, turn/energy/End turn on the
+  right. Cards are dragged into a chosen slot; attacks are aimed with an arrow (red), Repair and Shock robots ask for
+  a target with a green / violet arrow; the opponent's attacks are announced with an arrow too.
+  Sparks scale with damage (1 — a puff, 10 — a shower of metal), Core hits add a shockwave, screen shake and a
+  sub-bass thump; separate sounds for swings, light/medium/heavy hits, deploys, venting steam, overheat alarms,
+  welding repairs, turn start and card draw.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results
