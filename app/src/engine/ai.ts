@@ -116,13 +116,20 @@ export function planTurn(st0: BattleState, side: number, style: AiStyle, dur: Re
   for (let step = 0; step < 24 && st.winner === undefined && st.active === side; step++) {
     const base = evaluate(st, side, style, dur, wear0);
     let best: { a: Action; v: number; s: BattleState } | null = null;
+    const ok: { a: Action; v: number; s: BattleState }[] = [];
     for (const a of candidates(st)) {
       const s = cloneLite(st);
       if (applyAction(s, a, null)) continue;
       const v = evaluate(s, side, style, dur, wear0);
+      if (v > base - 4) ok.push({ a, v, s }); // "not terrible" moves for a sloppy opponent
       if (!best || v > best.v) best = { a, v, s };
     }
     if (!best || best.v <= base + 0.05) break;
+    // a sloppy opponent sometimes plays a random not-terrible move, or simply stops early
+    if (style.sloppy && Math.random() < style.sloppy) {
+      if (Math.random() < 0.3) break;
+      if (ok.length) best = ok[Math.floor(Math.random() * ok.length)];
+    }
     plan.push(best.a);
     applyAction(st, best.a, null);
   }

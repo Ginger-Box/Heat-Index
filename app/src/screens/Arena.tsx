@@ -27,7 +27,7 @@ import {
   type Target,
   type Unit,
 } from '../engine/battle';
-import { battleReward } from '../engine/pricing';
+import { ECON, battleReward } from '../engine/pricing';
 import { CLASS_HELP, CLASS_ICON, CLASS_LABEL, maxDurability, model } from '../engine/robots';
 import { teamError } from '../engine/team';
 import {
@@ -45,7 +45,7 @@ import {
 } from '../engine/world';
 import { act } from '../store';
 import { GLITCH_TOTAL, confetti, glitchTakeover } from '../ui/battleEnd';
-import { centerOf, chroma, createAim, flashScreen, ring, shake, slash, sparks, type Aim, type AimKind } from '../ui/battleFx';
+import { centerOf, chroma, crack, createAim, flashScreen, ring, shake, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
 import { DeckRow } from '../ui/decks';
@@ -78,6 +78,9 @@ interface AimState {
   onPick: (key: string) => void;
   onCancel: () => void;
 }
+
+/** How often the Arena opponent plays a random reasonable move instead of the best one (easier demo opponents). */
+const OPP_SLOPPY = 0.2;
 
 const coreKey = (side: number) => `core-${side}`;
 const keyOf = (side: number, to: string | 'core') => (to === 'core' ? coreKey(side) : to);
@@ -394,7 +397,7 @@ export function Arena({ w }: { w: World }) {
                 Instead of attacking you can cool it down (❄ on the robot).
               </li>
               <li>🛡 Armor robots are guards — hit them first. 💨 Maneuver robots ignore guards.</li>
-              <li>Wear costs money: every robot that fought −1, destroyed −1 more, overheated −1 more.</li>
+              <li>Wear costs money: a robot loses 1 durability when it is destroyed and 1 when it overheats.</li>
               <li>After {MAX_TURNS} turns each the bigger Core wins.</li>
             </ul>
           </details>
@@ -486,36 +489,31 @@ export function Arena({ w }: { w: World }) {
       return;
     }
     const p = Math.min(1, dmg / 5) * (opts.core ? 1.15 : 1);
-    const src = opts.from ? unitEl(opts.from) : null;
-    const s0 = src ? centerOf(src) : { x: c.x, y: c.y + 100 };
-    const ang = Math.atan2(c.y - s0.y, c.x - s0.x) + (Math.random() - 0.5) * 0.5 + Math.PI / 2.6;
-    sparks(c.x, c.y, dmg, { core: opts.core });
-    if (dmg >= 2) slash(c.x, c.y, ang, p);
     if (opts.shockHit) {
       sparks(c.x, c.y, 3, { kind: 'zap' });
       sfx('shock-hit');
     }
-    if (dmg >= 3) ring(c.x, c.y, 90 + p * 220, opts.core ? '#ffe600' : '#ffffff');
-    if (dmg >= 5) {
-      setTimeout(() => ring(c.x, c.y, 200 + p * 260, '#ff3b4e'), 70);
-      flashScreen(0.22);
-      chroma(tableRef.current, p);
-    }
-    shake(tableRef.current, dmg <= 1 ? 0 : dmg === 2 ? 2.5 : dmg <= 4 ? 4 + dmg * 1.5 : 15);
-    if (opts.core) {
-      sfx('core-hit', { volume: 0.7 + p * 0.5 });
-      battleSynth('thump', p);
+    if (dmg <= 3) {
+      // 1–3: sparks, a knock for 3
+      sparks(c.x, c.y, dmg, { core: opts.core });
+      if (dmg === 3) shake(tableRef.current, 4);
     } else {
-      sfx(dmg >= 5 ? 'hit-heavy' : dmg >= 3 ? 'hit' : 'hit-light');
-      if (dmg >= 3) battleSynth('thump', p * 0.85);
+      // 4+: the screen glass cracks at the point of impact — more and longer cracks the bigger the hit
+      crack(c.x, c.y, dmg);
+      sparks(c.x, c.y, dmg * 0.7, { core: opts.core });
+      sfx(dmg >= 6 ? 'glass-shatter' : 'glass', { volume: 0.8 + Math.min(0.5, (dmg - 4) * 0.15) });
+      shake(tableRef.current, Math.min(16, 4 + dmg * 2));
+      battleSynth('thump', Math.min(1, dmg / 6));
+      if (dmg >= 5) chroma(tableRef.current, Math.min(1, (dmg - 3) / 4));
+      if (dmg >= 6) flashScreen(0.18);
     }
+    if (opts.core) {
+      ring(c.x, c.y, 90 + p * 200, dmg >= 5 ? '#ff3b4e' : '#ffe600');
+      sfx('core-hit', { volume: 0.6 + p * 0.5 });
+      if (dmg <= 3) battleSynth('thump', p * 0.6);
+    } else sfx(dmg >= 5 ? 'hit-heavy' : dmg >= 3 ? 'hit' : 'hit-light', { volume: dmg >= 4 ? 0.6 : 1 });
   };
 
-  /**
-   * End of the battle. Victory: confetti cannons from both sides + a chiptune fanfare.
-   * Defeat: your Core cracks, a glitch spreads from it over the whole screen, the machine powers down.
-   * Then the full-screen result (VICTORY / DEFEAT + rewards and wear) appears.
-   */
   const finish = async (final: BattleState) => {
     setCaption(final.winner === null ? 'Draw!' : final.winner === 0 ? 'Victory!' : 'Defeat');
     endFx.current();
@@ -755,7 +753,8 @@ export function Arena({ w }: { w: World }) {
     setCaption(`${opp.name} is thinking…`);
     await sleep(700);
     let cur = fightRef.current!.st;
-    const plan = planTurn(cur, 1, { careful: opp.careful }, dur);
+    // opponents in the demo are a bit sloppy: about one move in five is not the best one
+    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: OPP_SLOPPY }, dur);
     for (const a of plan) {
       if (!alive.current || cur.winner !== undefined) return;
       const uid = a.t === 'deploy' ? a.uid : a.t === 'attack' ? a.from : a.t === 'vent' ? a.uid : null;
@@ -1136,7 +1135,7 @@ function ResultPanel({
   const me = getManager(w, PLAYER_ID);
   const res = st.winner === null ? 'Draw' : st.winner === 0 ? 'Victory!' : 'Defeat';
   const values = sideTeamValues(st);
-  const reward = battleReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0);
+  const reward = battleReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0, ECON.playerPurseRate);
   const uids = Object.keys(durBefore);
   return (
     <div className="panel" style={{ borderColor: st.winner === 0 ? 'var(--green)' : 'var(--line)' }}>
@@ -1157,7 +1156,7 @@ function ResultPanel({
       <h3>Robot wear</h3>
       <div className="row" style={{ gap: 18 }}>
         {uids.map((u) => {
-          const loss = wearLoss(st, u);
+          const loss = wearLoss(st, u, true);
           const before = durBefore[u];
           const now = w.robots[u]?.durability ?? 0;
           return (

@@ -401,9 +401,11 @@ export function applyAction(st: BattleState, a: Action, ev: BattleEvent[] | null
  * Robot wear after the battle (DESIGN.md §6): every robot that went into battle −1,
  * destroyed −1 more, overheated −1 more (at most −3). Robots that stayed in hand don't wear.
  */
-export function wearLoss(st: BattleState, uid: string): number {
+export function wearLoss(st: BattleState, uid: string, light = false): number {
   const w = st.wear[uid];
   if (!w || !w.fielded) return 0;
+  // light (the human player's robots): only being destroyed or overheating wears a robot out
+  if (light) return (w.destroyed ? 1 : 0) + (w.overheated ? 1 : 0);
   return Math.min(3, 1 + (w.destroyed ? 1 : 0) + (w.overheated ? 1 : 0));
 }
 
@@ -412,6 +414,8 @@ export function wearLoss(st: BattleState, uid: string): number {
 export interface AiStyle {
   /** 0 — risks everything to win, 1 — saves expensive robots from wear */
   careful: number;
+  /** 0..1: chance per move to play a random reasonable move instead of the best one (easier opponents) */
+  sloppy?: number;
 }
 
 // The AI lives in ai.ts; here only a hook to avoid a circular import.

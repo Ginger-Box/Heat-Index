@@ -4236,3 +4236,10 @@ button.pick {
   font-family: var(--font);
   font-size: 12px;
 }
+
+.fx-crack {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482903;
+  pointer-events: none;
+}

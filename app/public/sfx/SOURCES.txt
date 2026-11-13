@@ -68,3 +68,6 @@ sparkle.mp3 <= Coins/sfx_coin_cluster3 ; fanfare.mp3 <= Fanfares/sfx_sounds_fanf
 (earlier Kenney entries for hit-*, hit-light-*, hit-heavy-*, destroy-*, core-hit-*, blast, block, ui-scroll, victory, defeat are replaced)
 deck-open.mp3 <= card-fan-1.ogg (Kenney Casino)
 deck-close.mp3 <= card-shove-2.ogg (Kenney Casino)
+glass-1.mp3 <= impactGlass_heavy_001.ogg (Kenney Impact)
+glass-2.mp3 <= impactGlass_heavy_003.ogg (Kenney Impact)
+glass-shatter.mp3 <= impactGlass_heavy_000 + impactGlass_heavy_004 (+40ms) x0.8, Kenney Impact, mixed

@@ -15,7 +15,9 @@ export const ECON = {
   scrapShare: 0.15, // сдать сломанного на запчасти = 15%; изношенный робот у брокера стоит почти столько же
   // Призовой фонд боя = purseRate × (стоимость обеих команд по базовым ценам).
   // Победитель забирает winShare, ничья — drawShare каждому, проигравший — lossShare.
-  purseRate: 0.02,
+  purseRate: 0.025,
+  // the human player's battles pay more (Arena prize money for challengers) — so a few wins buy a good robot
+  playerPurseRate: 0.06,
   winShare: 0.75,
   drawShare: 0.5,
   lossShare: 0.25,
@@ -95,8 +97,8 @@ export const repairCost = (fair: number, r: Robot) =>
 
 /** Брокер замечает новую актуальность не сразу: сдвигается к ней на долю `react`. */
 /** Призовой фонд боя и доля стороны (res: 1 победа, 0.5 ничья, 0 поражение). */
-export function battleReward(teamValueA: number, teamValueB: number, res: number): number {
-  const purse = ECON.purseRate * (teamValueA + teamValueB);
+export function battleReward(teamValueA: number, teamValueB: number, res: number, rate = ECON.purseRate): number {
+  const purse = rate * (teamValueA + teamValueB);
   const share = res === 1 ? ECON.winShare : res === 0.5 ? ECON.drawShare : ECON.lossShare;
   return Math.round(purse * share);
 }

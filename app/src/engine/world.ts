@@ -24,6 +24,8 @@ import { CLASSES, MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurabil
 import { buildTeam, partialTeamError, teamError } from './team';
 
 export const PLAYER_ID = 'player';
+/** NPC decks are cheaper than the player's limit (42) — easier opponents for the demo. */
+export const NPC_DECK_COST = 28;
 export const HOUSE = 'house'; // основатели брокера
 export const HOURS_PER_DAY = 12;
 export const MATCHES_PER_HOUR = 12;
@@ -588,14 +590,14 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     for (const uid of Object.keys(st.wear)) {
       const r = w.robots[uid];
       if (!r || r.owner !== m.id || !st.wear[uid].fielded) continue;
-      r.durability = Math.max(0, r.durability - wearLoss(st, uid));
+      r.durability = Math.max(0, r.durability - wearLoss(st, uid, m.id === PLAYER_ID));
       const ms = w.stats[r.modelId];
       ms.recent.push(res);
       if (ms.recent.length > ECON.recentWindow) ms.recent.shift();
       ms.games++;
       if (res === 1) ms.wins++;
     }
-    const reward = battleReward(teamValue[s], teamValue[1 - s], res);
+    const reward = battleReward(teamValue[s], teamValue[1 - s], res, m.id === PLAYER_ID ? ECON.playerPurseRate : ECON.purseRate);
     m.credits += reward;
     ledger(w, { kind: 'reward', from: 'arena', to: m.id, amount: reward });
     if (res === 1) m.wins++;
@@ -736,7 +738,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
   // 3. Собрать команду; если не получается — докупить дешёвых роботов
   let hasTeam = false;
   for (let guard = 0; guard < 12; guard++) {
-    const team = buildTeam(owned(), teamValue(w, m, rel));
+    const team = buildTeam(owned(), teamValue(w, m, rel), NPC_DECK_COST);
     if (team) {
       m.team = team.map((r) => r.uid);
       hasTeam = true;
@@ -1081,7 +1083,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
       while (!team) {
         const own = MODELS.filter((x) => classOf(x.id) === focus);
         const pool = Array.from({ length: 22 }, (_, j) => mint(w, rng.pick(j < 12 ? own : MODELS).id, m.id));
-        team = buildTeam(pool, (r) => rng.next() + (classOf(r.modelId) === focus ? 1 : 0));
+        team = buildTeam(pool, (r) => rng.next() + (classOf(r.modelId) === focus ? 1 : 0), NPC_DECK_COST);
         if (!team) for (const r of pool) delete w.robots[r.uid];
         else for (const r of pool) if (!team.includes(r)) delete w.robots[r.uid];
       }
@@ -1094,7 +1096,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
     name: playerName,
     strategy: 'player',
     careful: 0.5,
-    credits: 500,
+    credits: 1000,
     team: [],
     elo: 1000,
     wins: 0,

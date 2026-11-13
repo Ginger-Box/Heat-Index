@@ -14,6 +14,8 @@ type Sfx =
   | 'lock'
   | 'shock-hit'
   | 'ui-scroll'
+  | 'glass'
+  | 'glass-shatter'
   | 'deck-open'
   | 'deck-close'
   | 'ui-tab'
@@ -85,6 +87,9 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   fanfare: { files: ['fanfare'], vol: 0.3, spread: 0.01 },
   'fast-forward': { files: ['fast-forward'], vol: 0.4 },
   // battle: impacts by damage (light / medium = 'hit' / heavy), deploy clank, turn gong, card draw, target lock
+  // the screen cracks on heavy hits (4+): glass crack / full shatter
+  glass: { files: ['glass-1', 'glass-2'], vol: 0.5, spread: 0.1 },
+  'glass-shatter': { files: ['glass-shatter'], vol: 0.55, spread: 0.06 },
   'hit-light': { files: ['hit-light-1', 'hit-light-2'], vol: 0.4, spread: 0.16 },
   'hit-heavy': { files: ['hit-heavy-1', 'hit-heavy-2'], vol: 0.55, spread: 0.08 },
   'b-deploy': { files: ['deploy-1', 'deploy-2'], vol: 0.55, spread: 0.12 },

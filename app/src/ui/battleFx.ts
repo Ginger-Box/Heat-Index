@@ -259,3 +259,122 @@ export function chroma(el: Element | null, power: number) {
     { duration: 220 + power * 120, easing: 'steps(5)' },
   );
 }
+
+/**
+ * The screen "glass" cracks at the point of impact — for heavy hits (4+ damage). A spider-web of cracks spreads
+ * from a shattered centre; bigger damage = more and longer cracks and more rings. It propagates in ~90 ms,
+ * holds, then fades. Each crack is its own short-lived canvas, so several can overlap.
+ */
+export function crack(x: number, y: number, dmg: number) {
+  if (reduce()) return;
+  const c = document.createElement('canvas');
+  c.className = 'fx-crack';
+  c.width = innerWidth;
+  c.height = innerHeight;
+  document.body.appendChild(c);
+  const g = c.getContext('2d')!;
+  const p = Math.min(1, Math.max(0, (dmg - 4) / 4)); // 4 → 0, 8+ → 1
+  const spokes = 7 + Math.round(p * 9);
+  const reach = 110 + p * 420 + Math.random() * 40;
+  type Seg = [number, number, number, number, number]; // x0,y0,x1,y1, distance from the centre (for propagation)
+  const segs: Seg[] = [];
+  const tips: [number, number, number][] = []; // spoke points by ring: x, y, ring index
+  const rings = 2 + Math.round(p * 3);
+  const spokePts: [number, number][][] = [];
+  for (let i = 0; i < spokes; i++) {
+    const base = (i / spokes) * Math.PI * 2 + Math.random() * 0.3;
+    let a = base;
+    let px = x;
+    let py = y;
+    const pts: [number, number][] = [[x, y]];
+    const steps = 5 + Math.round(p * 4);
+    for (let k = 1; k <= steps; k++) {
+      a += (Math.random() - 0.5) * 0.35;
+      const len = (reach / steps) * (0.6 + Math.random() * 0.8);
+      const nx = px + Math.cos(a) * len;
+      const ny = py + Math.sin(a) * len;
+      segs.push([px, py, nx, ny, Math.hypot(nx - x, ny - y)]);
+      // little side branches
+      if (Math.random() < 0.35) {
+        const ba = a + (Math.random() < 0.5 ? 0.6 : -0.6);
+        const bl = len * (0.4 + Math.random() * 0.5);
+        segs.push([nx, ny, nx + Math.cos(ba) * bl, ny + Math.sin(ba) * bl, Math.hypot(nx - x, ny - y) + bl]);
+      }
+      px = nx;
+      py = ny;
+      pts.push([px, py]);
+      tips.push([px, py, k]);
+    }
+    spokePts.push(pts);
+  }
+  // concentric web: connect neighbouring spokes at a few rings
+  for (let r = 1; r <= rings; r++) {
+    for (let i = 0; i < spokes; i++) {
+      const A = spokePts[i];
+      const B = spokePts[(i + 1) % spokes];
+      const k = Math.min(A.length - 1, B.length - 1, Math.round((r / (rings + 1)) * (A.length - 1)) + 1);
+      if (Math.random() < 0.15) continue;
+      const [ax, ay] = A[k];
+      const [bx, by] = B[k];
+      const mx = (ax + bx) / 2 + (Math.random() - 0.5) * 10;
+      const my = (ay + by) / 2 + (Math.random() - 0.5) * 10;
+      const d = Math.hypot(ax - x, ay - y);
+      segs.push([ax, ay, mx, my, d], [mx, my, bx, by, d]);
+    }
+  }
+  // shards around the impact point
+  const shards: [number, number][][] = [];
+  const sh = 5 + Math.round(p * 6);
+  for (let i = 0; i < sh; i++) {
+    const a0 = (i / sh) * Math.PI * 2;
+    const a1 = ((i + 1) / sh) * Math.PI * 2;
+    const r0 = 14 + p * 18;
+    shards.push([
+      [x, y],
+      [x + Math.cos(a0) * r0 * (0.7 + Math.random() * 0.6), y + Math.sin(a0) * r0],
+      [x + Math.cos(a1) * r0, y + Math.sin(a1) * r0 * (0.7 + Math.random() * 0.6)],
+    ]);
+  }
+  const start = performance.now();
+  const GROW = 90;
+  const HOLD = 520 + p * 400;
+  const FADE = 420;
+  const draw = (now: number) => {
+    const t = now - start;
+    g.clearRect(0, 0, c.width, c.height);
+    const front = Math.min(1, t / GROW) * (reach + 80);
+    const alpha = t < GROW + HOLD ? 1 : Math.max(0, 1 - (t - GROW - HOLD) / FADE);
+    g.globalAlpha = alpha;
+    // shattered centre: pale refracting shards
+    for (const [i, tri] of shards.entries()) {
+      g.fillStyle = i % 2 ? 'rgba(220,240,255,0.22)' : 'rgba(255,255,255,0.1)';
+      g.beginPath();
+      g.moveTo(tri[0][0], tri[0][1]);
+      g.lineTo(tri[1][0], tri[1][1]);
+      g.lineTo(tri[2][0], tri[2][1]);
+      g.closePath();
+      g.fill();
+    }
+    g.lineCap = 'round';
+    for (const pass of [0, 1]) {
+      // pass 0: a dark offset line (depth of the crack), pass 1: the bright edge
+      g.strokeStyle = pass ? 'rgba(235,250,255,0.95)' : 'rgba(0,0,0,0.55)';
+      g.lineWidth = pass ? 1.6 : 3;
+      g.shadowColor = pass ? '#00f0ff' : 'transparent';
+      g.shadowBlur = pass ? 6 : 0;
+      g.beginPath();
+      for (const [x0, y0, x1, y1, d] of segs) {
+        if (d > front) continue;
+        const o = pass ? 0 : 1.5;
+        g.moveTo(x0 + o, y0 + o);
+        g.lineTo(x1 + o, y1 + o);
+      }
+      g.stroke();
+    }
+    g.shadowBlur = 0;
+    if (alpha > 0) requestAnimationFrame(draw);
+    else c.remove();
+  };
+  requestAnimationFrame(draw);
+  setTimeout(() => c.remove(), GROW + HOLD + FADE + 600); // safety: a hidden tab stops rAF
+}

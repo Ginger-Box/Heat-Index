@@ -37,12 +37,12 @@ export const teamEnergy = (team: Robot[]) => team.reduce((s, r) => s + model(r.m
  * Собирает лучшую команду из доступных роботов по оценке `value`.
  * Жадно: берём самых ценных, пока влезают в лимит, оставляя энергию на оставшиеся места.
  */
-export function buildTeam(pool: Robot[], value: (r: Robot) => number): Robot[] | null {
+export function buildTeam(pool: Robot[], value: (r: Robot) => number, cap = TEAM_ENERGY_CAP): Robot[] | null {
   // Жадно по ценности; если не вышло — запасной вариант «самые дешёвые», он почти всегда влезает.
-  return buildGreedy(pool, value) ?? buildGreedy(pool, (r) => -model(r.modelId).cost * 100 + value(r) * 0.001);
+  return buildGreedy(pool, value, cap) ?? buildGreedy(pool, (r) => -model(r.modelId).cost * 100 + value(r) * 0.001, cap);
 }
 
-function buildGreedy(pool: Robot[], value: (r: Robot) => number): Robot[] | null {
+function buildGreedy(pool: Robot[], value: (r: Robot) => number, cap: number): Robot[] | null {
   const usable = pool.filter((r) => r.durability > 0).sort((a, b) => value(b) - value(a));
   const team: Robot[] = [];
   const counts: Record<string, number> = {};
@@ -60,7 +60,7 @@ function buildGreedy(pool: Robot[], value: (r: Robot) => number): Robot[] | null
     const slotsLeft = Math.max(0, TEAM_MIN - team.length - 1);
     const taken = new Set([...team.map((t) => t.uid), r.uid]);
     const reserve = cheapest(taken).slice(0, slotsLeft).reduce((s, x) => s + x, 0);
-    if (energy + c + reserve > TEAM_ENERGY_CAP) continue;
+    if (energy + c + reserve > cap) continue;
     team.push(r);
     counts[r.modelId] = (counts[r.modelId] ?? 0) + 1;
     energy += c;
