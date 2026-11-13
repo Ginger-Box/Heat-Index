@@ -29,7 +29,7 @@ export function Market({ w }: { w: World }) {
   const anchor = useRef<string | null>(null);
   const [help, setHelp] = useState(false);
 
-  // Esc снимает выделение и закрывает справку
+  // Esc Esc clears the selection and closes the help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -42,7 +42,7 @@ export function Market({ w }: { w: World }) {
 
   const me = getManager(w, PLAYER_ID);
   const hist = w.history.slice(-60);
-  // Цены считаются заново только когда мир изменился (а не на каждый клик по строке)
+  // Prices are recomputed only when the world changed (not on every row click)
   const ver = worldVersion();
   const rows = useMemo(() => computeRows(w), [ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const classStats = useMemo(() => computeClassStats(w, rows), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -95,8 +95,8 @@ export function Market({ w }: { w: World }) {
   });
 
   /**
-   * Выделение строк как в проводнике: клик — одна строка, Ctrl/⌘ — добавить или убрать,
-   * Shift — диапазон от последней отмеченной (с Ctrl/⌘ — добавить диапазон к выделенному).
+   * Row selection like a file explorer: click — one row, Ctrl/⌘ — add or remove,
+   * Shift — Shift — a range from the last marked row (with Ctrl/⌘ — add the range to the selection).
    */
   const clickRow = (e: MouseEvent, id: string) => {
     if (suppressClick.current) {
@@ -128,13 +128,13 @@ export function Market({ w }: { w: World }) {
     });
   };
 
-  // ---------- выделение рамкой: зажать ЛКМ на таблице и потянуть ----------
-  // Пока тянем — рамка и подсветка строк меняются напрямую в DOM (без перерисовки рынка, поэтому плавно);
-  // выделение сохраняется в состояние один раз — когда кнопку отпустили.
+  // ---------- box selection: hold the left button on the table and drag ----------
+  // While dragging, the box and the row highlight change directly in the DOM (no Market re-render, so it's smooth);
+  // the selection is saved to state once — when the button is released.
   const suppressClick = useRef(false);
   const startBox = (e: MouseEvent) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest('button, input, a, .peek-name, .tip')) return;
-    e.preventDefault(); // не выделять текст
+    e.preventDefault(); // don't select text
     const x0 = e.clientX;
     const y0 = e.clientY;
     const base = e.ctrlKey || e.metaKey ? new Set(selected) : new Set<string>();
@@ -189,7 +189,7 @@ export function Market({ w }: { w: World }) {
       rowsEl.forEach((r) => r.classList.remove('box-hit', 'boxing'));
       setCursorMode(null);
       setSelected(new Set([...base, ...hit]));
-      suppressClick.current = true; // клик после рамки не должен сбросить выделение
+      suppressClick.current = true; // the click after a box selection must not reset it
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -397,7 +397,7 @@ export function Market({ w }: { w: World }) {
                     <tr
                       data-id={r.m.id}
                       className={`${expanded ? 'expanded' : ''} ${selected.has(r.m.id) ? 'selected' : ''}`}
-                      onMouseDown={(e) => e.shiftKey && e.preventDefault() /* Shift-клик не выделяет текст */}
+                      onMouseDown={(e) => e.shiftKey && e.preventDefault() /* Shift-click does not select text */}
                       onClick={(e) => clickRow(e, r.m.id)}
                     >
                       <td>
@@ -428,7 +428,7 @@ export function Market({ w }: { w: World }) {
                           title={`Relevance ${Math.round(r.rel)}/100 · brokers see ${Math.round(r.perceived)}`}
                         >
                           <i style={{ width: `${Math.max(2, r.rel)}%` }} />
-                          {/* метка: какую актуальность «видят» брокеры — видно, недооценён робот или переоценён */}
+                          {/* marker: the relevance the brokers "see" — shows whether a robot is under- or overpriced */}
                           <b className="perceived" style={{ left: `${Math.min(99, r.perceived)}%` }} />
                           <span>
                             <Glitch text={Math.round(r.rel)} />
@@ -547,9 +547,9 @@ export function Market({ w }: { w: World }) {
 }
 
 /**
- * Наведение на имя робота показывает его карту рядом. Карта остаётся открытой, пока курсор на ней —
- * а на самой карте всплывает подробное описание способности.
- * Карта рисуется поверх всего (через портал), чтобы её не обрезала прокрутка таблицы.
+ * Hovering a robot's name shows its card next to it. The card stays open while the cursor is on it —
+ * and the card itself shows the full ability description.
+ * The card is drawn above everything (through a portal) so the table scroll never clips it.
  */
 /** the hover preview shows the card 1.5× as big as in the lists */
 const PEEK_ZOOM = 1.5;
@@ -572,7 +572,7 @@ function CardPeek({ modelId, children }: { modelId: string; children: React.Reac
     const r = e.currentTarget.getBoundingClientRect();
     const cardH = 190 * PEEK_ZOOM * s;
     const y = Math.min(Math.max(8, r.top + r.height / 2 - cardH / 2), window.innerHeight - cardH - 8);
-    const cell = e.currentTarget.closest('td')?.getBoundingClientRect() ?? r; // справа от колонки, не поверх строки
+    const cell = e.currentTarget.closest('td')?.getBoundingClientRect() ?? r; // to the right of the column, not over the row
     setPos({ x: (cell.right + 6) / s, y: y / s });
   };
   return (

@@ -98,7 +98,6 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 | `app/scripts/` | balance and economy simulations |
 | `app/src/near/` | NEAR session, login, transaction queue, game ↔ chain bridge |
 | `contract/` | the NEP-245 game contract (Rust) |
-| `DESIGN.md` | game design (Russian) |
 | `DEVLOG.md` | development history |
 
 ## Roadmap

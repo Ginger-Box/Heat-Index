@@ -1,6 +1,6 @@
-// Окупаемость роботов: сколько призовых денег робот «зарабатывает» за жизнь (по своей доле в стоимости команды)
-// по сравнению с ценой, и сколько стоит изношенный робот против лома.
-// Запуск: npx tsx scripts/payoff.ts [боёв]
+// Payoff of robots: how much prize money a robot "earns" over its life (by its share of the team value)
+// compared with its price, and what a worn robot is worth versus scrap.
+// Run: npx tsx scripts/payoff.ts [battles]
 import '../src/engine/ai';
 import { simulateBattle, wearLoss } from '../src/engine/battle';
 import { ECON, battleReward, durabilityFactor } from '../src/engine/pricing';

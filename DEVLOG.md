@@ -19,7 +19,6 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   repairs cost credits — every hit has a price.
 - A robot's price follows its **relevance** (how much it wins + how many teams pick it), so the market *is* the meta.
 - Two ways to play: **Champion** (fight, climb ELO) and **Magnate** (trade robots, invest in AI brokers).
-- Full design: `DESIGN.md`.
 
 ### First playable build
 - Vite + React + TypeScript, everything simulated in the browser (the chain comes later).
@@ -178,5 +177,5 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - GitHub Pages workflow for the public build.
 
 ## Next
-- Card art (prompts in `art-prompts.md`).
+- Card art.
 - README for judges, demo video.

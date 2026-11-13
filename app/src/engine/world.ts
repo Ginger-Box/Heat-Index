@@ -1,6 +1,6 @@
-// Мир NEON PIT: брокеры, менеджеры (NPC и игрок), роботы, статистика, сезон.
-// Состояние — обычный сериализуемый объект: его можно хранить в браузере, на сервере
-// и сверять с записями в блокчейне (ledger).
+// The HEAT INDEX world: brokers, managers (NPCs and the player), robots, statistics, the season.
+// The state is a plain serializable object: it can live in the browser or on a server
+// and be checked against the on-chain records (ledger).
 
 import './ai'; // registers the battle AI used by simulateBattle
 import { simulateBattle, wearLoss, type BattleState } from './battle';
@@ -37,7 +37,7 @@ export const playerHooks: {
 } = {};
 /** NPC decks are cheaper than the player's limit (42) — easier opponents for the demo. */
 export const NPC_DECK_COST = 28;
-export const HOUSE = 'house'; // основатели брокера
+export const HOUSE = 'house'; // the broker's founders
 export const HOURS_PER_DAY = 12;
 export const MATCHES_PER_HOUR = 12;
 export const DAYS_PER_SEASON = 7;
@@ -55,11 +55,11 @@ export interface Manager {
   id: string;
   name: string;
   strategy: Strategy;
-  careful: number; // стиль боя AI
-  focus?: RobotClass; // класс роботов, через который играет NPC (у игрока нет)
+  careful: number; // AI battle style
+  focus?: RobotClass; // the robot class this NPC plays (the player has none)
   credits: number;
-  team: string[]; // uid роботов — колода, с которой идут в бой (у игрока = активная колода из decks)
-  /** Игрок: 5 именованных колод; робот может стоять только в одной. activeDeck — какая идёт в бой. */
+  team: string[]; // uid robot uids — the deck that goes into battle (for the player = the active deck from decks)
+  /** Player: 5 named decks; a robot can stand in one deck only. activeDeck — the one that goes into battle. */
   decks?: Deck[];
   activeDeck?: number;
   elo: number;
@@ -81,20 +81,20 @@ export interface Broker {
   style: BrokerStyle;
   credits: number;
   closed: boolean;
-  perceived: Record<string, number>; // актуальность глазами брокера
-  shares: Record<string, number>; // владелец -> доли
+  perceived: Record<string, number>; // relevance as the broker sees it
+  shares: Record<string, number>; // owner -> shares
   dayStartCredits: number;
-  /** капитал на начало дня — прибыль дня считается от него */
+  /** equity at the start of the day — the day's profit is measured from it */
   dayStartEquity?: number;
   investedToday: number;
   lastDividend: number;
-  /** прибыль за последние дни (до 7), CR */
+  /** profit over the last days (up to 7), CR */
   profitLog?: number[];
-  /** дивиденды на одну долю за последние дни (до 7), CR */
+  /** dividends per share over the last days (up to 7), CR */
   divPerShareLog?: number[];
-  /** сколько дивидендов всего получил каждый владелец */
+  /** total dividends received by each owner */
   paidTotal?: Record<string, number>;
-  /** сколько роботов каждой модели закуплено на Фабрике сегодня (дорогие — с лимитом) */
+  /** how many robots of each model were bought from the Factory today (expensive ones are capped) */
   restockedToday?: Record<string, number>;
 }
 
@@ -145,8 +145,8 @@ export interface SeasonResult {
 export interface World {
   version: 1;
   rngState: number;
-  tick: number; // сыграно матчей NPC
-  hour: number; // всего прошло игровых часов
+  tick: number; // NPC matches played
+  hour: number; // game hours passed in total
   season: number;
   robots: Record<string, OwnedRobot>;
   serial: number;
@@ -164,7 +164,7 @@ export interface World {
 export const dayOf = (w: World) => Math.floor(w.hour / HOURS_PER_DAY) + 1;
 export const dayInSeason = (w: World) => ((dayOf(w) - 1) % DAYS_PER_SEASON) + 1;
 
-// ---------- служебное ----------
+// ---------- helpers ----------
 
 function withRng<T>(w: World, fn: (r: Rng) => T): T {
   const r = new Rng(w.rngState);
@@ -206,7 +206,7 @@ export const robotsOf = (w: World, owner: string) => Object.values(w.robots).fil
 export const teamOf = (w: World, m: Manager): OwnedRobot[] =>
   m.team.map((u) => w.robots[u]).filter((r) => r && r.owner === m.id);
 
-// ---------- актуальность и цены ----------
+// ---------- relevance and prices ----------
 
 export function pickCounts(w: World): Record<string, number> {
   const c: Record<string, number> = Object.fromEntries(MODELS.map((x) => [x.id, 0]));
@@ -219,7 +219,7 @@ export function actualRelevance(w: World, counts = pickCounts(w)): Record<string
   return Object.fromEntries(MODELS.map((x) => [x.id, relevance(w.stats[x.id], counts[x.id], max)]));
 }
 
-/** Рабочие (не сломанные) роботы модели на складе брокера. */
+/** Working (not broken) robots of a model in a broker's stock. */
 export const brokerStock = (w: World, b: Broker, modelId: string) =>
   robotsOf(w, b.id).filter((r) => r.modelId === modelId && r.durability > 0);
 
@@ -255,18 +255,18 @@ export function quote(w: World, b: Broker, modelId: string, rel = actualRelevanc
   };
 }
 
-/** Средняя справедливая цена по открытым брокерам — для графиков и оценки активов. */
+/** Average fair price across open brokers — for charts and asset values. */
 export function refPrice(w: World, modelId: string): number {
   const open = w.brokers.filter((b) => !b.closed);
   const list = open.length ? open : w.brokers;
   return list.reduce((s, b) => s + brokerFair(w, b, modelId), 0) / list.length;
 }
 
-/** Склад модели уже вдвое больше нормы — брокер такую больше не скупает (иначе затоваривается и продаёт в убыток). */
+/** The model's stock is already twice the target — the broker stops buying it (otherwise it overstocks and sells at a loss) */
 const overstocked = (w: World, b: Broker, modelId: string) => brokerStock(w, b, modelId).length >= b.style.targetStock * 2;
 
 export function bestBid(w: World, r: OwnedRobot): { broker: Broker; price: number } | null {
-  if (r.loaner) return null; // списанных роботов Арены не покупают
+  if (r.loaner) return null; // the Arena's written-off loaners are not bought
   let best: { broker: Broker; price: number } | null = null;
   for (const b of w.brokers) {
     if (b.closed) continue;
@@ -274,7 +274,7 @@ export function bestBid(w: World, r: OwnedRobot): { broker: Broker; price: numbe
     let price: number;
     if (r.durability <= 0) {
       if (!b.style.scrapper) continue;
-      // двор с ломом полон — новый лом не берём (раньше скупщик платил за лом, который потом всё равно переплавлял)
+      // the scrap yard is full — no new scrap (the scrap dealer used to pay for scrap it then melted anyway)
       if (robotsOf(w, b.id).filter((x) => x.durability <= 0).length >= SCRAP_YARD_CAP) continue;
       price = scrapPrice(fair);
     } else {
@@ -282,19 +282,19 @@ export function bestBid(w: World, r: OwnedRobot): { broker: Broker; price: numbe
       price = bidPrice(fair, b.style, r) * (b.style.scrapper ? SCRAPPER_WORKING_BID : 1);
     }
     price = Math.round(price);
-    // скупая робота, брокер не опускается ниже резерва — иначе разоряется на чужих распродажах
+    // buying a robot, the broker never dips below its reserve — otherwise it goes broke on other people's sell-offs
     if (price > b.credits - BANKRUPT_BELOW - 100) continue;
     if (!best || price > best.price) best = { broker: b, price };
   }
   return best;
 }
 
-/** Склад учитывается осторожно — по 70% базовой цены (его ещё надо продать). */
+/** Stock is valued cautiously — at 70% of the base price (it still has to be sold). */
 const STOCK_BOOK = 0.7;
-/** Скупщик лома берёт рабочих роботов неохотно — со скидкой (его дело — сломанные). */
+/** The scrap dealer buys working robots reluctantly — at a discount (its business is broken ones). */
 const SCRAPPER_WORKING_BID = 0.8;
 
-/** Капитал брокера: деньги + осторожная оценка склада. От него считаются цена доли и прибыль. */
+/** A broker's equity: cash + a cautious value of the stock. Share price and profit are computed from it. */
 export function brokerEquity(w: World, b: Broker): number {
   const stockValue = robotsOf(w, b.id).reduce(
     (s, r) => s + model(r.modelId).basePrice * (0.5 + 0.5 * durFrac(r)),
@@ -310,8 +310,8 @@ export function sharePrice(w: World, b: Broker): number {
 }
 
 /**
- * Ожидаемый доход в день на 100 вложенных CR — среднее по последним дням
- * (дивиденды на долю / текущая цена доли). Это прогноз по прошлому, а не обещание.
+ * Expected income per day per 100 CR invested — the average over the last days
+ * ((dividends per share / current share price). A forecast from the past, not a promise.
  */
 export function expectedDailyPer100(w: World, b: Broker): number {
   const log = b.divPerShareLog ?? [];
@@ -327,7 +327,7 @@ export function netWorth(w: World, m: Manager): number {
   return Math.round(v);
 }
 
-// ---------- действия (общие для игрока и NPC) ----------
+// ---------- actions (shared by the player and NPCs) ----------
 
 export function buy(w: World, managerId: string, brokerId: string, modelId: string): string | null {
   const m = getManager(w, managerId);
@@ -381,7 +381,7 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
   return null;
 }
 
-/** Цена ремонта у самого дешёвого открытого брокера. */
+/** Repair price at the cheapest open broker. */
 export function repairQuote(w: World, r: Robot): { broker: Broker; cost: number } | null {
   let best: { broker: Broker; cost: number } | null = null;
   for (const b of w.brokers) {
@@ -400,7 +400,7 @@ export function repair(w: World, managerId: string, uid: string): string | null 
   const q = repairQuote(w, r);
   if (!q) return 'All workshops are closed';
   if (m.credits < q.cost) return `Not enough credits: repair costs ${q.cost} CR`;
-  m.credits -= q.cost; // кредиты сгорают — сток экономики
+  m.credits -= q.cost; // credits are burned — an economy sink
   r.durability = maxDurability(r.modelId);
   ledger(w, { kind: 'repair', from: m.id, to: 'burn', uid, amount: q.cost });
   if (m.id === PLAYER_ID) playerHooks.repair?.(r, q.cost);
@@ -432,16 +432,16 @@ export function invest(w: World, managerId: string, brokerId: string, amount: nu
   return null;
 }
 
-/** Сколько брокер может выплатить за доли прямо сейчас (не опускаясь к банкротству). */
+/** How much a broker can pay out for shares right now (without nearing bankruptcy). */
 export const brokerCashForBuyback = (b: Broker) => Math.max(0, Math.floor(b.credits - BANKRUPT_BELOW - 100));
 
-/** Прибыль брокера с начала дня (рост капитала без учёта новых вложений). */
+/** A broker's profit since the start of the day (equity growth, not counting new investments). */
 export const brokerProfitToday = (w: World, b: Broker) =>
   brokerEquity(w, b) - (b.dayStartEquity ?? brokerEquity(w, b)) - b.investedToday;
 
 /**
- * Продать свои доли брокеру по текущей цене доли (fraction — какую часть своих долей, 0..1).
- * Брокер платит из свободных денег; если их не хватает — выкупает столько, сколько может.
+ * Sell your shares back to the broker at the current share price (fraction — what part of your shares, 0..1).
+ * The broker pays from free cash; if that's not enough it buys back as much as it can.
  */
 export function divest(w: World, managerId: string, brokerId: string, fraction = 1): string | null {
   const m = getManager(w, managerId);
@@ -458,7 +458,7 @@ export function divest(w: World, managerId: string, brokerId: string, fraction =
   b.shares[m.id] = own - shares;
   if (b.shares[m.id] < 1e-6) delete b.shares[m.id];
   b.credits -= amount;
-  b.investedToday -= amount; // вывод денег — не убыток брокера
+  b.investedToday -= amount; // withdrawing money is not the broker's loss
   m.credits += amount;
   ledger(w, { kind: 'divest', from: b.id, to: m.id, amount });
   if (m.id === PLAYER_ID) log(w, 'player', `You sold shares of ${b.name} for ${amount} CR`);
@@ -470,7 +470,7 @@ export const LOANER_DURABILITY = 5;
 
 const LOANER_MODELS = ['spark', 'scout', 'bolt', 'ram', 'welder'];
 
-/** Можно ли получить пособие Арены: команда не собирается, а денег почти нет. */
+/** Can the player claim the Arena's handout: no deck can be built and there is almost no money. */
 export function canClaimLoaner(w: World, managerId: string): boolean {
   const m = getManager(w, managerId);
   if (m.credits >= LOANER_MAX_CREDITS) return false;
@@ -478,7 +478,7 @@ export function canClaimLoaner(w: World, managerId: string): boolean {
   return LOANER_MODELS.some((x) => countOwned(w, m, x) < MAX_SAME_MODEL);
 }
 
-/** Пособие Арены: бесплатный списанный робот (прочность 5). Возвращает ошибку или null. */
+/** Arena handout: a free written-off robot (durability 5). Returns an error or null. */
 export function claimLoaner(w: World, managerId: string): string | null {
   if (!canClaimLoaner(w, managerId)) return 'Only managers with an incomplete team and under 40 CR get a loaner';
   const m = getManager(w, managerId);
@@ -491,7 +491,7 @@ export function claimLoaner(w: World, managerId: string): string | null {
   return null;
 }
 
-/** Утилизация сломанного робота бесплатно, если продать некому. */
+/** Recycle a broken robot for free when nobody buys it. */
 export function recycle(w: World, managerId: string, uid: string): string | null {
   const r = w.robots[uid];
   if (!r || r.owner !== managerId) return 'This is not your robot';
@@ -504,7 +504,7 @@ export function recycle(w: World, managerId: string, uid: string): string | null
   return null;
 }
 
-// ---------- колоды игрока ----------
+// ---------- the player's decks ----------
 
 /** Make sure the manager has DECK_COUNT decks (old saves: the current team becomes deck 1). */
 export function ensureDecks(m: Manager): Deck[] {
@@ -571,17 +571,17 @@ export function setTeam(w: World, managerId: string, uids: string[]): string | n
   const m = getManager(w, managerId);
   const team = uids.map((u) => w.robots[u]);
   if (team.some((r) => !r || r.owner !== m.id)) return 'The team has a robot you do not own';
-  // Команду можно хранить неполной: игрок собирает её по слоту. Полноту проверяет Арена перед боем.
+  // A deck may be stored incomplete: the player fills it slot by slot. The Arena checks it before a battle.
   const err = partialTeamError(team);
   if (err) return err;
   m.team = [...uids];
   return null;
 }
 
-// ---------- матчи ----------
+// ---------- matches ----------
 
 const BANKRUPT_BELOW = 60;
-/** Какая часть дневной прибыли брокера идёт на дивиденды (делится по долям) */
+/** Which part of a broker's daily profit is paid as dividends (split by shares) */
 export const DIVIDEND_SHARE = 0.8;
 const SCRAP_YARD_CAP = 12;
 const REOPEN_AT = 250;
@@ -593,8 +593,8 @@ function elo(a: Manager, b: Manager, score: number) {
   b.elo = Math.round(b.elo + k * (1 - score - (1 - ea)));
 }
 
-/** Применяет итог боя к миру: износ, статистика моделей, награды, рейтинг. */
-/** Стоимость команд обеих сторон по базовым ценам — от неё считается призовой фонд. */
+/** Applies a battle result to the world: wear, model statistics, rewards, rating. */
+/** Both sides' team value at base prices — the battle purse is computed from it. */
 export function sideTeamValues(st: BattleState): [number, number] {
   const v: [number, number] = [0, 0];
   for (const [uid, side] of Object.entries(st.sideOf)) v[side] += model(st.modelOf[uid]).basePrice;
@@ -605,7 +605,7 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
   const a = getManager(w, aId);
   const b = getManager(w, bId);
   const sides: [Manager, Manager] = [a, b];
-  // стоимость команд по базовым ценам — от неё призовой фонд
+  // team value at base prices — the battle purse comes from it
   const teamValue = sideTeamValues(st);
   for (let s = 0; s < 2; s++) {
     const res = st.winner === null ? 0.5 : st.winner === s ? 1 : 0;
@@ -636,12 +636,12 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     amount: 0,
     note: st.winner === null ? 'draw' : st.winner === 0 ? a.id : b.id,
   });
-  // Сломанные списанные роботы Арены отправляются в утиль
+  // Broken written-off Arena robots go to the scrap heap
   for (const uid of Object.keys(st.wear)) {
     const r = w.robots[uid];
     if (r?.loaner && r.durability <= 0) delete w.robots[uid];
   }
-  // Сломанные роботы выпадают из команды
+  // Broken robots drop out of the deck
   for (const m of sides) {
     m.team = m.team.filter((u) => (w.robots[u]?.durability ?? 0) > 0);
     syncDecks(w, m);
@@ -654,7 +654,7 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
   }
 }
 
-// ---------- поведение NPC ----------
+// ---------- NPC behaviour ----------
 
 const power = (modelId: string) => {
   const md = model(modelId);
@@ -663,7 +663,7 @@ const power = (modelId: string) => {
 
 function teamValue(w: World, m: Manager, rel: Record<string, number>) {
   const base = strategyValue(w, m, rel);
-  // Свой класс — в приоритете: NPC собирает команду вокруг него
+  // Their own class comes first: an NPC builds its team around it
   return (r: Robot) => base(r) * (m.focus && classOf(r.modelId) === m.focus ? 2 : 1);
 }
 
@@ -697,12 +697,12 @@ function countOwned(w: World, m: Manager, modelId: string) {
   return robotsOf(w, m.id).filter((r) => r.modelId === modelId && r.durability > 0).length;
 }
 
-/** Ход менеджера-NPC между боями: ремонт, продажа лома, покупки по стратегии, сборка команды. */
+/** An NPC manager's turn between battles: repairs, selling scrap, buying by strategy, building the team. */
 export function npcManage(w: World, m: Manager, rng: Rng) {
   const rel = actualRelevance(w);
   const owned = () => robotsOf(w, m.id);
 
-  // 1. Сломанные и изношенные
+  // 1. Broken and worn robots
   for (const r of owned()) {
     if (durFrac(r) > 0.3) continue;
     const q = repairQuote(w, r);
@@ -713,12 +713,12 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     else if (r.durability <= 0 && sell(w, m.id, r.uid)) recycle(w, m.id, r.uid);
   }
 
-  // Экономные с деньгами заранее чинят изношенных
+  // Thrifty NPCs with money repair worn robots in advance
   if (m.strategy === 'thrifty' && m.credits > 250) {
     for (const r of owned()) if (durFrac(r) <= 0.6 && m.credits > 200) repair(w, m.id, r.uid);
   }
 
-  // 2а. Добрать роботов своего класса (хотим не меньше 6 рабочих)
+  // 2a. Top up robots of their own class (want at least 8 working)
   const focusModels = m.focus ? MODELS.filter((x) => classOf(x.id) === m.focus) : [];
   const focusOwned = owned().filter((r) => r.durability > 0 && classOf(r.modelId) === m.focus).length;
   if (m.focus && focusOwned < 8 && m.credits > 160) {
@@ -736,7 +736,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     if (options.length) buy(w, m.id, options[0].offer!.broker.id, options[0].x.id);
   }
 
-  // 2б. Сделка по стратегии (не каждый раз; богатые торгуют всегда). Чаще — внутри своего класса.
+  // 2b. A deal by strategy (not every time; the rich always trade). More often within their own class.
   const universe = m.focus && rng.next() < 0.6 ? focusModels : MODELS;
   if (m.credits > 400 || rng.next() < 0.35) {
     if (m.strategy === 'hype') {
@@ -745,11 +745,11 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
       const offer = target && cheapestOffer(w, target.id);
       if (target && offer && m.credits - offer.price >= 80) buy(w, m.id, offer.broker.id, target.id);
     } else if (m.strategy === 'contrarian') {
-      // Продать то, что все переоценили…
+      // Sell what everyone overrates…
       for (const r of owned()) {
         if (r.durability > 0 && rel[r.modelId] > 62 && rng.next() < 0.5) sell(w, m.id, r.uid);
       }
-      // …и купить самое недооценённое: побеждает часто, а стоит дешевле базовой цены
+      // ……and buy the most underrated: wins often but costs less than its base price
       const underrated = (id: string, price: number) => winRate(w.stats[id]) / (price / model(id).basePrice);
       const ranked = universe.map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
         .filter((o) => o.offer && countOwned(w, m, o.x.id) < MAX_SAME_MODEL && o.x.cost >= 2)
@@ -759,7 +759,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     }
   }
 
-  // 3. Собрать команду; если не получается — докупить дешёвых роботов
+  // 3. Build the team; if that fails, buy cheap robots
   let hasTeam = false;
   for (let guard = 0; guard < 12; guard++) {
     const team = buildTeam(owned(), teamValue(w, m, rel), NPC_DECK_COST);
@@ -770,12 +770,12 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     }
     const working = owned().filter((r) => r.durability > 0);
     const mostExpensive = [...working].sort((x, y) => model(y.modelId).cost - model(x.modelId).cost)[0];
-    // Роботов хватает, но не влезают в лимит — продаём самого дорогого
+    // Enough robots, but they don't fit the limit — sell the most expensive one
     if (working.length >= TEAM_MIN) {
       if (!mostExpensive || sell(w, m.id, mostExpensive.uid)) break;
       continue;
     }
-    // Роботов мало — докупаем самых дешёвых
+    // Too few robots — buy the cheapest
     const cheap = MODELS.filter((x) => x.cost <= 3 && countOwned(w, m, x.id) < MAX_SAME_MODEL)
       .map((x) => ({ x, offer: cheapestOffer(w, x.id) }))
       .filter((o) => o.offer && o.offer.price <= m.credits)
@@ -789,15 +789,15 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
       buy(w, m.id, cheap[0].offer!.broker.id, cheap[0].x.id);
       continue;
     }
-    // Совсем на мели: продать дорогого робота, чтобы купить дешёвых
+    // Totally broke: sell an expensive robot to buy cheap ones
     if (mostExpensive && model(mostExpensive.modelId).cost > 2 && !sell(w, m.id, mostExpensive.uid)) continue;
-    // Ничего не помогло — пособие Арены
+    // Nothing helped — the Arena's handout
     if (claimLoaner(w, m.id)) break;
   }
 
-  // 3б. Апгрейд: богатый NPC покупает более дорогого робота (своего класса, если есть) взамен самого дешёвого
-  // в команде. Деньги уходят брокеру, тот закупается на Фабрике — так лишние кредиты выходят из экономики,
-  // а у дорогих роботов появляется спрос.
+  // 3b. Upgrade: a rich NPC buys a more expensive robot (of its class if possible) instead of the cheapest one
+  // in its team. The money goes to a broker, who restocks from the Factory — so extra credits leave the economy,
+  // and expensive robots get demand.
   if (hasTeam && m.credits > 450 && rng.next() < 0.6) {
     const team = owned().filter((r) => m.team.includes(r.uid));
     const cheapest = [...team].sort((x, y) => model(x.modelId).cost - model(y.modelId).cost)[0];
@@ -816,7 +816,7 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     }
   }
 
-  // 4. Не копить лишнее: больше 12 рабочих роботов — продать худших
+  // 4. Don't hoard: more than 4 spare working robots — sell the worst
   const extra = owned().filter((r) => r.durability > 0 && !m.team.includes(r.uid));
   if (hasTeam && extra.length > 4) {
     const val = teamValue(w, m, rel);
@@ -824,23 +824,23 @@ export function npcManage(w: World, m: Manager, rng: Rng) {
     for (const r of extra.slice(0, extra.length - 4)) sell(w, m.id, r.uid);
   }
 
-  // 5. Иногда NPC вкладываются в брокера в беде
+  // 5. Sometimes NPCs invest in a broker in trouble
   if (m.credits > 500 && rng.next() < 0.05) {
     const poor = w.brokers.filter((b) => b.credits < 300).sort((x, y) => x.credits - y.credits)[0];
     if (poor) invest(w, m.id, poor.id, 150);
   }
 }
 
-// ---------- брокеры: час и день ----------
+// ---------- brokers: hour and day ----------
 
 function brokerHour(w: World, rel: Record<string, number>) {
   for (const b of w.brokers) {
     for (const x of MODELS) b.perceived[x.id] = updatePerceived(b.perceived[x.id], rel[x.id], b.style);
     if (b.closed) continue;
-    // Скупщик лома чинит сломанных и выставляет на продажу
+    // The scrap dealer repairs broken robots and puts them up for sale
     if (b.style.scrapper) {
       const broken = robotsOf(w, b.id).filter((r) => r.durability <= 0);
-      // Лишний лом переплавляется — робот исчезает из мира
+      // Extra scrap is melted down — the robot leaves the world
       for (const r of broken.splice(0, Math.max(0, broken.length - SCRAP_YARD_CAP))) delete w.robots[r.uid];
       for (const r of broken.slice(0, 4)) {
         const cost = Math.round(repairCost(brokerFair(w, b, r.modelId), r) * 0.6);
@@ -850,19 +850,19 @@ function brokerHour(w: World, rel: Record<string, number>) {
         ledger(w, { kind: 'repair', from: b.id, to: 'burn', uid: r.uid, amount: cost });
       }
     }
-    // Дозакупка на Фабрике. Дорогие модели Фабрика выпускает понемногу: не больше 1 в день (энергия 5–6)
-    // и 2 в день (энергия 4) на брокера — их не хватает, на дефиците цена прыгает.
+    // Restocking from the Factory. The Factory makes expensive models slowly: at most 1 a day (energy 5–6)
+    // and 2 a day (energy 4) per broker — they run short, and the price jumps on the shortage.
     for (const x of MODELS) {
       const stock = brokerStock(w, b, x.id).length;
       if (stock >= b.style.targetStock) continue;
       const cap = x.cost >= 5 ? 1 : x.cost === 4 ? 2 : Infinity;
       if ((b.restockedToday?.[x.id] ?? 0) >= cap) continue;
-      // запас денег после закупки: на дорогую модель нужен больший резерв, иначе маленький брокер прогорает
+      // cash reserve after restocking: an expensive model needs a bigger reserve, otherwise a small broker goes broke
       if (b.credits - x.basePrice < BANKRUPT_BELOW + Math.max(100, x.basePrice * 0.8)) continue;
-      // Брокер не завозит то, что придётся продать дешевле закупки: такой робот пропадает со склада,
-      // дефицит поднимает цену, и когда завоз снова окупается — брокер его закупает.
+      // A broker doesn't stock what it would have to sell below cost: such a robot disappears from stock,
+      // the shortage raises the price, and once restocking pays again the broker buys it.
       if (askPrice(brokerFair(w, b, x.id), b.style) < x.basePrice) continue;
-      b.credits -= x.basePrice; // деньги уходят Фабрике — сток
+      b.credits -= x.basePrice; // the money goes to the Factory — a sink
       b.restockedToday = { ...(b.restockedToday ?? {}), [x.id]: (b.restockedToday?.[x.id] ?? 0) + 1 };
       const r = mint(w, x.id, b.id);
       ledger(w, { kind: 'mint', from: b.id, to: 'factory', uid: r.uid, amount: x.basePrice });
@@ -876,7 +876,7 @@ function brokerHour(w: World, rel: Record<string, number>) {
 
 function brokerDayEnd(w: World) {
   for (const b of w.brokers) {
-    // Прибыль — рост капитала за день (а не только денег: закупка склада — не убыток)
+    // Profit = equity growth over the day (not just cash: buying stock isn't a loss)
     const profit = brokerEquity(w, b) - (b.dayStartEquity ?? brokerEquity(w, b)) - b.investedToday;
     b.lastDividend = 0;
     const total = Object.values(b.shares).reduce((s, x) => s + x, 0);
@@ -885,7 +885,7 @@ function brokerDayEnd(w: World) {
       profit > 0 && !b.closed ? Math.min(profit * DIVIDEND_SHARE, Math.max(0, b.credits - BANKRUPT_BELOW - 200)) / total : 0;
     b.divPerShareLog = [...(b.divPerShareLog ?? []), perShare].slice(-7);
     if (profit > 0 && !b.closed) {
-      // дивиденды не должны разорять брокера: платим только из свободных денег
+      // dividends must not ruin the broker: pay only from free cash
       const pool = Math.min(profit * DIVIDEND_SHARE, Math.max(0, b.credits - BANKRUPT_BELOW - 200));
       for (const [owner, sh] of Object.entries(b.shares)) {
         if (owner === HOUSE) continue;
@@ -908,7 +908,7 @@ function brokerDayEnd(w: World) {
   }
 }
 
-// ---------- время ----------
+// ---------- time ----------
 
 function snapshot(w: World, rel: Record<string, number>) {
   const price = Object.fromEntries(MODELS.map((x) => [x.id, Math.round(refPrice(w, x.id))]));
@@ -950,7 +950,7 @@ function seasonEnd(w: World) {
     'season',
     `Season ${w.season} is over. Champion: ${res.champions[0].name}. Magnate: ${res.magnates[0].name}.`,
   );
-  // Мета перезапускается: актуальность сдвигается к 50, история боёв укорачивается
+  // The meta restarts: relevance drifts toward 50, the battle history gets shorter
   for (const b of w.brokers) for (const x of MODELS) b.perceived[x.id] += (50 - b.perceived[x.id]) * 0.3;
   for (const x of MODELS) w.stats[x.id].recent = w.stats[x.id].recent.slice(-Math.floor(ECON.recentWindow / 2));
   w.season++;
@@ -969,7 +969,7 @@ function endHour(w: World) {
   }
 }
 
-/** Подбор соперника по рейтингу: случайный из 4 ближайших по ELO. */
+/** Matchmaking by rating: a random one of the 4 closest by ELO. */
 export function findOpponent(pool: Manager[], me: Manager, r: Rng): Manager {
   const near = pool
     .filter((x) => x.id !== me.id)
@@ -983,7 +983,7 @@ export function pickOpponentForPlayer(w: World): Manager {
   return withRng(w, (r) => findOpponent(npcs, getManager(w, PLAYER_ID), r));
 }
 
-/** Один матч двух NPC-команд. */
+/** One match between two NPC teams. */
 export function playNpcMatch(w: World) {
   const npcs = w.managers.filter((m) => m.id !== PLAYER_ID);
   const [a, b] = withRng(w, (r) => {
@@ -1008,12 +1008,12 @@ export function playNpcMatch(w: World) {
   if (w.tick % MATCHES_PER_HOUR === 0) endHour(w);
 }
 
-/** Прокрутить N игровых часов. */
+/** Run N game hours. */
 export function advanceHours(w: World, hours: number) {
   for (let i = 0; i < hours * MATCHES_PER_HOUR; i++) playNpcMatch(w);
 }
 
-// ---------- создание мира ----------
+// ---------- creating the world ----------
 
 const NPC_TEAMS: [string, Strategy][] = [
   ['Rusty Dogs', 'hype'],
@@ -1131,7 +1131,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
   player.team = STARTER_TEAM.map((id) => mint(w, id, PLAYER_ID).uid);
   ensureDecks(player);
 
-  // Разогрев: мир живёт день до прихода игрока, чтобы у цен уже была история
+  // Warm-up: the world lives a day before the player arrives, so prices already have a history
   advanceHours(w, warmupHours);
   w.events = [];
   w.seasons = [];

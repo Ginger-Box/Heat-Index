@@ -78,7 +78,7 @@ export function Hangar({ w }: { w: World }) {
       return (sort.desc ? -c : c) || model(a.modelId).name.localeCompare(model(b.modelId).name, 'en');
     });
 
-  // Любое изменение состава сразу сохраняется в мир — отдельной кнопки «Сохранить» нет.
+  // Every change to a deck is saved to the world right away — there is no separate "Save" button.
   const save = (uids: string[]) => {
     if (cur < 0) return false;
     const err = act((w) => setDeck(w, PLAYER_ID, cur, uids));
@@ -88,12 +88,12 @@ export function Hangar({ w }: { w: World }) {
   const run = (fn: (w: World) => string | null) => setMsg(act(fn));
 
   const remove = (uid: string) => save(teamUids.filter((u) => u !== uid));
-  /** Положить робота в слот idx (или в первый свободный). Занятый слот — замена; робот из другого слота — обмен местами. */
+  /** Put a robot into slot idx (or the first free one). A taken slot — replace; a robot from another slot — swap. */
   const place = (uid: string, idx?: number): boolean => {
     const next = [...teamUids];
     const from = next.indexOf(uid);
     if (idx === undefined || idx >= next.length) {
-      if (from >= 0) return false; // уже в команде
+      if (from >= 0) return false; // already in the deck
       if (next.length >= TEAM_SIZE) {
         sfx('ui-error');
         setMsg(`All ${TEAM_SIZE} slots are full — remove someone or drop the robot onto a taken slot`);
@@ -108,7 +108,7 @@ export function Hangar({ w }: { w: World }) {
     return save(next);
   };
 
-  // Перетаскивание: на слот — поставить/заменить/поменять местами, в Ангар — убрать из команды
+  // Dragging: onto a slot — place / replace / swap, into the Hangar — remove from the deck
   const drag = useCardDrag((uid, target) => {
     if (target?.startsWith('slot-')) return place(uid, Number(target.slice(5)));
     if (target === 'pool') return teamUids.includes(uid) ? remove(uid) : 'cancel';

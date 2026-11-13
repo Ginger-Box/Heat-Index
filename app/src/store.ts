@@ -1,5 +1,5 @@
-// Хранилище мира на клиенте: один объект World + счётчик версий для перерисовки React.
-// Позже этот слой заменяется на сервер, который пишет сделки и бои в NEAR.
+// Client-side world store: one World object + a version counter to re-render React.
+// The player's trades and battles are mirrored on NEAR by src/near/bridge.ts.
 import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
 import { createWorld, ensureDecks, type World } from './engine/world';
@@ -21,7 +21,7 @@ function load(): World | null {
   }
 }
 
-/** Подтянуть в старое сохранение настройки, которые поменялись после балансировки. */
+/** Bring an old save up to date with settings that changed after balancing. */
 function migrate(w: World): World {
   // player decks (added after v5 started): the current team becomes deck 1
   const me = w.managers.find((m) => m.id === 'player');
@@ -40,7 +40,7 @@ function save() {
     try {
       if (world) localStorage.setItem(KEY, JSON.stringify(world));
     } catch {
-      /* хранилище недоступно — играем без сохранения */
+      /* storage unavailable — play without saving */
     }
   }, 500);
 }
@@ -84,7 +84,7 @@ export function getWorld(): World | null {
   return world;
 }
 
-/** Изменить мир и перерисовать интерфейс. Функция возвращает текст ошибки или null. */
+/** Change the world and re-render. The function returns an error text or null. */
 export function act(fn: (w: World) => string | null | void): string | null {
   const w = getWorld();
   if (!w) return 'World is not loaded';
@@ -97,13 +97,13 @@ export function act(fn: (w: World) => string | null | void): string | null {
 export function notify(background = false) {
   version++;
   save();
-  // Фоновые изменения (бои NPC, перемотка) рендерятся с низким приоритетом: React дробит работу
-  // и уступает вводу — курсор и клики не подлагивают. Действия игрока — сразу.
+  // Background changes (NPC battles, fast-forward) render at low priority: React splits the work
+  // and yields to input — the cursor and clicks never lag. Player actions render right away.
   if (background) startTransition(() => listeners.forEach((l) => l()));
   else for (const l of listeners) l();
 }
 
-/** Как act(), но для фоновых обновлений мира (живой мир, перемотка). */
+/** Like act(), but for background world updates (live world, fast-forward). */
 export function actBackground(fn: (w: World) => void) {
   const w = getWorld();
   if (!w) return;

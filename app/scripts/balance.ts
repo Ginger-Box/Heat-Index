@@ -1,5 +1,5 @@
-// Проверка баланса: тысячи боёв случайных команд, доля побед по моделям.
-// Запуск: npx tsx scripts/balance.ts [боёв]
+// Balance check: thousands of battles between random teams, win rate per model.
+// Run: npx tsx scripts/balance.ts [battles]
 import '../src/engine/ai';
 import { simulateBattle, wearLoss } from '../src/engine/battle';
 import { Rng } from '../src/engine/rng';
@@ -37,9 +37,9 @@ for (let i = 0; i < N; i++) {
   }
 }
 
-console.log(`Боёв: ${N}, ничьих: ${((draws / N) * 100).toFixed(1)}%, ходов в среднем: ${(rounds / N).toFixed(2)}`);
-console.log(`Средний износ выставленного робота за бой: ${(wear / fielded).toFixed(2)}`);
-console.log('Модель'.padEnd(14), 'Энергия', 'Побед%', 'Выставлений');
+console.log(`Battles: ${N}, draws: ${((draws / N) * 100).toFixed(1)}%, average turns: ${(rounds / N).toFixed(2)}`);
+console.log(`Average wear of a fielded robot per battle: ${(wear / fielded).toFixed(2)}`);
+console.log('Model'.padEnd(14), 'Energy', 'Win%', 'Fielded');
 for (const id of ids.sort((x, y) => stat[y].wins / stat[y].games - stat[x].wins / stat[x].games)) {
   const s = stat[id];
   console.log(

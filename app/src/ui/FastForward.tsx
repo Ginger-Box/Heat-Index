@@ -5,7 +5,7 @@ import { actBackground, getWorld } from '../store';
 import { Cr, Delta, LINE_COLORS, LineChart } from './common';
 
 const TOTAL_HOURS = HOURS_PER_DAY * DAYS_PER_SEASON;
-const MS_PER_HOUR = 380; // ≈ 32 секунды на неделю + время расчёта
+const MS_PER_HOUR = 380; // ≈ 32 ≈ 32 seconds per week + compute time
 
 export function FastForward({ onClose }: { onClose: () => void }) {
   const w0 = getWorld()!;

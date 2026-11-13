@@ -93,11 +93,11 @@ export function useCardDrag(onDrop: (id: string, target: string | null) => boole
       flying.current = null;
       setDragId(null);
       setGhostNode(null);
-      // подсказки карт полсекунды не всплывают — чтобы не выскакивать под курсором сразу после броска
+      // card tooltips don't pop up for half a second — so they don't appear under the cursor right after a drop
       document.body.classList.add('tip-cooldown');
       setTimeout(() => document.body.classList.remove('tip-cooldown'), 500);
     };
-    /** Анимация посадки прямо на месте (без пересоздания карты — иначе заново мигает подсказка). */
+    /** Landing animation in place (without re-creating the card — otherwise the tooltip blinks again). */
     const landFx = (id: string) =>
       requestAnimationFrame(() => {
         const host = document.querySelector(`[data-drag-id="${CSS.escape(id)}"]`) as HTMLElement | null;

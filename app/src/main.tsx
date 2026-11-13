@@ -9,9 +9,9 @@ import { installBridge } from './near/bridge'
 
 initAudio()
 
-// Масштаб интерфейса под экран: эталон 1600×900. На 1080p ≈ ×1,2, на 1440p ≈ ×1,6, на маленьком ноутбуке ≈ ×0,85.
-// Масштабируется всё сразу (текст, панели, карты), как в играх. --app-h — высота окна в «масштабированных» пикселях
-// (vh внутри элемента с zoom браузеры считают по-разному, поэтому считаем сами).
+// UI scale for the screen: reference 1600×900. 1080p ≈ ×1.2, 1440p ≈ ×1.6, a small laptop ≈ ×0.85.
+// Everything scales together (text, panels, cards), like in games. --app-h is the window height in scaled pixels
+// (vh (browsers compute vh inside a zoomed element differently, so we compute it ourselves).
 function applyUiScale() {
   const s = Math.min(2, Math.max(0.8, Math.min(window.innerWidth / 1600, window.innerHeight / 900)))
   const root = document.documentElement
@@ -21,7 +21,7 @@ function applyUiScale() {
 applyUiScale()
 window.addEventListener('resize', applyUiScale)
 
-// Курсор и «ламповое» свечение под ним (ui/fx.ts)
+// Cursor and the "tube" glow under it (ui/fx.ts)
 initFx()
 
 // NEAR: mirror the player's trades and battles on-chain when they are logged in (src/near)

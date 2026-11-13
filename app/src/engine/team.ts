@@ -1,4 +1,4 @@
-// Правила состава команды: 10–15 роботов, лимит 42 энергии, не больше 2 одной модели, без сломанных.
+// Deck rules: 10–15 robots, deck cost (sum of energy costs) at most 42, at most 2 of one model, none broken.
 import { MAX_SAME_MODEL, TEAM_ENERGY_CAP, TEAM_MAX, TEAM_MIN, model, type Robot } from './robots';
 import type { Rng } from './rng';
 
@@ -16,7 +16,7 @@ export function teamError(team: Robot[]): string | null {
   return null;
 }
 
-/** Проверка неполной команды (пока игрок собирает её в Ангаре): всё, кроме «ровно 8». */
+/** Check of an incomplete deck (while the player builds it in the Hangar): everything except the size minimum. */
 export function partialTeamError(team: Robot[]): string | null {
   if (team.length > TEAM_MAX) return `A deck holds at most ${TEAM_MAX} robots`;
   if (new Set(team.map((r) => r.uid)).size !== team.length) return 'This robot is already in the team';
@@ -34,11 +34,11 @@ export function partialTeamError(team: Robot[]): string | null {
 export const teamEnergy = (team: Robot[]) => team.reduce((s, r) => s + model(r.modelId).cost, 0);
 
 /**
- * Собирает лучшую команду из доступных роботов по оценке `value`.
- * Жадно: берём самых ценных, пока влезают в лимит, оставляя энергию на оставшиеся места.
+ * Builds the best deck from the available robots by the `value` score.
+ * Greedy: take the most valuable ones while they fit the limit, keeping energy for the remaining slots.
  */
 export function buildTeam(pool: Robot[], value: (r: Robot) => number, cap = TEAM_ENERGY_CAP): Robot[] | null {
-  // Жадно по ценности; если не вышло — запасной вариант «самые дешёвые», он почти всегда влезает.
+  // Greedy by value; if that fails — fallback "cheapest first", which almost always fits.
   return buildGreedy(pool, value, cap) ?? buildGreedy(pool, (r) => -model(r.modelId).cost * 100 + value(r) * 0.001, cap);
 }
 
@@ -69,7 +69,7 @@ function buildGreedy(pool: Robot[], value: (r: Robot) => number, cap: number): R
 }
 
 let tmpSerial = 0;
-/** Случайная допустимая команда из новых роботов — для тестов баланса. */
+/** A random valid deck of new robots — for balance tests. */
 export function randomTeam(rng: Rng, modelIds: string[]): Robot[] {
   for (;;) {
     const pool: Robot[] = [];

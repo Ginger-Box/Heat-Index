@@ -26,7 +26,7 @@ npx tsx scripts/tune.ts          # auto-tuner for class stats
   `pricing.ts` (all pricing in one readable file), `world.ts` (brokers, NPC teams, time).
 - `src/screens/` — Arena, Hangar, Market, Brokers, Analytics, Ratings.
 - `src/ui/` — shared components, card drag & drop, cursor and screen effects, boot screen, pixel robot generator.
-- Design: `../DESIGN.md`. History: `../DEVLOG.md`. Sound credits: `SOUNDS.md`.
+- History: `../DEVLOG.md`. Sound credits: `SOUNDS.md`.
 
 ## Credits
 

@@ -1,5 +1,5 @@
-// Автоподбор характеристик классов под новый бой: сильнейшему классу −1, слабейшему +1, пока все не в 44–56%.
-// Запуск: npx tsx scripts/tune.ts [боёв на пару] [итераций]. Печатает итоговые поправки по классам.
+// Auto-tuner for class stats: the strongest class −1, the weakest +1, until all are within 44–56%.
+// Run: npx tsx scripts/tune.ts [battles per pair] [iterations]. Prints the final per-class adjustments.
 import '../src/engine/ai';
 import { simulateBattle } from '../src/engine/battle';
 import { Rng } from '../src/engine/rng';
@@ -9,7 +9,7 @@ import { buildTeam } from '../src/engine/team';
 const N = Number(process.argv[2] ?? 80);
 const ITER = Number(process.argv[3] ?? 14);
 const base = Object.fromEntries(MODELS.map((m) => [m.id, { atk: m.atk, hp: m.hp }]));
-// поправки по отдельным роботам; в каждом классе крутим «указатель», чтобы шаг был в 1 робота, а не во весь класс
+// per-robot adjustments; each class has a rotating pointer so a step changes one robot, not the whole class
 const dHp: Record<string, number> = Object.fromEntries(MODELS.map((m) => [m.id, 0]));
 const dAtk: Record<string, number> = Object.fromEntries(MODELS.map((m) => [m.id, 0]));
 const ptr: Record<string, number> = Object.fromEntries(CLASSES.map((c) => [c, 0]));
@@ -19,7 +19,7 @@ const apply = () => {
     m.atk = Math.max(1, base[m.id].atk + dAtk[m.id]);
   }
 };
-/** Сдвинуть класс на один шаг: по очереди роботам класса, чередуя HP и атаку. */
+/** Move a class one step: robot by robot within the class, alternating HP and attack. */
 function nudge(c: RobotClass, dir: 1 | -1) {
   const ms = MODELS.filter((m) => classOf(m.id) === c);
   const k = ptr[c]++;
@@ -47,7 +47,7 @@ function matrix(seed: number) {
     for (const b of CLASSES) {
       if (a >= b) continue;
       for (let i = 0; i < N; i++) {
-        const swap = i % 2 === 1; // кто ходит первым — поровну
+        const swap = i % 2 === 1; // who moves first — split evenly
         const ta = classTeam(rng, a);
         const tb = classTeam(rng, b);
         const st = simulateBattle(swap ? tb : ta, swap ? ta : tb, seed * 1000 + i, [{ careful: 0.4 }, { careful: 0.4 }]);

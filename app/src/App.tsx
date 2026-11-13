@@ -45,7 +45,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
-const LIVE_MS = 2500; // в живом режиме NPC играют матч каждые 2,5 секунды
+const LIVE_MS = 2500; // in the live world NPCs play a match every 2.5 seconds
 
 export default function App() {
   const w = useWorld();
@@ -169,7 +169,7 @@ export default function App() {
 
       {tutorial === 'tour' && <Tour onTab={(t) => setTab(t as Tab)} onDone={() => advanceTutorial('done')} />}
 
-      {/* key={tab}: при смене вкладки блок пересоздаётся и проигрывает «включение кинескопа» */}
+      {/* key={tab}: switching tabs re-creates the block, which plays the "CRT power-on" */}
       <div className="content tab-crt" key={tab}>
         {tutorial === 'battle' ? (
           <Arena w={w} tutorial={{ onDone: () => advanceTutorial('tour') }} key="training" />

@@ -20,7 +20,7 @@ export function Analytics({ w }: { w: World }) {
   const [hl, setHl] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const hist = w.history;
-  // По умолчанию — 6 моделей с самым большим размахом
+  // By default — the 6 models with the biggest swing
   const swing = (id: string) => {
     const xs = hist.map((h) => (metric === 'price' ? h.price[id] / MODELS.find((m) => m.id === id)!.basePrice : h.rel[id]));
     return xs.length ? Math.max(...xs) - Math.min(...xs) : 0;

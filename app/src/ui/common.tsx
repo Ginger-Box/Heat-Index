@@ -4,7 +4,7 @@ import { AttackIcon, EnergyIcon, HpIcon } from './icons';
 import { RobotSprite } from './robotArt';
 import { ABILITY_HELP, ABILITY_LABEL, CLASS_HELP, CLASS_ICON, CLASS_LABEL, abilityHasN, classOf, maxDurability, model } from '../engine/robots';
 
-// Цвет рамки по стоимости в энергии (заглушка вместо арта)
+// Card frame colour by energy cost (a placeholder until card art)
 export const COST_COLOR = ['#8a8fbf', '#9aa3c7', '#3bff9a', '#22e3ff', '#a66bff', '#ff2bd6', '#f7f33b'];
 
 
@@ -24,7 +24,7 @@ export function DurBar({ value, max = 10 }: { value: number; max?: number }) {
 export function RobotCard(props: {
   modelId: string;
   durability?: number;
-  hp?: number; // текущее HP в бою
+  hp?: number; // current HP in battle
   selected?: boolean;
   onClick?: () => void;
   footer?: ReactNode;
@@ -39,9 +39,9 @@ export function RobotCard(props: {
   const broken = props.durability !== undefined && props.durability <= 0;
   const ab = md.ability;
   const [tip, setTip] = useState<{ below: boolean; shift: number }>({ below: false, shift: 0 });
-  /** Перед показом подсказки проверяем, есть ли для неё место; если нет — открываем снизу или сдвигаем внутрь экрана. */
+  /** Before showing the tooltip, check there is room for it; if not, open it below or shift it inside the screen. */
   const placeTip = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.currentTarget.closest('.card-peek')) return; // в превью рынка подсказка всегда справа
+    if (e.currentTarget.closest('.card-peek')) return; // in the Market preview the tooltip is always on the right
     const box = e.currentTarget.querySelector('.cardtip') as HTMLElement | null;
     if (!box) return;
     const s = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
@@ -155,7 +155,7 @@ export function Tip({ children, text }: { children: ReactNode; text: ReactNode }
   );
 }
 
-/** Метка класса: иконка + название. */
+/** Class tag: icon + name. */
 export function ClassTag({ modelId, cls }: { modelId?: string; cls?: import('../engine/robots').RobotClass }) {
   const c = cls ?? classOf(modelId!);
   return (
@@ -168,10 +168,10 @@ export function ClassTag({ modelId, cls }: { modelId?: string; cls?: import('../
 const GLYPHS = '#$%&@!?/\\<>[]{}=+*^~01';
 
 /**
- * Значение с глитч-эффектом: когда текст меняется, символы на ~0,3 с превращаются в шум,
- * картинка расслаивается на голубой и розовый, потом слева направо проявляется новое значение.
- * Шум рисуется поверх «невидимого» нового значения, поэтому ширина и высота элемента
- * не скачут — таблицы и строки не дёргаются.
+ * A value with a glitch effect: when the text changes, the characters turn into noise for ~0.3 s,
+ * the picture splits into cyan and magenta, then the new value appears from left to right.
+ * The noise is drawn over the "invisible" new value, so the element's width and height
+ * don't jump — tables and rows don't twitch.
  */
 export function Glitch({
   text,
@@ -180,15 +180,15 @@ export function Glitch({
 }: {
   text: string | number;
   className?: string;
-  /** громкость глич-звука (0 — без звука; по умолчанию звучат только кредиты игрока) */
+  /** glitch sound volume (0 — silent; by default only the player's credits make a sound) */
   volume?: number;
 }) {
   const value = String(text);
   const root = useRef<HTMLSpanElement | null>(null);
   const live = useRef<HTMLSpanElement | null>(null);
   const prev = useRef(value);
-  // Шум рисуется напрямую в DOM (без перерисовок React) — иначе при массовом обновлении цен
-  // сотни перерисовок в секунду забивают главный поток и курсор начинает подлагивать.
+  // The noise is drawn directly in the DOM (no React re-renders) — otherwise, when many prices update at once,
+  // hundreds of re-renders per second clog the main thread and the cursor starts to lag.
   useEffect(() => {
     if (prev.current === value) return;
     prev.current = value;
@@ -250,7 +250,7 @@ export function Delta({ v, suffix = '%' }: { v: number; suffix?: string }) {
   );
 }
 
-/** Мини-график без библиотек. */
+/** A tiny chart without libraries. */
 export function Spark({ data, width = 110, height = 28, color = 'var(--cyan)' }: {
   data: number[];
   width?: number;

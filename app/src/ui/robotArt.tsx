@@ -7,7 +7,7 @@
 // Size grows with energy cost; small details are picked deterministically from the model id.
 // Fast classes lean forward: rows are sheared toward the enemy, which reads as motion.
 // Each class also gets an animated layer (lightning, flames, fuse sparks, steam, rotor blur, shield glint),
-// drawn as two pixel frames that the CSS flips between (index.css · "живые спрайты").
+// drawn as two pixel frames that the CSS flips between (index.css · "living sprites").
 
 import { memo, type ReactElement } from 'react';
 import { classOf, model } from '../engine/robots';

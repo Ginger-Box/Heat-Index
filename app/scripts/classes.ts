@@ -1,5 +1,5 @@
-// Баланс классов: команды «вокруг класса» (как у NPC) играют каждый с каждым.
-// Запуск: npx tsx scripts/classes.ts [боёв на пару]
+// Class balance: class-built teams (like the NPCs') play everyone against everyone.
+// Run: npx tsx scripts/classes.ts [battles per pair]
 import '../src/engine/ai';
 import { simulateBattle } from '../src/engine/battle';
 import { Rng } from '../src/engine/rng';
@@ -35,7 +35,7 @@ for (const a of CLASSES)
     for (let i = 0; i < N; i++) {
       const ta = classTeam(a);
       const tb = classTeam(b);
-      const swap = i % 2 === 1; // кто ходит первым — поровну
+      const swap = i % 2 === 1; // who moves first — split evenly
       const st = simulateBattle(swap ? tb : ta, swap ? ta : tb, i + 1, [{ careful: 0.4 }, { careful: 0.4 }]);
       const aSide = swap ? 1 : 0;
       const s = st.winner === aSide ? 1 : st.winner === null ? 0.5 : 0;
@@ -49,7 +49,7 @@ for (const a of CLASSES)
     games[b] += N;
   }
 const pad = (x: string) => x.padEnd(9);
-console.log(pad(''), CLASSES.map((c) => pad(CLASS_LABEL[c])).join(''), 'ИТОГО');
+console.log(pad(''), CLASSES.map((c) => pad(CLASS_LABEL[c])).join(''), 'TOTAL');
 for (const a of [...CLASSES].sort((x, y) => wins[y] / games[y] - wins[x] / games[x])) {
   console.log(
     pad(CLASS_LABEL[a]),

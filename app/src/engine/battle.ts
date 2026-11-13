@@ -1,6 +1,6 @@
 // Battle engine «Overheat»: turns alternate, up to 4 robots per side, you choose who attacks whom.
 // Every attack heats the robot up; an overheated robot skips its next turn and wears out more after the battle.
-// Rules — DESIGN.md, section 4. Pure code (no UI): used by the game, the AI and the simulations.
+// Pure code (no UI): used by the game, the AI and the simulations.
 
 import { Rng } from './rng';
 import { model, type Robot } from './robots';
@@ -66,7 +66,7 @@ export interface BattleState {
   active: number; // whose turn it is
   sides: [SideState, SideState];
   modelOf: Record<string, string>;
-  /** чей робот: 0 или 1 (нужно, например, чтобы посчитать стоимость команд для призового фонда) */
+  /** whose robot: 0 or 1 (e.g. to value both teams for the battle purse) */
   sideOf: Record<string, number>;
   wear: Record<string, WearInfo>;
   history: BattleEvent[];
@@ -398,7 +398,7 @@ export function applyAction(st: BattleState, a: Action, ev: BattleEvent[] | null
 }
 
 /**
- * Robot wear after the battle (DESIGN.md §6): every robot that went into battle −1,
+ * Robot wear after the battle: every robot that went into battle −1,
  * destroyed −1 more, overheated −1 more (at most −3). Robots that stayed in hand don't wear.
  */
 export function wearLoss(st: BattleState, uid: string, light = false): number {

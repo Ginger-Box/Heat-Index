@@ -1,23 +1,23 @@
-// Модели роботов. Названия и цифры — рабочие заглушки (см. DESIGN.md, раздел 5).
+// Robot models. Names and numbers are tuned by the simulation scripts in scripts/.
 
 export type AbilityKind = 'armor' | 'maneuver' | 'repair' | 'blast' | 'charge' | 'shock';
-/** Класс робота = его способность; у роботов без способности класс «Базовый». */
+/** A robot's class = its ability; robots without an ability are "Basic". */
 export type RobotClass = AbilityKind | 'none';
 
 export interface Ability {
   kind: AbilityKind;
-  n: number; // сила способности (для Манёвра не используется)
+  n: number; // ability strength (unused for Maneuver)
 }
 
 export interface RobotModel {
   id: string;
   name: string;
-  cost: number; // энергия
+  cost: number; // energy
   atk: number;
   hp: number;
   ability?: Ability;
   basePrice: number; // CR
-  maxDur: number; // прочность нового робота
+  maxDur: number; // durability of a new robot
 }
 
 export const ABILITY_LABEL: Record<AbilityKind, string> = {
@@ -61,8 +61,8 @@ export const ABILITY_HELP: Record<AbilityKind, string> = {
 };
 
 /**
- * Базовая цена по стоимости в энергии — не ровная, а по кривой (×~1,8 за ступень):
- * дешёвых покупаешь сразу, на самых сильных приходится копить.
+ * Base price by energy cost — not linear but on a curve (×~1.8 per step):
+ * cheap robots you buy right away, the strongest you have to save up for.
  */
 export const BASE_PRICE = [0, 30, 55, 100, 180, 320, 560];
 
@@ -77,39 +77,39 @@ const m = (
 
 
 
-// 7 классов по 4 робота. Цифры подобраны скриптом scripts/classes.ts: классы выигрывают 47–56%.
+// 7 7 classes × 4 robots. Stats tuned with scripts/classes.ts and an A/B test: classes win 44–56%.
 export const MODELS: RobotModel[] = [
-  // Базовые
+  // Basic
   m('spark', 'Spark', 1, 2, 3),
   m('bolt', 'Bolt', 2, 3, 4),
   m('volt', 'Volt-7', 3, 4, 6),
   m('dozer', 'Dozer', 4, 5, 6),
-  // Броня
+  // Armor
   m('plate', 'Plate', 2, 1, 2, { kind: 'armor', n: 1 }),
   m('wall', 'Wall-M', 3, 1, 3, { kind: 'armor', n: 1 }),
   m('bastion', 'Bastion', 4, 2, 3, { kind: 'armor', n: 1 }),
   m('titan', 'Titan', 6, 3, 6, { kind: 'armor', n: 1 }),
-  // Манёвр
+  // Maneuver
   m('scout', 'Scout Bug', 1, 3, 3, { kind: 'maneuver', n: 0 }),
   m('hound', 'Hound', 3, 4, 5, { kind: 'maneuver', n: 0 }),
   m('ghost', 'Ghost', 4, 4, 5, { kind: 'maneuver', n: 0 }),
   m('raptor', 'Raptor', 5, 5, 6, { kind: 'maneuver', n: 0 }),
-  // Ремонт
+  // Repair
   m('drone', 'Fixdrone', 1, 1, 1, { kind: 'repair', n: 2 }),
   m('welder', 'Welder', 2, 2, 3, { kind: 'repair', n: 2 }),
   m('medic', 'Medic-X', 4, 4, 5, { kind: 'repair', n: 3 }),
   m('ark', 'Ark', 6, 5, 9, { kind: 'repair', n: 5 }),
-  // Взрыв
+  // Blast
   m('cracker', 'Firecracker', 1, 2, 2, { kind: 'blast', n: 1 }),
   m('mine', 'Mine-bot', 3, 4, 3, { kind: 'blast', n: 2 }),
   m('shrapnel', 'Shrapnel', 5, 5, 7, { kind: 'blast', n: 2 }),
   m('apoc', 'Apocalypse', 6, 8, 9, { kind: 'blast', n: 4 }),
-  // Натиск
+  // Charge
   m('dash', 'Dash', 1, 2, 2, { kind: 'charge', n: 1 }),
   m('ram', 'Ram', 2, 3, 2, { kind: 'charge', n: 1 }),
   m('hammer', 'Hammer', 3, 4, 3, { kind: 'charge', n: 1 }),
   m('bull', 'Bull', 5, 4, 5, { kind: 'charge', n: 1 }),
-  // Шок
+  // Shock
   m('zapper', 'Zapper', 2, 2, 5, { kind: 'shock', n: 0 }),
   m('arc', 'Arc', 3, 3, 6, { kind: 'shock', n: 0 }),
   m('tesla', 'Tesla-9', 4, 3, 6, { kind: 'shock', n: 0 }),
@@ -121,7 +121,7 @@ export const MODEL_BY_ID: Record<string, RobotModel> = Object.fromEntries(
 );
 
 export const classOf = (id: string): RobotClass => model(id).ability?.kind ?? 'none';
-/** Показывать ли число у способности (у Манёвра и Шока его нет). */
+/** Whether the ability shows a number (Maneuver and Shock don't have one). */
 export const abilityHasN = (k: AbilityKind) => k !== 'maneuver' && k !== 'shock';
 
 export const model = (id: string): RobotModel => {
@@ -130,9 +130,9 @@ export const model = (id: string): RobotModel => {
   return x;
 };
 
-/** Прочность зависит от модели: дешёвые 6, самые дорогие 16 (4 + 2 × энергия). */
+/** Durability depends on the model: cheap 6, the most expensive 16 (4 + 2 × energy). */
 export const maxDurability = (modelId: string) => model(modelId).maxDur;
-/** Доля оставшейся прочности 0..1. */
+/** Share of durability left, 0..1. */
 export const durFrac = (r: { modelId: string; durability: number }) => Math.max(0, r.durability) / maxDurability(r.modelId);
 /** A deck holds 10–15 robots (TEAM_SIZE = the most, used for the Hangar slots). */
 export const TEAM_MIN = 10;
@@ -141,7 +141,7 @@ export const TEAM_SIZE = TEAM_MAX;
 export const TEAM_ENERGY_CAP = 42;
 export const MAX_SAME_MODEL = 2;
 
-/** Конкретный робот (экземпляр). В блокчейне это токен NEP-245 с тиражом 1. */
+/** One concrete robot (instance). On NEAR it is a NEP-245 token with supply 1. */
 export interface Robot {
   uid: string; // "<model>#<serial>"
   modelId: string;

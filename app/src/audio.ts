@@ -98,7 +98,7 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   draw: { files: ['draw-1', 'draw-2'], vol: 0.35, spread: 0.12 },
   lock: { files: ['lock'], vol: 0.22, spread: 0.1 },
   'shock-hit': { files: ['shock-hit'], vol: 0.45, spread: 0.12 },
-  // карточные звуки (Kenney Casino Audio) с тихим «киберпанк»-слоем: стекло/глитч при подъёме, металл/стекло при посадке
+  // card sounds (Kenney Casino Audio) with a quiet cyberpunk layer: glass/glitch on pick-up, metal/glass on landing
   'card-pick': { files: ['card-pick-1', 'card-pick-2'], vol: 0.45 },
   'card-drop': { files: ['card-drop-1', 'card-drop-2'], vol: 0.55 },
 };
@@ -108,7 +108,7 @@ const MIN_GAP_MS: Partial<Record<Sfx, number>> = { glitch: 180, 'ui-hover': 60, 
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-/** Отдельная шина эффектов: тише эмбиента, чтобы клики и удары не резали слух на фоне гула. */
+/** A separate effects bus: quieter than the ambience, so clicks and hits don't cut through the hum. */
 let sfxBus: GainNode | null = null;
 const SFX_LEVEL = 0.4;
 const buffers = new Map<string, AudioBuffer>();
@@ -127,7 +127,7 @@ function readVolume(): number {
   }
 }
 
-/** Слух воспринимает громкость нелинейно — квадрат даёт ровный ход ползунка. */
+/** Hearing is non-linear — squaring gives an even slider. */
 const masterLevel = () => (enabled ? volume * volume : 0);
 function applyLevel() {
   if (master && ctx) master.gain.setTargetAtTime(masterLevel(), ctx.currentTime, 0.05);
@@ -145,7 +145,7 @@ function readPref(): boolean {
 export const soundEnabled = () => enabled;
 export const soundVolume = () => volume;
 
-/** Громкость 0..1 (сохраняется между сессиями). */
+/** Volume 0..1 (remembered between sessions). */
 export function setSoundVolume(v: number) {
   volume = Math.min(1, Math.max(0, v));
   try {

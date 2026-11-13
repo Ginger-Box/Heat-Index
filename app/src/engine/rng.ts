@@ -1,5 +1,5 @@
-// Детерминированный генератор случайных чисел (mulberry32).
-// Один и тот же seed даёт одинаковые бои — удобно для проверки и повторов.
+// Deterministic random number generator (mulberry32).
+// The same seed gives the same battles — handy for checks and replays.
 export class Rng {
   private s: number;
   constructor(seed: number) {

@@ -1,20 +1,20 @@
-// ЦЕНЫ. Вся логика цен брокеров — в этом одном файле (требование трека: «readable pricing rules»).
-// Формулы описаны в DESIGN.md, раздел 7. Объяснение цены (explainPrice) показывается в подсказке.
+// PRICES. All broker pricing logic lives in this one file (the track asks for readable pricing rules).
+// The price explanation (explainPrice) is shown in a tooltip in the game.
 
 import { durFrac, model, type Robot } from './robots';
 
-// ---------- параметры экономики ----------
+// ---------- economy parameters ----------
 export const ECON = {
-  recentWindow: 50, // по скольким последним боям считаем актуальность
-  minGamesForFullTrust: 10, // пока боёв меньше — актуальность тянется к 50
-  winWeight: 70, // вклад доли побед в актуальность
-  pickWeight: 30, // вклад популярности
+  recentWindow: 50, // how many recent battles relevance is computed from
+  minGamesForFullTrust: 10, // until there are this many battles, relevance is pulled toward 50
+  winWeight: 70, // weight of the win rate in relevance
+  pickWeight: 30, // weight of popularity
   stockFactorMin: 0.6,
   stockFactorMax: 1.6,
-  repairShare: 0.3, // полный ремонт = 30% справедливой цены (дорогие роботы окупаются, если их играть и чинить)
-  scrapShare: 0.15, // сдать сломанного на запчасти = 15%; изношенный робот у брокера стоит почти столько же
-  // Призовой фонд боя = purseRate × (стоимость обеих команд по базовым ценам).
-  // Победитель забирает winShare, ничья — drawShare каждому, проигравший — lossShare.
+  repairShare: 0.3, // full repair = 30% of the fair price (expensive robots pay off if you play and repair them)
+  scrapShare: 0.15, // selling a broken robot for parts = 15%; a worn-out robot at a broker is worth about the same
+  // Battle purse = purseRate × (both teams' value at base prices).
+  // The winner takes winShare, a draw gives drawShare to each, the loser gets lossShare.
   purseRate: 0.025,
   // the human player's battles pay more (Arena prize money for challengers) — so a few wins buy a good robot
   playerPurseRate: 0.06,
@@ -24,21 +24,21 @@ export const ECON = {
 };
 
 export interface ModelStats {
-  recent: number[]; // 1 — победа, 0.5 — ничья, 0 — поражение (последние бои модели)
+  recent: number[]; // 1 — 1 — win, 0.5 — draw, 0 — loss (the model's recent battles)
   games: number;
   wins: number;
 }
 
 export interface BrokerStyle {
-  spread: number; // наценка/скидка брокера
-  targetStock: number; // сколько роботов каждой модели брокер хочет держать
-  react: number; // 0..1 — как быстро брокер замечает изменение актуальности
-  scrapper: boolean; // покупает сломанных роботов
+  spread: number; // the broker's markup / discount
+  targetStock: number; // how many robots of each model the broker wants to keep
+  react: number; // 0..1 — how fast the broker notices a change in relevance
+  scrapper: boolean; // buys broken robots
 }
 
-// ---------- актуальность ----------
+// ---------- relevance ----------
 
-/** Доля побед модели за последние бои (0..1). Пока боёв мало — ближе к 0.5. */
+/** A model's win rate over recent battles (0..1). With few battles it stays close to 0.5. */
 export function winRate(s: ModelStats): number {
   if (!s.recent.length) return 0.5;
   const raw = s.recent.reduce((a, b) => a + b, 0) / s.recent.length;
@@ -47,56 +47,56 @@ export function winRate(s: ModelStats): number {
 }
 
 /**
- * Актуальность модели 0..100:
- *   70 × доля_побед + 30 × доля_выбора
- * доля_выбора — сколько команд взяли эту модель, относительно самой популярной.
+ * A model's relevance, 0..100:
+ *   70 × win_rate + 30 × pick_rate
+ * pick_rate — how many teams picked this model, relative to the most popular one.
  */
 export function relevance(s: ModelStats, pickCount: number, maxPickCount: number): number {
   const pick = maxPickCount > 0 ? pickCount / maxPickCount : 0.5;
   return ECON.winWeight * winRate(s) + ECON.pickWeight * pick;
 }
 
-// ---------- цена ----------
+// ---------- price ----------
 
-/** Множитель запаса: мало на складе — дороже, много — дешевле. */
+/** Stock multiplier: little in stock — dearer, a lot — cheaper. */
 export function stockFactor(stock: number, target: number): number {
   const f = target / Math.max(stock, 0.5);
   return Math.min(ECON.stockFactorMax, Math.max(ECON.stockFactorMin, f));
 }
 
 /**
- * Справедливая цена у брокера:
- *   базовая × (0.5 + актуальность/100) × множитель_запаса
- * `perceived` — актуальность, какой её видит брокер (он замечает изменения с задержкой).
+ * A broker's fair price:
+ *   base × (0.5 + relevance/100) × stock_multiplier
+ * `perceived` — `perceived` — relevance as the broker sees it (it notices changes with a delay).
  */
 export function fairPrice(modelId: string, perceived: number, stock: number, style: BrokerStyle): number {
   return model(modelId).basePrice * (0.5 + perceived / 100) * stockFactor(stock, style.targetStock);
 }
 
 /**
- * Сколько стоит робот с учётом износа (доля от цены целого).
- * Кривая выпуклая: свежий робот почти не теряет в цене, изношенный — почти металлолом
- * (при прочности около нуля — ровно цена лома). Поэтому выгоднее доиграть робота до конца,
- * чем продавать его «на последнем издыхании».
+ * What a robot is worth given its wear (a share of the price of a new one).
+ * The curve is convex: a fresh robot barely loses value, a worn-out one is almost scrap
+ * ((at near-zero durability — exactly the scrap price). So it pays to play a robot to the end
+ * rather than sell it "on its last legs".
  */
 export const durabilityFactor = (r: Robot) => ECON.scrapShare + (1 - ECON.scrapShare) * Math.pow(durFrac(r), 1.6);
 
-/** Брокер продаёт по справедливой цене + наценка. */
+/** A broker sells at the fair price + markup. */
 export const askPrice = (fair: number, style: BrokerStyle) => Math.round(fair * (1 + style.spread));
 
-/** Брокер покупает целого робота: справедливая − скидка, с поправкой на прочность. */
+/** A broker buys a working robot: fair price − discount, adjusted for durability. */
 export const bidPrice = (fair: number, style: BrokerStyle, r: Robot) =>
   Math.round(fair * (1 - style.spread) * durabilityFactor(r));
 
-/** Сломанного робота берёт только скупщик лома. */
+/** Only the scrap dealer takes a broken robot. */
 export const scrapPrice = (fair: number) => Math.max(1, Math.round(fair * ECON.scrapShare));
 
-/** Ремонт до полной прочности, пропорционально недостающей прочности. */
+/** Repair to full durability, in proportion to the missing durability. */
 export const repairCost = (fair: number, r: Robot) =>
   Math.max(1, Math.round(fair * ECON.repairShare * (1 - durFrac(r))));
 
-/** Брокер замечает новую актуальность не сразу: сдвигается к ней на долю `react`. */
-/** Призовой фонд боя и доля стороны (res: 1 победа, 0.5 ничья, 0 поражение). */
+/** A broker notices the new relevance with a delay: it moves toward it by the share `react`. */
+/** The battle purse and a side's share (res: 1 win, 0.5 draw, 0 loss). */
 export function battleReward(teamValueA: number, teamValueB: number, res: number, rate = ECON.purseRate): number {
   const purse = rate * (teamValueA + teamValueB);
   const share = res === 1 ? ECON.winShare : res === 0.5 ? ECON.drawShare : ECON.lossShare;
@@ -106,7 +106,7 @@ export function battleReward(teamValueA: number, teamValueB: number, res: number
 export const updatePerceived = (prev: number, actual: number, style: BrokerStyle) =>
   prev + (actual - prev) * style.react;
 
-// ---------- объяснение цены для подсказки ----------
+// ---------- the price explanation for the tooltip ----------
 
 export function explainPrice(p: {
   brokerName: string;
