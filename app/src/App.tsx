@@ -15,7 +15,10 @@ import { Hangar } from './screens/Hangar';
 import { Market } from './screens/Market';
 import { Ratings } from './screens/Ratings';
 import { actBackground, getWorld, resetGame, startGame, useWorld } from './store';
-import { emailLoginPending, resumeEmailLogin } from './near/chain';
+import { chainSession, emailLoginPending, resumeEmailLogin, signOutChain } from './near/chain';
+import { Boot } from './ui/Boot';
+import { bootSound } from './audio';
+import type { World } from './engine/world';
 import { linkRobots } from './near/bridge';
 import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soundVolume } from './audio';
 import { Cr, Glitch } from './ui/common';
@@ -62,6 +65,11 @@ export default function App() {
   };
   const [ff, setFf] = useState(false);
   const [live, setLive] = useState(true);
+  // The site starts on the login screen (whose click also unlocks the sound) → the boot screen → the game,
+  // which then powers on like an old TV. Returning players get a "welcome back" screen instead of the login.
+  const [stage, setStage] = useState<'login' | 'boot' | 'game'>('login');
+  const [powerOn, setPowerOn] = useState(false);
+  const enter = () => setStage('boot');
   // coming back from the NEAR Auth login page (email login by redirect): finish creating the account
   const [resume, setResume] = useState<{ busy: boolean; error: string | null }>(() => ({
     busy: emailLoginPending(),
@@ -82,10 +90,10 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!w || !live || ff) return;
+    if (!w || !live || ff || stage !== 'game') return;
     const t = setInterval(() => actBackground((w) => playNpcMatch(w)), LIVE_MS);
     return () => clearInterval(t);
-  }, [!!w, live, ff]);
+  }, [!!w, live, ff, stage]);
 
   if (resume.busy)
     return (
@@ -96,12 +104,34 @@ export default function App() {
         <p className="near-resume">Creating your NEAR account…</p>
       </div>
     );
-  if (!w) return <Login error={resume.error} />;
+  if (!w)
+    return (
+      <Login
+        error={resume.error}
+        onEnter={(name) => {
+          startGame(name);
+          enter();
+        }}
+      />
+    );
+  if (stage === 'login') return <Welcome w={w} onEnter={enter} />;
+  if (stage === 'boot')
+    return (
+      <Boot
+        onDone={() => {
+          // the boot screen has collapsed into a dot — now the arena switches on
+          setStage('game');
+          setPowerOn(true);
+          bootSound('power-on');
+          setTimeout(() => setPowerOn(false), 700);
+        }}
+      />
+    );
   const me = getManager(w, PLAYER_ID);
   const hourOfDay = w.hour % HOURS_PER_DAY;
 
   return (
-    <div className="app">
+    <div className={`app ${powerOn ? 'tv-power-on' : ''}`}>
       <div className="panel topbar">
         <div className="logo" data-text="HEAT INDEX">
           HEAT INDEX
@@ -338,8 +368,10 @@ function VolumeControl() {
   );
 }
 
-function Login({ error }: { error?: string | null }) {
+/** First screen: log in (email first), connect a wallet, or try it as a guest. Any of these clicks unlocks the sound. */
+function Login({ error, onEnter }: { error?: string | null; onEnter: (name: string) => void }) {
   const [name, setName] = useState('');
+  const nm = name.trim();
   return (
     <div className="panel login">
       <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 40, marginBottom: 8 }}>
@@ -349,25 +381,58 @@ function Login({ error }: { error?: string | null }) {
         An underground robot arena. Build a team and fight for the title — or play the market: buy robots while they are
         cheap and invest in AI brokers.
       </p>
-      <form
-        className="grid"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) startGame(name.trim());
-        }}
-      >
-        <input placeholder="What's your name?" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        {name.trim() ? (
-          // on NEAR: your robots and credits are tokens you own, every trade and battle is a transaction
-          <NearLogin name={name.trim()} onDone={() => startGame(name.trim())} />
-        ) : (
-          <small className="muted">Type a name to start.</small>
-        )}
+      <div className="grid">
+        <input placeholder="Your name in the arena" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        {/* on NEAR: your robots and credits are tokens you own, every trade and battle is a transaction */}
+        <NearLogin name={nm || 'pilot'} onDone={() => onEnter(nm || 'Pilot')} />
         {error && <div className="error">{error}</div>}
-        <button className="login-offline" disabled={!name.trim()}>
-          or play offline (no blockchain)
+        <button type="button" className="login-offline" data-sfx="none" onClick={() => onEnter(nm || 'Guest')}>
+          Play as a guest — just to try it, nothing is saved on-chain
         </button>
-      </form>
+      </div>
+    </div>
+  );
+}
+
+/** Returning player: one click to continue (it also unlocks the sound), or start over. */
+function Welcome({ w, onEnter }: { w: World; onEnter: () => void }) {
+  const me = getManager(w, PLAYER_ID);
+  const session = chainSession();
+  const [sure, setSure] = useState(false);
+  return (
+    <div className="panel login">
+      <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 40, marginBottom: 8 }}>
+        HEAT INDEX
+      </div>
+      <p className="welcome-name">
+        Welcome back, <b>{me.name}</b>
+      </p>
+      <p className="muted" style={{ marginTop: 0 }}>
+        {session ? (
+          <>
+            On NEAR as <b className="near-acc">{session.accountId}</b>
+          </>
+        ) : (
+          'Playing as a guest (off-chain)'
+        )}
+      </p>
+      <div className="grid">
+        <button className="primary welcome-go" autoFocus onClick={onEnter}>
+          ▶ Continue
+        </button>
+        <button
+          type="button"
+          className="login-offline"
+          data-sfx="none"
+          onClick={() => {
+            if (!sure) return setSure(true);
+            signOutChain();
+            resetGame();
+          }}
+        >
+          {sure ? 'Sure? This deletes your local progress — click again' : 'Log out / start over'}
+        </button>
+      </div>
     </div>
   );
 }

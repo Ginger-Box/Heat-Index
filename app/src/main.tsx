@@ -2,7 +2,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { Boot } from './ui/Boot'
 import { initAudio } from './audio'
 import { initFx } from './ui/fx'
 import { installBridge } from './near/bridge'
@@ -30,6 +29,5 @@ installBridge()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
-    <Boot />
   </StrictMode>,
 )

@@ -1,8 +1,7 @@
 // Loading screen like an old CRT TV + PC: the tube switches on softly → a "BIOS" boots the arena
 // (beep, a quiet fax/modem handshake, ticks, OK blips) → "PRESS ANY BUTTON TO CONTINUE" → the picture collapses.
-// Browsers only allow sound after the first click/keypress, so where autoplay is blocked the boot runs silently
-// and the sound starts with that final button press. A click during the boot skips straight to the game.
-// Lives outside the game (rendered next to <App/>), disappears when done.
+// It starts right after the player logs in — that click has already unlocked the sound (browsers only allow audio
+// after a user gesture). A click during the boot skips to the end. When it is done, the app powers on like a TV.
 // Everything on screen is derived from the elapsed time, so it is deterministic and easy to tune.
 
 import { useEffect, useRef, useState } from 'react';
@@ -25,7 +24,7 @@ const BOOT_END = TASKS_START + TASKS.length * TASK_MS + 250;
 const OFF_MS = 330; // tube switch-off
 const SPIN = ['|', '/', '-', '\\'];
 
-export function Boot() {
+export function Boot({ onDone }: { onDone?: () => void }) {
   const [t, setT] = useState(0); // ms since power-on
   const [offAt, setOffAt] = useState<number | null>(null);
   const [done, setDone] = useState(false);
@@ -53,6 +52,10 @@ export function Boot() {
   useEffect(() => {
     if (!done && offAt !== null && t >= offAt + OFF_MS) setDone(true);
   }, [t, offAt, done]);
+
+  useEffect(() => {
+    if (done) onDone?.();
+  }, [done]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // any click or key: during the boot — skip to the game; on the prompt — continue
   useEffect(() => {
