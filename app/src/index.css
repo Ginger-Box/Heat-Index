@@ -4746,3 +4746,9 @@ button.pick {
 .near-tx.error a {
   color: var(--red);
 }
+.near-resume {
+  font-family: var(--font-px);
+  font-size: 13px;
+  color: var(--cyan);
+  animation: blink 1.2s steps(1) infinite;
+}

@@ -153,14 +153,63 @@ export const accountName = (name: string) =>
     .replace(/^[-_]+|[-_]+$/g, '')
     .slice(0, 24) || 'player';
 
+const EMAIL_PENDING = 'heat-index-email-login';
+
 /**
- * Email login: Auth0 popup → the player's NEAR Auth key → their account (created on first login).
- * Returns the account id. Throws a readable error on failure.
+ * Email login: an Auth0 popup, or — where popups are blocked (e.g. the app's built-in browser) — a redirect to the
+ * login page and back (the game then finishes in resumeEmailLogin on load). Returns the account id, or null when
+ * the page is about to redirect. Throws a readable error on failure.
  */
-export async function loginWithEmail(playerName: string): Promise<string> {
+export async function loginWithEmail(playerName: string): Promise<string | null> {
   if (!emailLoginAvailable()) throw new Error(`Email login works on ${NEAR_AUTH.origin} (testnet NEAR Auth)`);
   const client = await nearAuthClient();
-  await client.login();
+  try {
+    await client.login();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!/popup/i.test(msg)) throw e;
+    // no popups here: go to the login page and come back
+    try {
+      localStorage.setItem(EMAIL_PENDING, JSON.stringify({ name: playerName }));
+    } catch {
+      /* without storage the name falls back to "player" */
+    }
+    await client.login({ redirectUri: `${location.origin}/` });
+    return null;
+  }
+  return finishEmailLogin(client, playerName);
+}
+
+/** Is the page coming back from the email login page? */
+export const emailLoginPending = () => {
+  try {
+    return !!localStorage.getItem(EMAIL_PENDING) && new URLSearchParams(location.search).has('code');
+  } catch {
+    return false;
+  }
+};
+
+/** Back from the login page: finish the email login. Returns the player name and account, or null if not pending. */
+export async function resumeEmailLogin(): Promise<{ name: string; accountId: string } | null> {
+  if (!emailLoginPending()) return null;
+  let name = 'player';
+  try {
+    name = (JSON.parse(localStorage.getItem(EMAIL_PENDING) ?? '{}') as { name?: string }).name ?? name;
+    localStorage.removeItem(EMAIL_PENDING);
+  } catch {
+    /* ignore */
+  }
+  const client = await nearAuthClient();
+  // the provider handles the ?code=&state= callback inside isLoggedIn()
+  const provider = (client as unknown as { provider: { isLoggedIn: () => Promise<boolean> } }).provider;
+  const ok = await provider.isLoggedIn();
+  history.replaceState(null, '', location.pathname); // drop ?code=&state= from the address bar
+  if (!ok) throw new Error('The email login was cancelled');
+  return { name, accountId: await finishEmailLogin(client, name) };
+}
+
+/** After Auth0: the player's NEAR Auth key → their account (created on first login). */
+async function finishEmailLogin(client: Awaited<ReturnType<typeof nearAuthClient>>, playerName: string): Promise<string> {
   const signer = await client.getSigner();
   const ownerKey = String(await signer.getPublicKey());
   const existing = await view<string | null>('account_for_owner_key', { owner_key: ownerKey });

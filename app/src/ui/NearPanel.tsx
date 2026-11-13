@@ -36,8 +36,10 @@ export function NearLogin({ name, onDone }: { name: string; onDone?: () => void 
     setBusy(kind);
     setErr(null);
     try {
-      if (kind === 'email') await loginWithEmail(name || 'player');
-      else await loginWithWallet();
+      if (kind === 'email') {
+        // null = the page is going to the login page (no popups here) and will finish when it comes back
+        if ((await loginWithEmail(name || 'player')) === null) return;
+      } else await loginWithWallet();
       onDone?.();
       if (getWorld()) await linkRobots();
       sfx('ui-buy');

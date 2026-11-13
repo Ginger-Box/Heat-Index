@@ -14,7 +14,9 @@ import { Brokers } from './screens/Brokers';
 import { Hangar } from './screens/Hangar';
 import { Market } from './screens/Market';
 import { Ratings } from './screens/Ratings';
-import { actBackground, resetGame, startGame, useWorld } from './store';
+import { actBackground, getWorld, resetGame, startGame, useWorld } from './store';
+import { emailLoginPending, resumeEmailLogin } from './near/chain';
+import { linkRobots } from './near/bridge';
 import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soundVolume } from './audio';
 import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
@@ -60,6 +62,21 @@ export default function App() {
   };
   const [ff, setFf] = useState(false);
   const [live, setLive] = useState(true);
+  // coming back from the NEAR Auth login page (email login by redirect): finish creating the account
+  const [resume, setResume] = useState<{ busy: boolean; error: string | null }>(() => ({
+    busy: emailLoginPending(),
+    error: null,
+  }));
+  useEffect(() => {
+    if (!resume.busy) return;
+    resumeEmailLogin()
+      .then(async (r) => {
+        if (r && !getWorld()) startGame(r.name);
+        if (r) await linkRobots();
+        setResume({ busy: false, error: null });
+      })
+      .catch((e) => setResume({ busy: false, error: e instanceof Error ? e.message : String(e) }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!w || !live || ff) return;
@@ -67,7 +84,16 @@ export default function App() {
     return () => clearInterval(t);
   }, [!!w, live, ff]);
 
-  if (!w) return <Login />;
+  if (resume.busy)
+    return (
+      <div className="panel login">
+        <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 40, marginBottom: 8 }}>
+          HEAT INDEX
+        </div>
+        <p className="near-resume">Creating your NEAR account…</p>
+      </div>
+    );
+  if (!w) return <Login error={resume.error} />;
   const me = getManager(w, PLAYER_ID);
   const hourOfDay = w.hour % HOURS_PER_DAY;
 
@@ -309,7 +335,7 @@ function VolumeControl() {
   );
 }
 
-function Login() {
+function Login({ error }: { error?: string | null }) {
   const [name, setName] = useState('');
   return (
     <div className="panel login">
@@ -334,6 +360,7 @@ function Login() {
         ) : (
           <small className="muted">Type a name to start.</small>
         )}
+        {error && <div className="error">{error}</div>}
         <button className="login-offline" disabled={!name.trim()}>
           or play offline (no blockchain)
         </button>
