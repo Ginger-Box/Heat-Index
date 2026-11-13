@@ -1341,11 +1341,16 @@ function TutPointer({ target }: { target: string }) {
       const el = document.querySelector(target);
       setGeo(box && el ? { a: box.getBoundingClientRect(), b: el.getBoundingClientRect() } : null);
     };
-    measure();
-    const id = setInterval(measure, 250);
+    // first draw once the hint box has faded in, so the arrow never starts from a moving box
+    let id: ReturnType<typeof setInterval> | undefined;
+    const first = setTimeout(() => {
+      measure();
+      id = setInterval(measure, 250);
+    }, 260);
     addEventListener('resize', measure);
     return () => {
-      clearInterval(id);
+      clearTimeout(first);
+      if (id) clearInterval(id);
       removeEventListener('resize', measure);
     };
   }, [target]);

@@ -37,6 +37,12 @@
   zoom: var(--ui-scale, 1);
   position: relative;
   z-index: 1; /* поверх свечения курсора */
+  /* own block formatting context: a child's top margin (e.g. the login panel) must not collapse through #root
+     and push the whole <body> background down — that left a black stripe at the top */
+  display: flow-root;
+}
+html {
+  background: var(--bg);
 }
 /* «Ламповое» свечение под курсором — позади панелей (см. ui/fx.ts).
    Три слоя догоняют курсор с разной скоростью: при движении цвета расходятся, как послесвечение кинескопа. */
@@ -4307,7 +4313,9 @@ button.pick {
   box-shadow:
     0 0 0 3px #050409,
     0 0 24px #ffe60055;
-  animation: end-body-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1);
+  /* fade in only — the old slide-in replaced the centering transform, so the box (and its arrow) appeared
+     to the right and then jumped left */
+  animation: tut-coach-in 0.25s ease-out;
 }
 .tut-coach p {
   margin: 6px 0 10px;
@@ -4430,5 +4438,11 @@ button.pick {
       0 0 0 3px #050409,
       0 0 0 6px #fff59a,
       0 0 30px #ffe600cc;
+  }
+}
+
+@keyframes tut-coach-in {
+  from {
+    opacity: 0;
   }
 }
