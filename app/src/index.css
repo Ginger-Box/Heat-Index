@@ -4969,8 +4969,9 @@ button.pick {
   filter: drop-shadow(0 0 4px #ffe600aa);
 }
 .np-packet {
-  fill: #fff;
-  filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 4px var(--yellow));
+  fill: #fff6c0;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 3px #ffe60099);
 }
 .np-head {
   fill: var(--yellow);
@@ -5005,9 +5006,122 @@ button.pick {
 p.tour-swap {
   display: block;
 }
+/* fixed text area: the window keeps its size whatever the text, so the buttons never move */
+.tour-box p {
+  min-height: calc(1.45em * 4);
+}
 @keyframes tour-swap {
   from {
     opacity: 0;
     transform: translateY(4px);
+  }
+}
+
+/* brokers: portrait, identity and a live remark (ui/brokerPersona.tsx) */
+.broker-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.broker-id {
+  flex: 1;
+  min-width: 0;
+}
+.broker-person {
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--text);
+  margin-top: 4px;
+}
+.broker-bio {
+  font-size: 14px;
+  margin-top: 3px;
+}
+.broker-portrait {
+  position: relative;
+  flex: none;
+  padding: 6px 6px 0;
+  background:
+    repeating-linear-gradient(to bottom, #ffffff08 0 1px, transparent 1px 3px),
+    radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--bc) 28%, transparent), #07060c 75%);
+  border: 2px solid var(--bc);
+  box-shadow:
+    inset 0 0 0 2px #07060c,
+    0 0 12px color-mix(in srgb, var(--bc) 45%, transparent);
+  overflow: hidden;
+}
+/* a scan line drifting down the portrait monitor */
+.broker-portrait::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 30%;
+  top: -30%;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bc) 22%, transparent), transparent);
+  animation: bp-scan 3.4s linear infinite;
+}
+@keyframes bp-scan {
+  to {
+    top: 100%;
+  }
+}
+.broker-portrait svg {
+  display: block;
+  filter: drop-shadow(0 2px 0 #000a);
+}
+.bp-eye {
+  animation: bp-eye 4.2s steps(1) infinite;
+}
+@keyframes bp-eye {
+  0%,
+  92%,
+  96%,
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 1px #fff);
+  }
+  93%,
+  95% {
+    opacity: 0.15; /* blink */
+  }
+}
+.broker-quote {
+  position: relative;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text);
+  background: #0a0812;
+  border: 2px solid color-mix(in srgb, var(--bc) 70%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--bc) 20%, transparent);
+  animation: quote-in 0.35s steps(5);
+}
+/* the speech-bubble tail pointing up at the portrait */
+.broker-quote::before {
+  content: '';
+  position: absolute;
+  left: 34px;
+  top: -9px;
+  width: 12px;
+  height: 7px;
+  background: color-mix(in srgb, var(--bc) 70%, transparent);
+  clip-path: polygon(0 100%, 50% 0, 100% 100%);
+}
+@keyframes quote-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .broker-portrait::after,
+  .bp-eye,
+  .broker-quote {
+    animation: none;
   }
 }

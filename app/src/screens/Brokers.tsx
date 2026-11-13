@@ -18,6 +18,7 @@ import {
 import { sfx } from '../audio';
 import { act } from '../store';
 import { Cr, Glitch, Tip } from '../ui/common';
+import { BrokerPortrait, PERSONAS, brokerQuote } from '../ui/brokerPersona';
 
 /** How risky a broker is, judging by its recent days. */
 function profile(b: Broker): { label: string; cls: string; hint: string } {
@@ -137,13 +138,24 @@ export function Brokers({ w }: { w: World }) {
           const canSell = Math.min(Math.floor(worth), brokerCashForBuyback(b));
           return (
             <div key={b.id} className={`panel broker-card ${b.closed ? 'closed' : ''}`}>
-              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-                <h3 style={{ margin: 0 }} title={b.tagline}>
-                  {b.name}
-                </h3>
-                <span className={`tag ${p.cls}`} title={p.hint}>
-                  {p.label}
-                </span>
+              {/* face, name, bio and a live remark in its own voice */}
+              <div className="broker-head">
+                <BrokerPortrait id={b.id} />
+                <div className="broker-id">
+                  <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                    <h3 style={{ margin: 0 }} title={b.tagline}>
+                      {b.name}
+                    </h3>
+                    <span className={`tag ${p.cls}`} title={p.hint}>
+                      {p.label}
+                    </span>
+                  </div>
+                  <div className="broker-person">{PERSONAS[b.id]?.person}</div>
+                  <div className="muted broker-bio">{PERSONAS[b.id]?.bio ?? b.tagline}</div>
+                </div>
+              </div>
+              <div className="broker-quote" key={brokerQuote(w, b)} style={{ ['--bc' as string]: PERSONAS[b.id]?.color }}>
+                “{brokerQuote(w, b)}”
               </div>
 
               <div className="yield-box" title="Average of the last 3 days — a forecast, not a promise">

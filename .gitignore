@@ -5,3 +5,7 @@ dist
 # internal docs (kept locally, not published)
 DESIGN.md
 art-prompts.md
+
+# promo video workspace and jury reports (local only)
+promo/
+jury/
