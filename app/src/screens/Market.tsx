@@ -551,8 +551,8 @@ export function Market({ w }: { w: World }) {
  * а на самой карте всплывает подробное описание способности.
  * Карта рисуется поверх всего (через портал), чтобы её не обрезала прокрутка таблицы.
  */
-/** the hover preview shows the card twice as big as in the lists */
-const PEEK_ZOOM = 2;
+/** the hover preview shows the card 1.5× as big as in the lists */
+const PEEK_ZOOM = 1.5;
 
 function CardPeek({ modelId, children }: { modelId: string; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);

@@ -455,28 +455,76 @@ details[open] > summary::before {
   padding: 12px 16px 16px;
   margin-bottom: 18px;
 }
-/* «Пульс рынка» под верхней панелью (ui/Ticker.tsx): одна тихая строка без движения и рамки */
+/* Неоновая трубка под верхней панелью — чистый декор: мягкое свечение, отражение и редкая искра */
 .topbar {
   margin-bottom: 0;
 }
-.pulse {
-  display: flex;
-  align-items: baseline;
-  gap: 26px;
-  padding: 7px 18px 14px;
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
+.neonbar {
+  position: relative;
+  height: 3px;
+  margin: 9px 14px 20px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #00f0ff 12%, #7a5cff 38%, #ff2a8a 62%, #00f0ff 88%, transparent);
+  box-shadow:
+    0 0 6px #ff2a8a88,
+    0 0 16px #00f0ff55;
+  animation: neon-breathe 5s ease-in-out infinite;
 }
-.pulse-label {
-  font-family: var(--font-px);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  color: #6b6290;
+/* reflection on the "floor" */
+.neonbar::before {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 7px;
+  height: 6px;
+  background: inherit;
+  filter: blur(6px);
+  opacity: 0.35;
 }
-.pulse-item b {
-  font-weight: normal;
+/* a spark that runs along the tube now and then */
+.neonbar::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 70px;
+  height: 7px;
+  border-radius: 4px;
+  background: radial-gradient(ellipse at center, #ffffff 0%, #ffffffaa 30%, transparent 70%);
+  filter: drop-shadow(0 0 6px #ffffff);
+  opacity: 0;
+  animation: neon-spark 9s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+}
+@keyframes neon-breathe {
+  50% {
+    box-shadow:
+      0 0 9px #ff2a8aaa,
+      0 0 24px #00f0ff77;
+  }
+}
+@keyframes neon-spark {
+  0%,
+  70% {
+    left: -70px;
+    opacity: 0;
+  }
+  72% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .neonbar,
+  .neonbar::after {
+    animation: none;
+  }
 }
 .logo {
   position: relative;
@@ -1668,11 +1716,11 @@ th.sorted {
   filter: drop-shadow(8px 8px 0 #000a);
 }
 .card-peek-zoom {
-  zoom: 2; /* = PEEK_ZOOM in Market.tsx */
+  zoom: 1.5; /* = PEEK_ZOOM in Market.tsx */
 }
 /* подсказка карты здесь — справа от карты, а не над ней */
 .card-peek .cardtip {
-  zoom: 0.6; /* the ability text stays normal-sized next to the big card */
+  zoom: 0.75; /* the ability text stays normal-sized next to the big card */
   left: calc(100% + 10px);
   top: 0;
   bottom: auto;
@@ -4285,6 +4333,9 @@ button.pick {
 }
 .arena3.tut-cores .b-core,
 .arena3.tut-hand .b-hand,
+.arena3.tut-energy .b-energy,
+.arena3.tut-energy .b-energy-label,
+.arena3.tut-stats .b-board.side-0 .tok,
 .arena3.tut-end .b-end,
 .arena3.tut-enemy .b-core.side-1,
 .arena3.tut-enemy .b-board.side-1,
@@ -4304,11 +4355,6 @@ button.pick {
   box-shadow:
     0 0 0 9999px #050409c4,
     0 0 26px #ffe600aa;
-  transition:
-    left 0.3s cubic-bezier(0.2, 0.8, 0.3, 1),
-    top 0.3s cubic-bezier(0.2, 0.8, 0.3, 1),
-    width 0.3s,
-    height 0.3s;
 }
 .tour-arrow {
   position: fixed;
@@ -4316,12 +4362,9 @@ button.pick {
   pointer-events: none;
   overflow: visible;
 }
-.tour-arrow path {
-  fill: none;
+.tour-arrow line {
   stroke: var(--yellow);
   stroke-width: 4;
-  stroke-dasharray: 10 6;
-  animation: aim-march 0.5s linear infinite;
   filter: drop-shadow(0 0 4px #ffe600);
 }
 .tour-arrow polygon {
@@ -4353,4 +4396,17 @@ button.pick {
 }
 .tour-box .row {
   justify-content: space-between;
+}
+
+/* обучение: значения, о которых идёт речь, ещё и подпрыгивают */
+.arena3.tut-stats .b-board.side-0 .tok,
+.arena3.tut-energy .b-energy span.on {
+  animation:
+    tut-glow 1s steps(2) infinite,
+    tut-bounce 1s steps(2) infinite;
+}
+@keyframes tut-bounce {
+  50% {
+    transform: translateY(-3px) scale(1.12);
+  }
 }

@@ -34,9 +34,10 @@ export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: 
 
   useEffect(() => onTab(step.tab), [i]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
+    // measure once the tab switch has settled — measuring mid-animation made the arrow jump
+    setRect(null);
     const measure = () => setRect(document.querySelector(`[data-tab="${step.tab}"]`)?.getBoundingClientRect() ?? null);
-    measure();
-    const id = setTimeout(measure, 350); // after the tab switch animation
+    const id = setTimeout(measure, 380);
     addEventListener('resize', measure);
     return () => {
       clearTimeout(id);
@@ -59,10 +60,21 @@ export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: 
   // the caption box sits below the tab, a bit to the right, so the arrow has room to curve up to the button
   const bx = Math.min(innerWidth - 440 * s - 16, Math.max(16, rect.left + 40));
   const by = rect.bottom + 120;
-  const ax0 = bx + 60;
-  const ay0 = by;
+  // a straight neon arrow from the caption box up to the bottom of the tab, its head along the line
+  const ax0 = bx + 70;
+  const ay0 = by - 4;
   const ax1 = rect.left + rect.width / 2;
-  const ay1 = rect.bottom + pad + 6;
+  const ay1 = rect.bottom + pad + 4;
+  const ang = Math.atan2(ay1 - ay0, ax1 - ax0);
+  const L = 16;
+  const W = 9;
+  const hx = ax1 - Math.cos(ang) * L;
+  const hy = ay1 - Math.sin(ang) * L;
+  const head = [
+    [ax1, ay1],
+    [hx + Math.cos(ang + Math.PI / 2) * W, hy + Math.sin(ang + Math.PI / 2) * W],
+    [hx - Math.cos(ang + Math.PI / 2) * W, hy - Math.sin(ang + Math.PI / 2) * W],
+  ];
   return createPortal(
     <>
       <div
@@ -70,16 +82,8 @@ export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: 
         style={{ left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }}
       />
       <svg className="tour-arrow" style={{ left: 0, top: 0, width: innerWidth, height: innerHeight }}>
-        <path d={`M ${ax0} ${ay0} Q ${ax0} ${(ay0 + ay1) / 2} ${ax1} ${ay1 + 14}`} />
-        <polygon
-          points={[
-            [ax1, ay1],
-            [ax1 - 9, ay1 + 16],
-            [ax1 + 9, ay1 + 16],
-          ]
-            .map((p) => p.join(','))
-            .join(' ')}
-        />
+        <line x1={ax0} y1={ay0} x2={hx} y2={hy} />
+        <polygon points={head.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')} />
       </svg>
       <div className="tour-box" style={{ left: bx / s, top: by / s }} key={i}>
         <h3>

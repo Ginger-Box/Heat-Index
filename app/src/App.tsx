@@ -19,7 +19,6 @@ import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soun
 import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
 import { FastForward } from './ui/FastForward';
-import { Ticker } from './ui/Ticker';
 import { Tour } from './ui/Tour';
 
 const TUTORIAL_KEY = 'heat-index-tutorial';
@@ -133,7 +132,8 @@ export default function App() {
         />
       </div>
 
-      <Ticker w={w} />
+      {/* decorative neon tube under the header (no information on purpose) */}
+      <div className="neonbar" aria-hidden />
 
       {tutorial === 'tour' && <Tour onTab={(t) => setTab(t as Tab)} onDone={() => advanceTutorial('done')} />}
 

@@ -490,10 +490,14 @@ export function recycle(w: World, managerId: string, uid: string): string | null
 /** Make sure the manager has DECK_COUNT decks (old saves: the current team becomes deck 1). */
 export function ensureDecks(m: Manager): Deck[] {
   if (!m.decks) {
-    m.decks = Array.from({ length: DECK_COUNT }, (_, i) => ({ name: `Deck ${i + 1}`, uids: i === 0 ? [...m.team] : [] }));
+    m.decks = Array.from({ length: DECK_COUNT }, (_, i) => ({ name: `Team ${i + 1}`, uids: i === 0 ? [...m.team] : [] }));
     m.activeDeck = 0;
   }
-  while (m.decks.length < DECK_COUNT) m.decks.push({ name: `Deck ${m.decks.length + 1}`, uids: [] });
+  while (m.decks.length < DECK_COUNT) m.decks.push({ name: `Team ${m.decks.length + 1}`, uids: [] });
+  // the default names used to be "Deck N" — rename those (custom names stay)
+  m.decks.forEach((d, i) => {
+    if (d.name === `Deck ${i + 1}`) d.name = `Team ${i + 1}`;
+  });
   return m.decks;
 }
 

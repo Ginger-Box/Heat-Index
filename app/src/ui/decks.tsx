@@ -5,7 +5,7 @@ import { useState, type ReactNode } from 'react';
 import { TEAM_ENERGY_CAP, TEAM_MAX, TEAM_MIN } from '../engine/robots';
 import { teamEnergy, teamError } from '../engine/team';
 import type { Deck, World } from '../engine/world';
-import { sfx } from '../audio';
+import { deckSound, sfx } from '../audio';
 
 export function DeckRow(props: {
   w: World;
@@ -32,7 +32,7 @@ export function DeckRow(props: {
         className="deck-head"
         onClick={() => {
           if (edit === null) {
-            sfx(props.open ? 'deck-close' : 'deck-open');
+            deckSound(!props.open, robots.length);
             props.onToggle();
           }
         }}
@@ -67,7 +67,7 @@ export function DeckRow(props: {
         >
           ✎
         </button>
-        {props.battle && <span className="tag deck-battle">BATTLE DECK</span>}
+        {props.battle && <span className="tag deck-battle">BATTLE TEAM</span>}
         <span className="deck-stats muted">
           {robots.length ? `${robots.length} robots · deck cost ${energy}/${TEAM_ENERGY_CAP}` : 'empty'}
         </span>

@@ -147,8 +147,8 @@ export function Hangar({ w }: { w: World }) {
     <div className="grid">
       <div className="panel">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-          <h2 style={{ margin: 0 }}>Decks</h2>
-          <span className="muted">Open a deck to edit it · the battle deck is chosen in the Arena</span>
+          <h2 style={{ margin: 0 }}>Teams</h2>
+          <span className="muted">Open a team to edit it · the battle team is chosen in the Arena</span>
         </div>
         {msg && (
           <div className="error" style={{ marginBottom: 8 }}>

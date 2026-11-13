@@ -877,3 +877,58 @@ export function keyClick(kind: 'key' | 'space' | 'back' = 'key') {
   q.start(t + 0.01);
   q.stop(t + 0.035);
 }
+
+// ---------- team rows opening / closing: a servo drawer + one data tick per robot ----------
+
+/** Opening a team: a short servo whir up and a quick rising run of digital ticks, one per robot (none if empty).
+ *  Closing: the servo whirs down, a single soft latch. */
+export function deckSound(open: boolean, robots: number) {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const c = ctx;
+  const t = c.currentTime;
+  const out = c.createGain();
+  out.gain.value = 0.9;
+  out.connect(sfxBus ?? master);
+  // servo: a filtered saw sliding in pitch
+  const o = c.createOscillator();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(open ? 180 : 320, t);
+  o.frequency.exponentialRampToValueAtTime(open ? 320 : 150, t + 0.14);
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 900;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.06, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+  o.connect(lp).connect(g).connect(out);
+  o.start(t);
+  o.stop(t + 0.17);
+  // latch click at the end
+  const lat = c.createOscillator();
+  lat.type = 'square';
+  lat.frequency.value = open ? 1800 : 1100;
+  const lg = c.createGain();
+  lg.gain.setValueAtTime(0.0001, t + 0.15);
+  lg.gain.exponentialRampToValueAtTime(0.03, t + 0.152);
+  lg.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+  lat.connect(lg).connect(out);
+  lat.start(t + 0.15);
+  lat.stop(t + 0.18);
+  if (!open) return;
+  // one data tick per robot, rising
+  const n = Math.min(15, robots);
+  for (let i = 0; i < n; i++) {
+    const at = t + 0.17 + i * 0.022;
+    const q = c.createOscillator();
+    q.type = 'square';
+    q.frequency.value = 1400 + i * 90;
+    const qg = c.createGain();
+    qg.gain.setValueAtTime(0.0001, at);
+    qg.gain.exponentialRampToValueAtTime(0.018, at + 0.002);
+    qg.gain.exponentialRampToValueAtTime(0.0001, at + 0.018);
+    q.connect(qg).connect(out);
+    q.start(at);
+    q.stop(at + 0.02);
+  }
+}

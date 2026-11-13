@@ -146,14 +146,19 @@ const TUT_STEPS: { text: string; wait: TutWait; focus: string }[] = [
     focus: 'cores',
   },
   {
-    text: 'Drag a robot from your hand into any slot. Deploying costs energy — the number in the card corner. You have 2 this turn, +1 every turn.',
+    text: 'This is your ENERGY (right). Deploying a robot costs energy — the number in the card corner. You have 2 now and get +1 every turn, up to 6.',
+    wait: 'next',
+    focus: 'energy',
+  },
+  {
+    text: 'Drag a robot from your hand into any slot.',
     wait: 'deploy',
     focus: 'hand',
   },
   {
-    text: 'Every robot has Attack (orange) and HP (green). A freshly deployed robot waits a turn before attacking. Press END TURN.',
+    text: 'Every robot has ATTACK (orange) — the damage it deals, and HP (green) — how much it takes before it breaks. A robot waits a turn after landing. Press END TURN.',
     wait: 'end',
-    focus: 'end',
+    focus: 'stats end',
   },
   {
     text: 'Your turn. Drag an arrow from your robot to an enemy robot or straight to the enemy Core — or click the robot, then the target. Robots you hit strike back.',
@@ -161,16 +166,16 @@ const TUT_STEPS: { text: string; wait: TutWait; focus: string }[] = [
     focus: 'enemy',
   },
   {
-    text: 'See the pips under your robot? That is heat: every attack +2. At the limit it overheats — skips a turn and wears out. ❄ COOL on a robot cools it instead of attacking.',
+    text: 'See the pips under your robot? That is HEAT: every attack +2. At the limit it overheats — skips a turn and wears out. ❄ COOL on a robot cools it instead of attacking.',
     wait: 'next',
     focus: 'heat',
   },
   {
-    text: 'Every class has a special ability. Hover any robot to read what it can do — Dash, for example, attacks on the turn it lands.',
+    text: 'Every class has a special ability. Hover any robot to read what it does — for example, Charge robots attack on the very turn they land.',
     wait: 'next',
-    focus: 'hand',
+    focus: '',
   },
-  { text: 'Now finish the job: break the enemy Core!', wait: 'free', focus: '' },
+  { text: 'Now finish the job: break the enemy Core!', wait: 'free', focus: 'enemy' },
 ];
 
 export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
@@ -353,6 +358,13 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     sfx('turn-start');
   }, [tutorial, fight, tutEnd]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the last hint ("finish the job") goes away by itself after a few seconds
+  useEffect(() => {
+    if (!tutorial || TUT_STEPS[tut]?.wait !== 'free') return;
+    const id = setTimeout(() => setTut(TUT_STEPS.length), 3500);
+    return () => clearTimeout(id);
+  }, [tut, tutorial]);
+
   /** Training: advance when the player does what the current step asks. */
   const tutEvent = (ev: BattleEvent[]) => {
     if (!tutorial) return;
@@ -451,7 +463,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
               {teamErr && <div className="error">Battle deck not ready: {teamErr}. Pick another deck or go to the Hangar.</div>}
             </div>
             <div style={{ flex: 1 }}>
-              <h3>Your decks</h3>
+              <h3>Your teams</h3>
               {ensureDecks(me).map((d, di) => (
                 <DeckRow
                   key={di}
@@ -1110,7 +1122,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
   return (
     <div className="grid">
       <div
-        className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''} ${tutorial && TUT_STEPS[tut]?.focus ? `tut-${TUT_STEPS[tut].focus}` : ''}`}
+        className={`panel arena3 aim-${aimKind} ${myTurn ? 'my-turn' : ''} ${tutorial && TUT_STEPS[tut]?.focus ? TUT_STEPS[tut].focus.split(' ').map((f) => `tut-${f}`).join(' ') : ''}`}
         ref={tableRef}
       >
         <div className="b-table">
