@@ -152,6 +152,16 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Market: tighter columns, 2× card preview; a static "market today" line replaced the scrolling ticker;
   Reset uses an in-app confirmation (the browser dialog was blocked in the embedded browser).
 
+### Meta and robot balance check (Nov 13)
+- New `app/scripts/meta.ts`: runs a week on 3 worlds and prints the daily top robots and class averages. The meta does
+  move — the leading class changed 3–4 times a week, half of the top-10 rotates — but Shock sat at the bottom.
+- Robot balance by an A/B test (the same deck with and without a robot, 300 battles each): Titan was +11% — its
+  armor 2 shut out most attacks while it guarded the Core → armor 1, 3/6. Expensive robots arrive late (6 energy on
+  turn 5) and needed better stats: Ark 5/9 repair 5, Apocalypse 8/9 blast 4, Shrapnel 5/7, Bull 4/5;
+  Welder 2/3, Plate 1/2, Dozer 5/6, Tesla-9 3/6, Medic-X 4/5, Hammer 4/3, Hound 4/5.
+  Classes now win 44–56% (Charge was 67%, Maneuver 34% midway through the tuning).
+- HUD got status LEDs, scanlines, a light sweep and pixel corner brackets.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results

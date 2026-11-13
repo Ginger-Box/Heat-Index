@@ -83,36 +83,36 @@ export const MODELS: RobotModel[] = [
   m('spark', 'Spark', 1, 2, 3),
   m('bolt', 'Bolt', 2, 3, 4),
   m('volt', 'Volt-7', 3, 4, 6),
-  m('dozer', 'Dozer', 4, 4, 6),
+  m('dozer', 'Dozer', 4, 5, 6),
   // Броня
-  m('plate', 'Plate', 2, 1, 1, { kind: 'armor', n: 1 }),
+  m('plate', 'Plate', 2, 1, 2, { kind: 'armor', n: 1 }),
   m('wall', 'Wall-M', 3, 1, 3, { kind: 'armor', n: 1 }),
   m('bastion', 'Bastion', 4, 2, 3, { kind: 'armor', n: 1 }),
-  m('titan', 'Titan', 6, 4, 6, { kind: 'armor', n: 2 }),
+  m('titan', 'Titan', 6, 3, 6, { kind: 'armor', n: 1 }),
   // Манёвр
   m('scout', 'Scout Bug', 1, 3, 3, { kind: 'maneuver', n: 0 }),
-  m('hound', 'Hound', 3, 3, 5, { kind: 'maneuver', n: 0 }),
+  m('hound', 'Hound', 3, 4, 5, { kind: 'maneuver', n: 0 }),
   m('ghost', 'Ghost', 4, 4, 5, { kind: 'maneuver', n: 0 }),
   m('raptor', 'Raptor', 5, 5, 6, { kind: 'maneuver', n: 0 }),
   // Ремонт
   m('drone', 'Fixdrone', 1, 1, 1, { kind: 'repair', n: 2 }),
-  m('welder', 'Welder', 2, 1, 2, { kind: 'repair', n: 2 }),
-  m('medic', 'Medic-X', 4, 5, 5, { kind: 'repair', n: 3 }),
-  m('ark', 'Ark', 6, 3, 7, { kind: 'repair', n: 4 }),
+  m('welder', 'Welder', 2, 2, 3, { kind: 'repair', n: 2 }),
+  m('medic', 'Medic-X', 4, 4, 5, { kind: 'repair', n: 3 }),
+  m('ark', 'Ark', 6, 5, 9, { kind: 'repair', n: 5 }),
   // Взрыв
   m('cracker', 'Firecracker', 1, 2, 2, { kind: 'blast', n: 1 }),
   m('mine', 'Mine-bot', 3, 4, 3, { kind: 'blast', n: 2 }),
-  m('shrapnel', 'Shrapnel', 5, 4, 6, { kind: 'blast', n: 2 }),
-  m('apoc', 'Apocalypse', 6, 7, 6, { kind: 'blast', n: 3 }),
+  m('shrapnel', 'Shrapnel', 5, 5, 7, { kind: 'blast', n: 2 }),
+  m('apoc', 'Apocalypse', 6, 8, 9, { kind: 'blast', n: 4 }),
   // Натиск
   m('dash', 'Dash', 1, 2, 2, { kind: 'charge', n: 1 }),
   m('ram', 'Ram', 2, 3, 2, { kind: 'charge', n: 1 }),
-  m('hammer', 'Hammer', 3, 5, 3, { kind: 'charge', n: 1 }),
-  m('bull', 'Bull', 5, 3, 4, { kind: 'charge', n: 1 }),
+  m('hammer', 'Hammer', 3, 4, 3, { kind: 'charge', n: 1 }),
+  m('bull', 'Bull', 5, 4, 5, { kind: 'charge', n: 1 }),
   // Шок
   m('zapper', 'Zapper', 2, 2, 5, { kind: 'shock', n: 0 }),
   m('arc', 'Arc', 3, 3, 6, { kind: 'shock', n: 0 }),
-  m('tesla', 'Tesla-9', 4, 2, 6, { kind: 'shock', n: 0 }),
+  m('tesla', 'Tesla-9', 4, 3, 6, { kind: 'shock', n: 0 }),
   m('storm', 'Stormcaller', 6, 5, 8, { kind: 'shock', n: 0 }),
 ];
 

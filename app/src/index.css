@@ -4523,3 +4523,124 @@ button.pick {
   opacity: 1;
   color: var(--cyan);
 }
+
+/* HUD: живые эффекты — скан-линии, блик, пиксельные уголки, мигающие «светодиоды» у подписей */
+.hud {
+  position: relative;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(0deg, #ffffff06 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #0d0a16, #07060c);
+}
+/* a soft light sweep across the whole strip every few seconds */
+.hud::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 22%;
+  background: linear-gradient(100deg, transparent, #ffffff10 40%, #ffffff22 50%, #ffffff10 60%, transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+  animation: hud-sweep 7s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+}
+@keyframes hud-sweep {
+  0%,
+  62% {
+    left: -30%;
+  }
+  100% {
+    left: 120%;
+  }
+}
+/* pixel corner brackets */
+.hud::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  pointer-events: none;
+  --c: var(--magenta);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 10px 2px,
+    linear-gradient(var(--c), var(--c)) top left / 2px 10px,
+    linear-gradient(var(--c), var(--c)) top right / 10px 2px,
+    linear-gradient(var(--c), var(--c)) top right / 2px 10px,
+    linear-gradient(var(--c), var(--c)) bottom left / 10px 2px,
+    linear-gradient(var(--c), var(--c)) bottom left / 2px 10px,
+    linear-gradient(var(--c), var(--c)) bottom right / 10px 2px,
+    linear-gradient(var(--c), var(--c)) bottom right / 2px 10px;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 0 3px var(--magenta));
+}
+.hud-cell {
+  position: relative;
+  z-index: 1;
+}
+/* a status LED before each label, in the cell's colour, blinking at its own pace */
+.hud-cell > span::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: var(--led, var(--muted));
+  box-shadow: 0 0 6px var(--led, var(--muted));
+  animation: hud-led var(--led-t, 2.4s) steps(1) infinite;
+}
+.hud-cell.credits {
+  --led: var(--yellow);
+  --led-t: 2.1s;
+}
+.hud-cell.worth {
+  --led: var(--cyan);
+  --led-t: 3.3s;
+}
+.hud-cell.elo {
+  --led: var(--magenta);
+  --led-t: 2.7s;
+}
+.hud-cell.time {
+  --led: var(--green);
+  --led-t: 1s;
+}
+@keyframes hud-led {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  81%,
+  100% {
+    opacity: 0.25;
+  }
+}
+/* the value's glow breathes gently */
+.hud-cell b {
+  animation: hud-breathe 4s ease-in-out infinite;
+}
+.hud-cell:nth-child(2) b {
+  animation-delay: -1s;
+}
+.hud-cell:nth-child(3) b {
+  animation-delay: -2s;
+}
+.hud-cell:nth-child(4) b {
+  animation-delay: -3s;
+}
+@keyframes hud-breathe {
+  50% {
+    filter: brightness(1.25);
+  }
+}
+/* hovering a cell lights it up */
+.hud-cell:hover {
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--led) 14%, transparent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud::before,
+  .hud-cell b,
+  .hud-cell > span::before {
+    animation: none;
+  }
+}

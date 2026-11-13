@@ -39,7 +39,7 @@ battles ──► wins / picks ──► relevance ──► price
 
 Turn-based, up to 5 robots a side, a Core of 20 HP. Drag a robot into a slot, then drag an arrow from a robot to a
 target. Every attack **heats** a robot; at its limit it overheats — skips a turn and wears out more.
-7 classes: Basic, Armor (guards), Maneuver (flank), Repair, Blast, Charge, Shock — each wins 43–57% overall, with
+7 classes: Basic, Armor (guards), Maneuver (flank), Repair, Blast, Charge, Shock — each wins 44–56% overall, with
 clear counters.
 
 ## Run it
