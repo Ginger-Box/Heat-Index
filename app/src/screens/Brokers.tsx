@@ -72,6 +72,12 @@ function ProfitBars({ data }: { data: number[] }) {
   );
 }
 
+const BANNER: Record<string, string> = {
+  kessler: 'KESSLER CORP · INVESTOR RELATIONS',
+  soroka: 'NO RECEIPTS · CASH ONLY',
+  scrap: '⚠ SCRAP YARD · MIND THE EDGES',
+};
+
 export function Brokers({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
@@ -137,7 +143,11 @@ export function Brokers({ w }: { w: World }) {
           const paid = b.paidTotal?.[PLAYER_ID] ?? 0;
           const canSell = Math.min(Math.floor(worth), brokerCashForBuyback(b));
           return (
-            <div key={b.id} className={`panel broker-card ${b.closed ? 'closed' : ''}`}>
+            <div key={b.id} className={`panel broker-card persona-${b.id} ${b.closed ? 'closed' : ''}`}>
+              {/* each broker's window is dressed like its owner (index.css · broker personas) */}
+              <div className="broker-banner">
+                <span>{BANNER[b.id] ?? b.name}</span>
+              </div>
               {/* face, name, bio and a live remark in its own voice */}
               <div className="broker-head">
                 <BrokerPortrait id={b.id} />

@@ -5125,3 +5125,79 @@ p.tour-swap {
     animation: none;
   }
 }
+
+/* broker windows dressed like their owners */
+.broker-banner {
+  margin: -18px -18px 14px;
+  padding: 6px 12px;
+  font-family: var(--font-px);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+/* Kessler: a clean corporate terminal — blueprint grid, a crisp cyan double frame */
+.broker-card.persona-kessler {
+  --b: #00f0ffaa;
+  background-color: #0b1220e6;
+  background-image:
+    linear-gradient(#00f0ff0c 1px, transparent 1px),
+    linear-gradient(90deg, #00f0ff0c 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-repeat: repeat;
+}
+.persona-kessler .broker-banner {
+  color: #050409;
+  background: linear-gradient(90deg, #00f0ff, #7ad8ff);
+  box-shadow: inset 0 -2px 0 #0b1220;
+}
+.persona-kessler h3 {
+  color: #bfefff;
+  letter-spacing: 0.06em;
+}
+/* Magpie: the black market — spray-paint noise, magenta neon, a crooked tape label */
+.broker-card.persona-soroka {
+  --b: #ff2a8aaa;
+  background-color: #150a18e6;
+  background-image:
+    radial-gradient(circle at 80% 20%, #ff2a8a22, transparent 45%),
+    radial-gradient(circle at 15% 85%, #b46bff1c, transparent 40%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .16 0 0 0 0 .54 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: auto, auto, 120px 120px;
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+.persona-soroka .broker-banner {
+  display: inline-block;
+  margin: -10px 0 14px -6px;
+  color: #050409;
+  background: #ff2a8a;
+  transform: rotate(-2.5deg);
+  box-shadow: 3px 3px 0 #000;
+}
+.persona-soroka h3 {
+  color: #ff7ab8;
+  text-shadow: 0 0 8px #ff2a8a88;
+  transform: skewX(-6deg);
+}
+/* Junkman: rusty riveted plate with hazard stripes */
+.broker-card.persona-scrap {
+  --b: #ff8a00aa;
+  background-color: #1a120ce6;
+  background-image:
+    radial-gradient(circle at 10px 10px, #6a4a2a 0 2px, #2a1a10 2.5px, transparent 3px),
+    radial-gradient(circle at 80% 30%, #8a4a1a26, transparent 50%),
+    radial-gradient(circle at 25% 75%, #5a3a1a33, transparent 45%);
+  background-size: 40px 40px, auto, auto;
+  background-repeat: repeat, no-repeat, no-repeat;
+}
+.persona-scrap .broker-banner {
+  color: #050409;
+  background: repeating-linear-gradient(-45deg, #ffb000 0 10px, #1a1a1a 10px 20px);
+}
+/* the text sits on a solid plate so the stripes don't eat it */
+.persona-scrap .broker-banner span {
+  padding: 2px 8px;
+  background: #ffb000;
+  box-shadow: 0 0 0 2px #1a1a1a;
+}
+.persona-scrap h3 {
+  color: #ffb36a;
+}
