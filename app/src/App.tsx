@@ -17,7 +17,7 @@ import { Ratings } from './screens/Ratings';
 import { actBackground, getWorld, resetGame, startGame, useWorld } from './store';
 import { chainSession, emailLoginPending, resumeEmailLogin, signOutChain } from './near/chain';
 import { Boot } from './ui/Boot';
-import { bootSound } from './audio';
+import { tvSound } from './audio';
 import type { World } from './engine/world';
 import { linkRobots } from './near/bridge';
 import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soundVolume } from './audio';
@@ -122,8 +122,8 @@ export default function App() {
           // the boot screen has collapsed into a dot — now the arena switches on
           setStage('game');
           setPowerOn(true);
-          bootSound('power-on');
-          setTimeout(() => setPowerOn(false), 700);
+          tvSound('on');
+          setTimeout(() => setPowerOn(false), 1000);
         }}
       />
     );
@@ -131,6 +131,9 @@ export default function App() {
   const hourOfDay = w.hour % HOURS_PER_DAY;
 
   return (
+    <>
+      {/* outside .app: the scaling power-on animation must not stretch this layer */}
+      {powerOn && <div className="tv-on-fx" aria-hidden />}
     <div className={`app ${powerOn ? 'tv-power-on' : ''}`}>
       <div className="panel topbar">
         <div className="logo" data-text="HEAT INDEX">
@@ -214,6 +217,7 @@ export default function App() {
       </div>
       {ff && <FastForward onClose={() => setFf(false)} />}
     </div>
+    </>
   );
 }
 

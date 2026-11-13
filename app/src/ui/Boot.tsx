@@ -5,7 +5,7 @@
 // Everything on screen is derived from the elapsed time, so it is deterministic and easy to tune.
 
 import { useEffect, useRef, useState } from 'react';
-import { bootSound, faxSound } from '../audio';
+import { bootSound, faxSound, tvSound } from '../audio';
 
 const TASKS = [
   'INITIALIZING NEON TUBES',
@@ -21,7 +21,7 @@ const MEM_MS = 520; // memory test counter
 const TASK_MS = 320; // per task
 const TASKS_START = ON_MS + MEM_MS;
 const BOOT_END = TASKS_START + TASKS.length * TASK_MS + 250;
-const OFF_MS = 330; // tube switch-off
+const OFF_MS = 760; // tube switch-off: squash to a line, shrink to a dot, the dot fades
 const SPIN = ['|', '/', '-', '\\'];
 
 export function Boot({ onDone }: { onDone?: () => void }) {
@@ -80,7 +80,7 @@ export function Boot({ onDone }: { onDone?: () => void }) {
       if (!p.off) {
         p.off = true;
         // the press that unlocked the audio arrives a moment before the context is running
-        setTimeout(() => bootSound('power-off'), 30);
+        setTimeout(() => tvSound('off'), 30);
       }
       return;
     }

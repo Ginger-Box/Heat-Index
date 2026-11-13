@@ -932,3 +932,118 @@ export function deckSound(open: boolean, robots: number) {
     q.stop(at + 0.02);
   }
 }
+
+// ---------- old TV switching off / on (boot screen → arena) ----------
+
+/**
+ * 'off': a burst of static, the falling "zip" of the picture collapsing, a dull capacitor thunk at the end.
+ * 'on': a relay click, the wobbling hum of the degauss coil, crackles and the rising tone of the tube warming up.
+ */
+export function tvSound(kind: 'off' | 'on') {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const c = ctx;
+  const t = c.currentTime;
+  const out = c.createGain();
+  out.gain.value = 0.9;
+  out.connect(sfxBus ?? master);
+  const noise = (sec: number) => {
+    const b = c.createBuffer(1, Math.floor(c.sampleRate * sec), c.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const n = c.createBufferSource();
+    n.buffer = b;
+    return n;
+  };
+  const env = (g: GainNode, at: number, peak: number, attack: number, decay: number) => {
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(peak, at + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + attack + decay);
+  };
+  if (kind === 'off') {
+    const st = noise(0.45);
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 3200;
+    bp.Q.value = 0.8;
+    const sg = c.createGain();
+    env(sg, t, 0.22, 0.01, 0.4);
+    st.connect(bp).connect(sg).connect(out);
+    st.start(t);
+    const z = c.createOscillator();
+    z.type = 'sawtooth';
+    z.frequency.setValueAtTime(1400, t);
+    z.frequency.exponentialRampToValueAtTime(45, t + 0.38);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600;
+    const zg = c.createGain();
+    env(zg, t, 0.12, 0.01, 0.38);
+    z.connect(lp).connect(zg).connect(out);
+    z.start(t);
+    z.stop(t + 0.42);
+    const k = c.createOscillator();
+    k.type = 'sine';
+    k.frequency.setValueAtTime(130, t + 0.36);
+    k.frequency.exponentialRampToValueAtTime(38, t + 0.55);
+    const kg = c.createGain();
+    env(kg, t + 0.36, 0.38, 0.005, 0.2);
+    k.connect(kg).connect(out);
+    k.start(t + 0.36);
+    k.stop(t + 0.6);
+  } else {
+    const r = noise(0.02);
+    const rl = c.createBiquadFilter();
+    rl.type = 'lowpass';
+    rl.frequency.value = 1200;
+    const rg = c.createGain();
+    env(rg, t, 0.3, 0.002, 0.02);
+    r.connect(rl).connect(rg).connect(out);
+    r.start(t);
+    // degauss: a low hum whose loudness wobbles and dies down
+    for (const [f, v] of [
+      [55, 0.32],
+      [110, 0.12],
+    ] as const) {
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const g = c.createGain();
+      env(g, t + 0.03, v, 0.04, 0.85);
+      const lfo = c.createOscillator();
+      lfo.frequency.setValueAtTime(14, t);
+      lfo.frequency.linearRampToValueAtTime(6, t + 0.9);
+      const lg = c.createGain();
+      lg.gain.value = v * 0.6;
+      lfo.connect(lg).connect(g.gain);
+      o.connect(g).connect(out);
+      o.start(t + 0.03);
+      lfo.start(t + 0.03);
+      o.stop(t + 1);
+      lfo.stop(t + 1);
+    }
+    // crackles of static charge
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 4200;
+    bp.Q.value = 2;
+    bp.connect(out);
+    for (let i = 0; i < 12; i++) {
+      const n = noise(0.01);
+      const g = c.createGain();
+      const at = t + 0.08 + Math.random() * 0.5;
+      env(g, at, 0.06 + Math.random() * 0.1, 0.001, 0.01);
+      n.connect(g).connect(bp);
+      n.start(at);
+    }
+    // the tube warming up: a soft rising tone
+    const w = c.createOscillator();
+    w.type = 'triangle';
+    w.frequency.setValueAtTime(180, t + 0.1);
+    w.frequency.exponentialRampToValueAtTime(720, t + 0.55);
+    const wg = c.createGain();
+    env(wg, t + 0.1, 0.035, 0.15, 0.4);
+    w.connect(wg).connect(out);
+    w.start(t + 0.1);
+    w.stop(t + 0.7);
+  }
+}

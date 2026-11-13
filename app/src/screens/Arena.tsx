@@ -49,6 +49,7 @@ import { centerOf, chroma, crack, createAim, flashScreen, ring, shake, sparks, t
 import { DurBar, Glitch, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
 import { DeckRow } from '../ui/decks';
+import { NeonPointer } from '../ui/Pointer';
 import { EnergyIcon } from '../ui/icons';
 
 interface Fight {
@@ -1380,31 +1381,13 @@ function TutPointer({ target }: { target: string }) {
     const ay = acy + Math.sin(t0) * kk;
     // stop at the edge of the target (a little outside it)
     const ang = Math.atan2(by - ay, bx - ax);
-    const rx = b.width / 2 + 8;
-    const ry = b.height / 2 + 8;
+    // the head stops just outside the target's corner brackets
+    const rx = b.width / 2 + 16;
+    const ry = b.height / 2 + 16;
     const k = Math.min(Math.abs(rx / Math.cos(ang) || 1e9), Math.abs(ry / Math.sin(ang) || 1e9));
     const ex = bx - Math.cos(ang) * k;
     const ey = by - Math.sin(ang) * k;
-    const L = 16;
-    const W = 9;
-    const hx = ex - Math.cos(ang) * L;
-    const hy = ey - Math.sin(ang) * L;
-    const n = ang + Math.PI / 2;
-    if (Math.hypot(ex - ax, ey - ay) > 24)
-      svg = (
-        <svg className="tour-arrow tut-arrow" style={{ left: 0, top: 0, width: innerWidth, height: innerHeight }}>
-          <line x1={ax} y1={ay} x2={hx} y2={hy} />
-          <polygon
-            points={[
-              [ex, ey],
-              [hx + Math.cos(n) * W, hy + Math.sin(n) * W],
-              [hx - Math.cos(n) * W, hy - Math.sin(n) * W],
-            ]
-              .map((p) => p.map((v) => v.toFixed(1)).join(','))
-              .join(' ')}
-          />
-        </svg>
-      );
+    if (Math.hypot(ex - ax, ey - ay) > 30) svg = <NeonPointer x0={ax} y0={ay} x1={ex} y1={ey} target={b} />;
   }
-  return <span ref={self}>{svg && createPortal(svg, document.body)}</span>;
+  return <span ref={self}>{svg}</span>;
 }

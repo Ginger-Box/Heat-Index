@@ -2815,23 +2815,62 @@ html.cy-on input:not([type]) {
 }
 /* power-off: the picture collapses into a line, then a dot */
 .boot.phase-off .boot-screen {
-  animation: tv-off 0.32s ease-in forwards;
+  animation: tv-off 0.76s ease-in forwards;
 }
 .boot.phase-off {
-  animation: boot-fade 0.32s steps(1) forwards;
+  animation: boot-fade 0.76s steps(1) forwards;
 }
 @keyframes tv-off {
   0% {
     transform: none;
     filter: brightness(1);
   }
-  55% {
-    transform: scale(1, 0.006);
-    filter: brightness(4);
+  22% {
+    transform: scale(1.02, 0.01);
+    filter: brightness(3) saturate(0.3);
+  }
+  42% {
+    transform: scale(1, 0.004);
+    filter: brightness(7) saturate(0);
+  }
+  62% {
+    transform: scale(0.006, 0.004);
+    filter: brightness(10) saturate(0);
   }
   100% {
-    transform: scale(0, 0.006);
-    filter: brightness(8);
+    transform: scale(0.003, 0.003);
+    filter: brightness(10);
+    opacity: 0;
+  }
+}
+/* the glowing dot that lingers in the middle of a switched-off tube */
+.boot.phase-off::after {
+  content: '';
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 30%, #bfefff 45%, transparent 70%);
+  box-shadow: 0 0 30px 10px #bfefff66;
+  opacity: 0;
+  animation: tv-dot 0.76s ease-out forwards;
+}
+@keyframes tv-dot {
+  0%,
+  55% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.2);
   }
 }
 @keyframes boot-fade {
@@ -3164,19 +3203,48 @@ html.cy-on input:not([type]) {
 .b-backs {
   display: flex;
   justify-content: center;
-  height: 64px;
   align-items: flex-start;
+  height: 104px;
+  min-width: 0;
+  padding-top: 4px;
 }
+/* opponent's card backs: big enough to read their number, fanned and overlapping so 6 of them still fit */
 .b-backs i {
-  width: 40px;
-  height: 56px;
-  margin: 0 -6px;
-  border: 2px solid #ff2a8a88;
+  position: relative;
+  flex: none;
+  width: 70px;
+  height: 96px;
+  margin: 0 -13px;
+  border: 3px solid #ff2a8a;
   background:
-    repeating-linear-gradient(45deg, #ff2a8a22 0 4px, transparent 4px 8px),
-    #140b1a;
-  box-shadow: 0 2px 0 #000;
-  transform: rotate(calc(var(--i) * -4deg)) translateY(calc(var(--i) * var(--i) * 2px));
+    repeating-linear-gradient(45deg, #ff2a8a26 0 5px, transparent 5px 10px),
+    linear-gradient(180deg, #2a0f2e, #120816);
+  box-shadow:
+    inset 0 0 0 3px #120816,
+    inset 0 0 0 5px #ff2a8a55,
+    0 4px 0 #000,
+    0 0 12px #ff2a8a44;
+  transform: rotate(calc(var(--i) * -5deg)) translateY(calc(var(--i) * var(--i) * 3px));
+  transition: transform 0.2s;
+}
+/* the emblem in the middle of every back */
+.b-backs i::after {
+  content: 'HI';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 5px 4px 3px;
+  font-family: var(--font-px);
+  font-size: 11px;
+  font-style: normal;
+  color: #ff2a8a;
+  background: #120816;
+  border: 2px solid #ff2a8a;
+  text-shadow: 0 0 6px #ff2a8a;
+}
+.b-backs:hover i {
+  transform: rotate(calc(var(--i) * -7deg)) translateY(calc(var(--i) * var(--i) * 3px - 4px));
 }
 
 /* Cores: a "reactor" with a charge ring */
@@ -4756,30 +4824,108 @@ button.pick {
 /* after the boot screen collapses, the arena switches on like an old TV: a bright line opens into the picture */
 .app.tv-power-on {
   transform-origin: 50% 35vh;
-  animation: app-tv-on 0.6s ease-out;
+  animation: app-tv-on 0.95s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 @keyframes app-tv-on {
   0% {
-    transform: scale(0.02, 0.003);
-    filter: brightness(7);
-    opacity: 1;
+    transform: scale(0.004, 0.003);
+    filter: brightness(10) saturate(0);
   }
-  40% {
-    transform: scale(1, 0.004);
-    filter: brightness(5);
+  18% {
+    transform: scale(1.04, 0.004);
+    filter: brightness(8) saturate(0);
   }
-  75% {
-    transform: scale(1, 1.02);
-    filter: brightness(1.8) saturate(0.6);
+  45% {
+    transform: scale(1, 1.06);
+    filter: brightness(2.2) saturate(0.4) hue-rotate(-20deg);
+  }
+  60% {
+    transform: scale(1, 0.98);
+    filter: brightness(1.4);
   }
   100% {
     transform: none;
     filter: none;
   }
 }
+/* over the arena while it powers on: a white flash line, scanlines, static and an RGB flicker that fade out */
+.tv-on-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482990;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, #ffffff14 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 55%, #000000aa 100%);
+  animation: tv-fx 0.95s ease-out forwards;
+}
+.tv-on-fx::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 35vh;
+  height: 3px;
+  background: #fff;
+  box-shadow:
+    0 0 24px 6px #bfefff,
+    0 -2px 0 #ff2a8a,
+    0 2px 0 #00f0ff;
+  animation: tv-line 0.45s ease-out forwards;
+}
+.tv-on-fx::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+  mix-blend-mode: screen;
+  animation: tv-static 0.6s steps(6) forwards;
+}
+@keyframes tv-fx {
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes tv-line {
+  0% {
+    transform: scaleX(0.02);
+    opacity: 1;
+  }
+  35% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1, 60);
+    opacity: 0;
+  }
+}
+@keyframes tv-static {
+  0% {
+    opacity: 0.9;
+    background-position: 0 0;
+  }
+  50% {
+    opacity: 0.5;
+    background-position: 37px 91px;
+  }
+  100% {
+    opacity: 0;
+    background-position: 13px 45px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .app.tv-power-on {
     animation: none;
+  }
+  .tv-on-fx {
+    display: none;
   }
 }
 /* returning player */
@@ -4798,4 +4944,70 @@ button.pick {
 .welcome-go {
   padding: 13px;
   font-size: 15px;
+}
+
+/* tutorial / tour pointer (ui/Pointer.tsx): pixel-dashed neon line, a running data packet, a chevron head,
+   blinking corner brackets around the target */
+.neon-pointer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2147482801;
+  pointer-events: none;
+  overflow: visible;
+}
+.np-shadow {
+  fill: none;
+  stroke: #050409;
+  stroke-width: 9;
+}
+.np-line {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 5;
+  stroke-dasharray: 6 5;
+  filter: drop-shadow(0 0 4px #ffe600aa);
+}
+.np-packet {
+  fill: #fff;
+  filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 4px var(--yellow));
+}
+.np-head {
+  fill: var(--yellow);
+  stroke: #050409;
+  stroke-width: 3;
+  paint-order: stroke;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 6px #ffe600aa);
+}
+.np-head-core {
+  fill: #fff6a0;
+}
+.np-bracket {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 4;
+  stroke-linecap: square;
+  filter: drop-shadow(0 0 4px #ffe600);
+  animation: np-bracket 0.9s steps(2) infinite;
+}
+@keyframes np-bracket {
+  50% {
+    stroke: #fff;
+    opacity: 0.7;
+  }
+}
+/* the tour window stays put; only its text changes, with a quick fade */
+.tour-swap {
+  display: inline-block;
+  animation: tour-swap 0.25s ease-out;
+}
+p.tour-swap {
+  display: block;
+}
+@keyframes tour-swap {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }

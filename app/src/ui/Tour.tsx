@@ -5,6 +5,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { sfx } from '../audio';
+import { NeonPointer } from './Pointer';
 
 export const TOUR: { tab: string; title: string; text: string }[] = [
   { tab: 'arena', title: 'ARENA', text: 'Pick an opponent and one of your decks, fight for credits and ELO. Every battle wears your robots out.' },
@@ -29,20 +30,20 @@ export const TOUR: { tab: string; title: string; text: string }[] = [
 
 export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: () => void }) {
   const [i, setI] = useState(0);
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [geo, setGeo] = useState<{ tab: DOMRect; nav: DOMRect } | null>(null);
   const step = TOUR[i];
 
   useEffect(() => onTab(step.tab), [i]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
-    // measure once the tab switch has settled — measuring mid-animation made the arrow jump
-    setRect(null);
-    const measure = () => setRect(document.querySelector(`[data-tab="${step.tab}"]`)?.getBoundingClientRect() ?? null);
-    const id = setTimeout(measure, 380);
-    addEventListener('resize', measure);
-    return () => {
-      clearTimeout(id);
-      removeEventListener('resize', measure);
+    // the tab buttons don't move when the content switches, so they can be measured right away
+    const measure = () => {
+      const tab = document.querySelector(`[data-tab="${step.tab}"]`)?.getBoundingClientRect();
+      const nav = document.querySelector('.nav')?.getBoundingClientRect();
+      if (tab && nav) setGeo({ tab, nav });
     };
+    measure();
+    addEventListener('resize', measure);
+    return () => removeEventListener('resize', measure);
   }, [i, step.tab]);
 
   const next = () => {
@@ -50,52 +51,45 @@ export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: 
       sfx('ui-close');
       onDone();
     } else {
-      sfx('ui-open');
+      sfx('ui-open', { volume: 0.7 });
       setI(i + 1);
     }
   };
-  if (!rect) return null;
+  if (!geo) return null;
   const s = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+  const { tab, nav } = geo;
   const pad = 6;
-  // the caption box sits below the tab, a bit to the right, so the arrow has room to curve up to the button
-  const bx = Math.min(innerWidth - 440 * s - 16, Math.max(16, rect.left + 40));
-  const by = rect.bottom + 120;
-  // a straight neon arrow from the caption box up to the bottom of the tab, its head along the line
-  const ax0 = bx + 70;
-  const ay0 = by - 4;
-  const ax1 = rect.left + rect.width / 2;
-  const ay1 = rect.bottom + pad + 4;
-  const ang = Math.atan2(ay1 - ay0, ax1 - ax0);
-  const L = 16;
-  const W = 9;
-  const hx = ax1 - Math.cos(ang) * L;
-  const hy = ay1 - Math.sin(ang) * L;
-  const head = [
-    [ax1, ay1],
-    [hx + Math.cos(ang + Math.PI / 2) * W, hy + Math.sin(ang + Math.PI / 2) * W],
-    [hx - Math.cos(ang + Math.PI / 2) * W, hy - Math.sin(ang + Math.PI / 2) * W],
-  ];
+  // ONE window that stays put under the tab bar; only its text and the arrow change from step to step
+  const boxW = 440 * s;
+  const bx = Math.max(16, Math.min(innerWidth - boxW - 16, nav.left + nav.width / 2 - boxW / 2));
+  const by = nav.bottom + 150 * s;
+  // the arrow leaves the box's top edge at the point closest to the tab
+  const ax0 = Math.max(bx + 24, Math.min(bx + boxW - 24, tab.left + tab.width / 2));
   return createPortal(
     <>
       <div
         className="tour-dim"
-        style={{ left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }}
+        style={{ left: tab.left - pad, top: tab.top - pad, width: tab.width + pad * 2, height: tab.height + pad * 2 }}
       />
-      <svg className="tour-arrow" style={{ left: 0, top: 0, width: innerWidth, height: innerHeight }}>
-        <line x1={ax0} y1={ay0} x2={hx} y2={hy} />
-        <polygon points={head.map((p) => p.map((v) => v.toFixed(1)).join(',')).join(' ')} />
-      </svg>
-      <div className="tour-box" style={{ left: bx / s, top: by / s }} key={i}>
+      <NeonPointer x0={ax0} y0={by - 6} x1={tab.left + tab.width / 2} y1={tab.bottom + 20} target={tab} />
+      <div className="tour-box" style={{ left: bx / s, top: by / s }}>
         <h3>
-          {step.title} <span className="muted" style={{ fontSize: 10 }}>{i + 1}/{TOUR.length}</span>
+          <span key={i} className="tour-swap">
+            {step.title}
+          </span>{' '}
+          <span className="muted" style={{ fontSize: 10 }}>
+            {i + 1}/{TOUR.length}
+          </span>
         </h3>
-        <p>{step.text}</p>
+        <p key={i} className="tour-swap">
+          {step.text}
+        </p>
         <div className="row">
           <button className="small" onClick={onDone}>
             Skip
           </button>
           <button className="primary" onClick={next}>
-            {i + 1 >= TOUR.length ? 'Start playing' : 'Next ▶'}
+            Got it ▶
           </button>
         </div>
       </div>
