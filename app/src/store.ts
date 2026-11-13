@@ -4,7 +4,7 @@ import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
 import { createWorld, type World } from './engine/world';
 
-const KEY = 'neon-pit-world-v3'; // v3: English names — older saves are incompatible
+const KEY = 'neon-pit-world-v4'; // v4: new economy (price curve, durability by cost, battle purse)
 const NAME_KEY = 'neon-pit-player';
 
 let world: World | null = null;

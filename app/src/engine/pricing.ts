@@ -1,7 +1,7 @@
 // ЦЕНЫ. Вся логика цен брокеров — в этом одном файле (требование трека: «readable pricing rules»).
 // Формулы описаны в DESIGN.md, раздел 7. Объяснение цены (explainPrice) показывается в подсказке.
 
-import { MAX_DURABILITY, model, type Robot } from './robots';
+import { durFrac, model, type Robot } from './robots';
 
 // ---------- параметры экономики ----------
 export const ECON = {
@@ -11,11 +11,14 @@ export const ECON = {
   pickWeight: 30, // вклад популярности
   stockFactorMin: 0.6,
   stockFactorMax: 1.6,
-  repairShare: 0.5, // полный ремонт = 50% справедливой цены
-  scrapShare: 0.15, // сдать сломанного на запчасти = 15%
-  rewardWin: 20,
-  rewardDraw: 10,
-  rewardLoss: 5,
+  repairShare: 0.3, // полный ремонт = 30% справедливой цены (дорогие роботы окупаются, если их играть и чинить)
+  scrapShare: 0.15, // сдать сломанного на запчасти = 15%; изношенный робот у брокера стоит почти столько же
+  // Призовой фонд боя = purseRate × (стоимость обеих команд по базовым ценам).
+  // Победитель забирает winShare, ничья — drawShare каждому, проигравший — lossShare.
+  purseRate: 0.03,
+  winShare: 0.75,
+  drawShare: 0.5,
+  lossShare: 0.25,
 };
 
 export interface ModelStats {
@@ -68,7 +71,13 @@ export function fairPrice(modelId: string, perceived: number, stock: number, sty
   return model(modelId).basePrice * (0.5 + perceived / 100) * stockFactor(stock, style.targetStock);
 }
 
-export const durabilityFactor = (r: Robot) => 0.5 + 0.5 * (r.durability / MAX_DURABILITY);
+/**
+ * Сколько стоит робот с учётом износа (доля от цены целого).
+ * Кривая выпуклая: свежий робот почти не теряет в цене, изношенный — почти металлолом
+ * (при прочности около нуля — ровно цена лома). Поэтому выгоднее доиграть робота до конца,
+ * чем продавать его «на последнем издыхании».
+ */
+export const durabilityFactor = (r: Robot) => ECON.scrapShare + (1 - ECON.scrapShare) * Math.pow(durFrac(r), 1.6);
 
 /** Брокер продаёт по справедливой цене + наценка. */
 export const askPrice = (fair: number, style: BrokerStyle) => Math.round(fair * (1 + style.spread));
@@ -82,9 +91,16 @@ export const scrapPrice = (fair: number) => Math.max(1, Math.round(fair * ECON.s
 
 /** Ремонт до полной прочности, пропорционально недостающей прочности. */
 export const repairCost = (fair: number, r: Robot) =>
-  Math.max(1, Math.round(fair * ECON.repairShare * ((MAX_DURABILITY - r.durability) / MAX_DURABILITY)));
+  Math.max(1, Math.round(fair * ECON.repairShare * (1 - durFrac(r))));
 
 /** Брокер замечает новую актуальность не сразу: сдвигается к ней на долю `react`. */
+/** Призовой фонд боя и доля стороны (res: 1 победа, 0.5 ничья, 0 поражение). */
+export function battleReward(teamValueA: number, teamValueB: number, res: number): number {
+  const purse = ECON.purseRate * (teamValueA + teamValueB);
+  const share = res === 1 ? ECON.winShare : res === 0.5 ? ECON.drawShare : ECON.lossShare;
+  return Math.round(purse * share);
+}
+
 export const updatePerceived = (prev: number, actual: number, style: BrokerStyle) =>
   prev + (actual - prev) * style.react;
 

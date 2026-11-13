@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CLASSES, MAX_DURABILITY, TEAM_ENERGY_CAP, TEAM_SIZE, classOf, model } from '../engine/robots';
+import { CLASSES, TEAM_ENERGY_CAP, TEAM_SIZE, classOf, maxDurability, model } from '../engine/robots';
 import { buildTeam, teamEnergy, teamError } from '../engine/team';
 import {
   PLAYER_ID,
@@ -118,7 +118,7 @@ export function Hangar({ w }: { w: World }) {
   };
 
   const repairBtn = (r: OwnedRobot) => {
-    if (r.durability >= MAX_DURABILITY) return null;
+    if (r.durability >= maxDurability(r.modelId)) return null;
     const rq = repairQuote(w, r);
     return rq ? (
       <button

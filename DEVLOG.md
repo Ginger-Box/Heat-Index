@@ -88,6 +88,18 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Click effect: a narrow "signal tear" glitch with needle-shaped slices.
 - **git**: repository created; the existing code committed in logical parts. Real history starts here.
 
+### Economy v4 (Nov 13)
+- Requested: robots shouldn't all cost about the same, saving up should matter, expensive robots should last longer
+  and pay off when played, and it should be better to play a worn robot to the end than to sell it.
+- Prices now follow a curve (30 → 560 CR), durability grows with cost (6 → 16), battle rewards are a purse of 3% of
+  both teams' value (winner takes 75%), repairs cost 30%, and a worn robot's resale value falls to scrap value.
+- First try (purse 8%) inflated NPC money ×6 a week — NPCs fight ~170 battles a week each. Tuned with
+  `scripts/economy.ts` and the new `scripts/payoff.ts`; added two money sinks found along the way: rich NPCs upgrade
+  their teams, and brokers keep a cash reserve and stop buying models they are overstocked on (the small broker kept
+  going bankrupt from buying up everyone's used robots).
+- Result: stable money supply over a simulated week on 3 worlds; expensive robots pay back ×1.1–1.9 for an average
+  player, cheap ones are consumables.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results

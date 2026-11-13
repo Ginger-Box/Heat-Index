@@ -2,20 +2,21 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { sfx } from '../audio';
 import { AttackIcon, EnergyIcon, HpIcon } from './icons';
 import { RobotSprite } from './robotArt';
-import { ABILITY_HELP, ABILITY_LABEL, CLASS_HELP, CLASS_ICON, CLASS_LABEL, MAX_DURABILITY, abilityHasN, classOf, model } from '../engine/robots';
+import { ABILITY_HELP, ABILITY_LABEL, CLASS_HELP, CLASS_ICON, CLASS_LABEL, abilityHasN, classOf, maxDurability, model } from '../engine/robots';
 
 // Цвет рамки по стоимости в энергии (заглушка вместо арта)
 export const COST_COLOR = ['#8a8fbf', '#9aa3c7', '#3bff9a', '#22e3ff', '#a66bff', '#ff2bd6', '#f7f33b'];
 
 
-export function durColor(d: number) {
-  return d <= 0 ? '#555' : d <= 3 ? 'var(--red)' : d <= 6 ? 'var(--yellow)' : 'var(--green)';
+export function durColor(d: number, max = 10) {
+  const f = d / max;
+  return d <= 0 ? '#555' : f <= 0.3 ? 'var(--red)' : f <= 0.6 ? 'var(--yellow)' : 'var(--green)';
 }
 
-export function DurBar({ value, max = MAX_DURABILITY }: { value: number; max?: number }) {
+export function DurBar({ value, max = 10 }: { value: number; max?: number }) {
   return (
     <div className="dur" title={`Durability ${value}/${max}`}>
-      <i style={{ width: `${(Math.max(0, value) / max) * 100}%`, background: durColor(value) }} />
+      <i style={{ width: `${(Math.max(0, value) / max) * 100}%`, background: durColor(value, max) }} />
     </div>
   );
 }
@@ -88,7 +89,7 @@ export function RobotCard(props: {
         </div>
         {props.durability !== undefined && (
           <div className="muted" style={{ marginTop: 6 }}>
-            Durability {props.durability}/{MAX_DURABILITY}: −1 when damaged, −2 when destroyed in battle.
+            Durability {props.durability}/{maxDurability(md.id)}: every battle −1, destroyed or overheated −1 more.
           </div>
         )}
       </div>
@@ -108,7 +109,7 @@ export function RobotCard(props: {
           {props.hp !== undefined && props.hp < md.hp ? <small className="muted">/{md.hp}</small> : null}
         </span>
       </div>
-      {props.durability !== undefined && <DurBar value={props.durability} />}
+      {props.durability !== undefined && <DurBar value={props.durability} max={maxDurability(md.id)} />}
       {props.footer}
     </div>
   );

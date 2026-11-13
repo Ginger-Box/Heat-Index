@@ -65,6 +65,8 @@ export interface BattleState {
   active: number; // whose turn it is
   sides: [SideState, SideState];
   modelOf: Record<string, string>;
+  /** чей робот: 0 или 1 (нужно, например, чтобы посчитать стоимость команд для призового фонда) */
+  sideOf: Record<string, number>;
   wear: Record<string, WearInfo>;
   history: BattleEvent[];
   winner: number | null | undefined; // undefined — ongoing; null — draw
@@ -124,6 +126,7 @@ export function cloneLite(st: BattleState): BattleState {
       SideState,
     ],
     modelOf: st.modelOf,
+    sideOf: st.sideOf,
     wear: Object.fromEntries(Object.entries(st.wear).map(([k, v]) => [k, { ...v }])),
     history: [],
     winner: st.winner,
@@ -136,10 +139,12 @@ export function cloneLite(st: BattleState): BattleState {
 export function createBattle(teamA: Robot[], teamB: Robot[], seed: number): BattleState {
   const rng = new Rng(seed);
   const modelOf: Record<string, string> = {};
+  const sideOf: Record<string, number> = {};
   const wear: Record<string, WearInfo> = {};
-  const mkSide = (team: Robot[], extra: number): SideState => {
+  const mkSide = (team: Robot[], extra: number, side: number): SideState => {
     for (const r of team) {
       modelOf[r.uid] = r.modelId;
+      sideOf[r.uid] = side;
       wear[r.uid] = { fielded: false, damaged: false, destroyed: false, overheated: false };
     }
     const deck = rng.shuffle(team.map((r) => r.uid));
@@ -149,8 +154,9 @@ export function createBattle(teamA: Robot[], teamB: Robot[], seed: number): Batt
   // the second player gets one extra card to make up for moving second
   const st: BattleState = {
     active: 0,
-    sides: [mkSide(teamA, 0), mkSide(teamB, 1)],
+    sides: [mkSide(teamA, 0, 0), mkSide(teamB, 1, 1)],
     modelOf,
+    sideOf,
     wear,
     history: [],
     winner: undefined,

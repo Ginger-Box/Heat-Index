@@ -17,6 +17,7 @@ export interface RobotModel {
   hp: number;
   ability?: Ability;
   basePrice: number; // CR
+  maxDur: number; // прочность нового робота
 }
 
 export const ABILITY_LABEL: Record<AbilityKind, string> = {
@@ -59,6 +60,12 @@ export const ABILITY_HELP: Record<AbilityKind, string> = {
   shock: 'When deployed, stuns the robot across: it deals no damage this round.',
 };
 
+/**
+ * Базовая цена по стоимости в энергии — не ровная, а по кривой (×~1,8 за ступень):
+ * дешёвых покупаешь сразу, на самых сильных приходится копить.
+ */
+export const BASE_PRICE = [0, 30, 55, 100, 180, 320, 560];
+
 const m = (
   id: string,
   name: string,
@@ -66,7 +73,9 @@ const m = (
   atk: number,
   hp: number,
   ability?: Ability,
-): RobotModel => ({ id, name, cost, atk, hp, ability, basePrice: cost * 20 });
+): RobotModel => ({ id, name, cost, atk, hp, ability, basePrice: BASE_PRICE[cost], maxDur: 4 + 2 * cost });
+
+
 
 // 7 классов по 4 робота. Цифры подобраны скриптом scripts/classes.ts: классы выигрывают 47–56%.
 export const MODELS: RobotModel[] = [
@@ -121,7 +130,10 @@ export const model = (id: string): RobotModel => {
   return x;
 };
 
-export const MAX_DURABILITY = 10;
+/** Прочность зависит от модели: дешёвые 6, самые дорогие 16 (4 + 2 × энергия). */
+export const maxDurability = (modelId: string) => model(modelId).maxDur;
+/** Доля оставшейся прочности 0..1. */
+export const durFrac = (r: { modelId: string; durability: number }) => Math.max(0, r.durability) / maxDurability(r.modelId);
 export const TEAM_SIZE = 8;
 export const TEAM_ENERGY_CAP = 24;
 export const MAX_SAME_MODEL = 2;

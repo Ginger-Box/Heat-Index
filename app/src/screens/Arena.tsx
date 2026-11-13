@@ -18,8 +18,8 @@ import {
   type Target,
   type Unit,
 } from '../engine/battle';
-import { ECON } from '../engine/pricing';
-import { CLASS_HELP, CLASS_ICON, CLASS_LABEL, model } from '../engine/robots';
+import { battleReward } from '../engine/pricing';
+import { CLASS_HELP, CLASS_ICON, CLASS_LABEL, maxDurability, model } from '../engine/robots';
 import { teamError } from '../engine/team';
 import {
   PLAYER_ID,
@@ -27,6 +27,7 @@ import {
   applyMatch,
   getManager,
   pickOpponentForPlayer,
+  sideTeamValues,
   teamOf,
   type World,
 } from '../engine/world';
@@ -669,7 +670,8 @@ function ResultPanel({
 }) {
   const me = getManager(w, PLAYER_ID);
   const res = st.winner === null ? 'Draw' : st.winner === 0 ? 'Victory!' : 'Defeat';
-  const reward = st.winner === null ? ECON.rewardDraw : st.winner === 0 ? ECON.rewardWin : ECON.rewardLoss;
+  const values = sideTeamValues(st);
+  const reward = battleReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0);
   const uids = Object.keys(durBefore);
   return (
     <div className="panel" style={{ borderColor: st.winner === 0 ? 'var(--green)' : 'var(--line)' }}>
@@ -692,7 +694,7 @@ function ResultPanel({
           return (
             <div key={u} style={{ width: 130 }}>
               <b>{model(st.modelOf[u]).name}</b>
-              <DurBar value={now} />
+              <DurBar value={now} max={maxDurability(st.modelOf[u])} />
               <small className={loss ? 'down' : 'muted'}>
                 {before} → {now} {loss ? `(−${loss})` : '(no loss)'}
                 {st.wear[u]?.overheated ? ' 🔥' : ''}

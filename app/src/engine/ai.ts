@@ -3,7 +3,7 @@
 // of the board and the position is scored. The AI does not cheat: the opponent's hand is not counted.
 // The score includes wear: a "careful" NPC avoids losing and overheating expensive robots (repairs cost money).
 
-import { model } from './robots';
+import { maxDurability, model } from './robots';
 import {
   BOARD_SLOTS,
   applyAction,
@@ -60,7 +60,7 @@ function evaluate(
     const w0 = wear0[uid];
     if (!w0 || !isMine(st, side, uid)) continue;
     const cost = model(st.modelOf[uid]).cost;
-    const fragile = (dur[uid] ?? 10) <= 3 ? 2 : 1;
+    const fragile = (dur[uid] ?? 10) / maxDurability(st.modelOf[uid]) <= 0.3 ? 2 : 1;
     const k = style.careful * fragile * cost;
     if (w.destroyed && !w0.destroyed) v -= k * 1.5;
     else if (w.damaged && !w0.damaged) v -= k * 0.4;
