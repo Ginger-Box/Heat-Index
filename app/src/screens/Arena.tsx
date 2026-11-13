@@ -34,6 +34,9 @@ import {
   PLAYER_ID,
   STRATEGY_LABEL,
   applyMatch,
+  ensureDecks,
+  renameDeck,
+  selectDeck,
   getManager,
   pickOpponentForPlayer,
   sideTeamValues,
@@ -45,6 +48,7 @@ import { GLITCH_TOTAL, confetti, glitchTakeover } from '../ui/battleEnd';
 import { centerOf, chroma, createAim, flashScreen, ring, shake, slash, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
+import { DeckRow } from '../ui/decks';
 import { EnergyIcon } from '../ui/icons';
 
 interface Fight {
@@ -128,6 +132,7 @@ export function Arena({ w }: { w: World }) {
   const [fight, setFight] = useState<Fight | null>(null);
   const [view, setView] = useState<BattleState | null>(null); // what is drawn (during animations may differ from fight.st)
   const [handSel, setHandSel] = useState<string | null>(null);
+  const [deckOpen, setDeckOpen] = useState<number | null>(() => getManager(w, PLAYER_ID).activeDeck ?? 0);
   const [pending, setPending] = useState<{ uid: string; slot: number; targets: Target[] } | null>(null);
   const [aimLegal, setAimLegal] = useState<Set<string> | null>(null);
   const [aimFrom, setAimFrom] = useState<string | null>(null);
@@ -341,17 +346,39 @@ export function Arena({ w }: { w: World }) {
                   ⚔ Fight
                 </button>
               </div>
-              {teamErr && <div className="error">Team not ready: {teamErr}. Go to the Hangar.</div>}
+              {teamErr && <div className="error">Battle deck not ready: {teamErr}. Pick another deck or go to the Hangar.</div>}
             </div>
             <div style={{ flex: 1 }}>
-              <h3>
-                Your deck <span className="muted">· {myTeam.length} robots</span>
-              </h3>
-              <div className="lobby-deck">
-                {myTeam.map((r) => (
-                  <RobotCard key={r.uid} modelId={r.modelId} durability={r.durability} />
-                ))}
-              </div>
+              <h3>Your decks</h3>
+              {ensureDecks(me).map((d, di) => (
+                <DeckRow
+                  key={di}
+                  w={w}
+                  deck={d}
+                  open={deckOpen === di}
+                  battle={(me.activeDeck ?? 0) === di}
+                  onToggle={() => {
+                    if ((me.activeDeck ?? 0) !== di) {
+                      act((w) => selectDeck(w, PLAYER_ID, di));
+                      setDeckOpen(di);
+                    } else setDeckOpen(deckOpen === di ? null : di);
+                  }}
+                  onRename={(name) => act((w) => renameDeck(w, PLAYER_ID, di, name))}
+                >
+                  {d.uids.length ? (
+                    <div className="lobby-deck">
+                      {d.uids
+                        .map((u) => w.robots[u])
+                        .filter(Boolean)
+                        .map((r) => (
+                          <RobotCard key={r.uid} modelId={r.modelId} durability={r.durability} />
+                        ))}
+                    </div>
+                  ) : (
+                    <span className="muted">Empty — build it in the Hangar.</span>
+                  )}
+                </DeckRow>
+              ))}
             </div>
           </div>
           <details style={{ marginTop: 14 }}>

@@ -2,7 +2,7 @@
 // Позже этот слой заменяется на сервер, который пишет сделки и бои в NEAR.
 import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
-import { createWorld, type World } from './engine/world';
+import { createWorld, ensureDecks, type World } from './engine/world';
 
 const KEY = 'neon-pit-world-v5'; // v5: decks of 10–15 robots, 5 board slots (v4: new economy)
 const NAME_KEY = 'neon-pit-player';
@@ -23,6 +23,9 @@ function load(): World | null {
 
 /** Подтянуть в старое сохранение настройки, которые поменялись после балансировки. */
 function migrate(w: World): World {
+  // player decks (added after v5 started): the current team becomes deck 1
+  const me = w.managers.find((m) => m.id === 'player');
+  if (me) ensureDecks(me);
   for (const b of w.brokers) {
     if (b.id === 'kessler') b.style.targetStock = 3;
     if (b.id === 'soroka') b.style.spread = 0.08;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CLASSES, TEAM_ENERGY_CAP, TEAM_MIN, TEAM_SIZE, classOf, maxDurability, model } from '../engine/robots';
-import { buildTeam, teamEnergy, teamError } from '../engine/team';
+import { buildTeam } from '../engine/team';
 import {
   PLAYER_ID,
   bestBid,
@@ -12,8 +12,10 @@ import {
   repairQuote,
   robotsOf,
   sell,
-  setTeam,
-  teamOf,
+  DECK_COUNT,
+  ensureDecks,
+  renameDeck,
+  setDeck,
   type OwnedRobot,
   type World,
 } from '../engine/world';
@@ -21,6 +23,7 @@ import { sfx } from '../audio';
 import { act } from '../store';
 import { Cr, RobotCard } from '../ui/common';
 import { useCardDrag } from '../ui/drag';
+import { DeckRow } from '../ui/decks';
 
 type SortKey = 'class' | 'cost' | 'atk' | 'hp' | 'dur' | 'price' | 'name';
 const SORTS: [SortKey, string][] = [
@@ -38,10 +41,13 @@ export function Hangar({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'cost', desc: true });
 
-  const team = teamOf(w, me);
+  const decks = ensureDecks(me);
+  // the deck being edited (one at a time, can be collapsed); starts on the battle deck
+  const [editIdx, setEditIdx] = useState<number | null>(me.activeDeck ?? 0);
+  const cur = editIdx ?? -1;
+  const team = (decks[cur]?.uids ?? []).map((u) => w.robots[u] as OwnedRobot).filter(Boolean);
   const teamUids = team.map((r) => r.uid);
-  const energy = teamEnergy(team);
-  const ready = !teamError(team);
+  const inAnyDeck = new Set(decks.flatMap((d) => d.uids));
 
   const price = (r: OwnedRobot) => bestBid(w, r)?.price ?? 0;
   const keyOf = (r: OwnedRobot): number | string => {
@@ -64,7 +70,7 @@ export function Hangar({ w }: { w: World }) {
     }
   };
   const pool = robotsOf(w, PLAYER_ID)
-    .filter((r) => !teamUids.includes(r.uid))
+    .filter((r) => !inAnyDeck.has(r.uid)) // the Hangar shows robots that stand in no deck
     .sort((a, b) => {
       const ka = keyOf(a);
       const kb = keyOf(b);
@@ -74,7 +80,8 @@ export function Hangar({ w }: { w: World }) {
 
   // Любое изменение состава сразу сохраняется в мир — отдельной кнопки «Сохранить» нет.
   const save = (uids: string[]) => {
-    const err = act((w) => setTeam(w, PLAYER_ID, uids));
+    if (cur < 0) return false;
+    const err = act((w) => setDeck(w, PLAYER_ID, cur, uids));
     setMsg(err);
     return !err;
   };
@@ -109,7 +116,8 @@ export function Hangar({ w }: { w: World }) {
   });
 
   const auto = () => {
-    const t = buildTeam(robotsOf(w, PLAYER_ID), (r) => {
+    // from this deck's robots + the free ones (robots in other decks stay where they are)
+    const t = buildTeam(robotsOf(w, PLAYER_ID).filter((r) => teamUids.includes(r.uid) || !inAnyDeck.has(r.uid)), (r) => {
       const md = model(r.modelId);
       return md.atk + md.hp + (md.ability ? 2 : 0) + r.durability * 0.2;
     });
@@ -138,62 +146,77 @@ export function Hangar({ w }: { w: World }) {
   return (
     <div className="grid">
       <div className="panel">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0 }}>Team</h2>
-          <div className="row">
-            <span>
-              Deck <b className={team.length < TEAM_MIN ? 'down' : ''}>{team.length}</b> ({TEAM_MIN}–{TEAM_SIZE})
-            </span>
-            <span>
-              Energy <b className={energy > TEAM_ENERGY_CAP ? 'down' : ''}>{energy}</b>/{TEAM_ENERGY_CAP}
-            </span>
-            <span className={ready ? 'up' : 'muted'}>{ready ? '✓ ready to fight' : 'not ready to fight'}</span>
-            <button onClick={auto}>Auto-build</button>
-            <button onClick={() => save([])} disabled={!team.length}>
-              Clear
-            </button>
-          </div>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+          <h2 style={{ margin: 0 }}>Decks</h2>
+          <span className="muted">Open a deck to edit it · the battle deck is chosen in the Arena</span>
         </div>
         {msg && (
-          <div className="error" style={{ marginTop: 8 }}>
+          <div className="error" style={{ marginBottom: 8 }}>
             {msg}
           </div>
         )}
-        <div className="slots">
-          {Array.from({ length: TEAM_SIZE }, (_, i) => {
-            const r = team[i];
-            const card = r && (
-              <RobotCard
-                modelId={r.modelId}
-                durability={r.durability}
-                onClick={() => remove(r.uid)}
-                badge={<span className="muted">✕</span>}
-              />
-            );
-            const h = r && drag.handle(r.uid, () => card);
-            return (
-              <div
-                key={i}
-                data-drop={`slot-${i}`}
-                className={`slot-cell ${r ? '' : 'empty'} ${drag.dragging && drag.over === `slot-${i}` ? 'over' : ''}`}
-              >
-                {r && h ? (
-                  <>
-                    <div key={h.key} {...h.props}>
-                      {card}
-                    </div>
-                    <div className="slot-actions">{repairBtn(r)}</div>
-                  </>
-                ) : (
-                  <span className="muted">{i < TEAM_MIN ? `slot ${i + 1}` : `slot ${i + 1} · optional`}</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        {decks.slice(0, DECK_COUNT).map((d, di) => (
+          <DeckRow
+            key={di}
+            w={w}
+            deck={d}
+            open={editIdx === di}
+            battle={(me.activeDeck ?? 0) === di}
+            onToggle={() => {
+              setMsg(null);
+              setEditIdx(editIdx === di ? null : di);
+            }}
+            onRename={(name) => run((w) => renameDeck(w, PLAYER_ID, di, name))}
+            actions={
+              editIdx === di && (
+                <>
+                  <button className="small" onClick={auto}>
+                    Auto-build
+                  </button>
+                  <button className="small" onClick={() => save([])} disabled={!team.length}>
+                    Clear
+                  </button>
+                </>
+              )
+            }
+          >
+            <div className="slots">
+              {Array.from({ length: TEAM_SIZE }, (_, i) => {
+                const r = team[i];
+                const card = r && (
+                  <RobotCard
+                    modelId={r.modelId}
+                    durability={r.durability}
+                    onClick={() => remove(r.uid)}
+                    badge={<span className="muted">✕</span>}
+                  />
+                );
+                const h = r && drag.handle(r.uid, () => card);
+                return (
+                  <div
+                    key={i}
+                    data-drop={`slot-${i}`}
+                    className={`slot-cell ${r ? '' : 'empty'} ${drag.dragging && drag.over === `slot-${i}` ? 'over' : ''}`}
+                  >
+                    {r && h ? (
+                      <>
+                        <div key={h.key} {...h.props}>
+                          {card}
+                        </div>
+                        <div className="slot-actions">{repairBtn(r)}</div>
+                      </>
+                    ) : (
+                      <span className="muted">{i < TEAM_MIN ? `slot ${i + 1}` : `slot ${i + 1} · optional`}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </DeckRow>
+        ))}
         <small className="muted">
-          Drag robots between the Hangar and the slots (drop on a taken slot to swap), or just click them. Changes save
-          instantly.
+          Drag robots between the Hangar and the slots of the open deck (drop on a taken slot to swap), or just click
+          them. A robot can stand in one deck at a time. Changes save instantly.
           A deck is {TEAM_MIN}–{TEAM_SIZE} robots, {TEAM_ENERGY_CAP} energy at most, at most 2 of the same model.
         </small>
         {canClaimLoaner(w, PLAYER_ID) && (
@@ -230,7 +253,7 @@ export function Hangar({ w }: { w: World }) {
           </div>
         </div>
         <div className="row" style={{ alignItems: 'stretch', gap: 18 }}>
-          {pool.length === 0 && <span className="muted">All robots are in the team. Buy more on the Market.</span>}
+          {pool.length === 0 && <span className="muted">All your robots are in decks. Buy more on the Market.</span>}
           {pool.map((r) => {
             const bid = bestBid(w, r);
             const card = (

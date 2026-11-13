@@ -45,12 +45,21 @@ export interface Manager {
   careful: number; // стиль боя AI
   focus?: RobotClass; // класс роботов, через который играет NPC (у игрока нет)
   credits: number;
-  team: string[]; // uid роботов
+  team: string[]; // uid роботов — колода, с которой идут в бой (у игрока = активная колода из decks)
+  /** Игрок: 5 именованных колод; робот может стоять только в одной. activeDeck — какая идёт в бой. */
+  decks?: Deck[];
+  activeDeck?: number;
   elo: number;
   wins: number;
   losses: number;
   draws: number;
 }
+
+export interface Deck {
+  name: string;
+  uids: string[];
+}
+export const DECK_COUNT = 5;
 
 export interface Broker {
   id: string;
@@ -345,6 +354,7 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
   deal.broker.credits -= deal.price;
   r.owner = deal.broker.id;
   m.team = m.team.filter((x) => x !== uid);
+  syncDecks(w, m);
   ledger(w, { kind: r.durability <= 0 ? 'scrap' : 'sell', from: deal.broker.id, to: m.id, uid, amount: deal.price });
   if (m.id === PLAYER_ID)
     log(w, 'player', `You sold ${model(r.modelId).name} to ${deal.broker.name} for ${deal.price} CR`);
@@ -468,7 +478,67 @@ export function recycle(w: World, managerId: string, uid: string): string | null
   delete w.robots[uid];
   const m = getManager(w, managerId);
   m.team = m.team.filter((x) => x !== uid);
+  syncDecks(w, m);
   if (managerId === PLAYER_ID) log(w, 'player', `You recycled ${model(r.modelId).name}`);
+  return null;
+}
+
+// ---------- колоды игрока ----------
+
+/** Make sure the manager has DECK_COUNT decks (old saves: the current team becomes deck 1). */
+export function ensureDecks(m: Manager): Deck[] {
+  if (!m.decks) {
+    m.decks = Array.from({ length: DECK_COUNT }, (_, i) => ({ name: `Deck ${i + 1}`, uids: i === 0 ? [...m.team] : [] }));
+    m.activeDeck = 0;
+  }
+  while (m.decks.length < DECK_COUNT) m.decks.push({ name: `Deck ${m.decks.length + 1}`, uids: [] });
+  return m.decks;
+}
+
+/** After m.team changed (sold, recycled, broke in battle): mirror it into the active deck, drop robots we lost. */
+function syncDecks(w: World, m: Manager) {
+  if (!m.decks) return;
+  m.decks[m.activeDeck ?? 0].uids = [...m.team];
+  for (const d of m.decks) d.uids = d.uids.filter((u) => w.robots[u]?.owner === m.id);
+}
+
+/** Which deck a robot stands in (or -1). */
+export const deckOfRobot = (m: Manager, uid: string) => (m.decks ?? []).findIndex((d) => d.uids.includes(uid));
+
+/** Save the contents of deck idx (may be incomplete while it is being built). A robot can be in one deck only. */
+export function setDeck(w: World, managerId: string, idx: number, uids: string[]): string | null {
+  const m = getManager(w, managerId);
+  const decks = ensureDecks(m);
+  const team = uids.map((u) => w.robots[u]);
+  if (team.some((r) => !r || r.owner !== m.id)) return 'The deck has a robot you do not own';
+  const other = uids.find((u) => {
+    const d = deckOfRobot(m, u);
+    return d >= 0 && d !== idx;
+  });
+  if (other) return `${model(w.robots[other].modelId).name} is already in ${decks[deckOfRobot(m, other)].name}`;
+  const err = partialTeamError(team);
+  if (err) return err;
+  decks[idx].uids = [...uids];
+  if (idx === (m.activeDeck ?? 0)) m.team = [...uids];
+  return null;
+}
+
+/** Choose the deck that goes into battle. */
+export function selectDeck(w: World, managerId: string, idx: number): string | null {
+  const m = getManager(w, managerId);
+  const decks = ensureDecks(m);
+  if (!decks[idx]) return 'No such deck';
+  m.activeDeck = idx;
+  m.team = [...decks[idx].uids];
+  return null;
+}
+
+export function renameDeck(w: World, managerId: string, idx: number, name: string): string | null {
+  const m = getManager(w, managerId);
+  const decks = ensureDecks(m);
+  const n = name.trim().slice(0, 24);
+  if (!n) return 'The name cannot be empty';
+  decks[idx].name = n;
   return null;
 }
 
@@ -546,7 +616,10 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     if (r?.loaner && r.durability <= 0) delete w.robots[uid];
   }
   // Сломанные роботы выпадают из команды
-  for (const m of sides) m.team = m.team.filter((u) => (w.robots[u]?.durability ?? 0) > 0);
+  for (const m of sides) {
+    m.team = m.team.filter((u) => (w.robots[u]?.durability ?? 0) > 0);
+    syncDecks(w, m);
+  }
   if (a.id === PLAYER_ID || b.id === PLAYER_ID) {
     const me = a.id === PLAYER_ID ? 0 : 1;
     const opp = sides[1 - me];
@@ -1030,6 +1103,7 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
   };
   w.managers.push(player);
   player.team = STARTER_TEAM.map((id) => mint(w, id, PLAYER_ID).uid);
+  ensureDecks(player);
 
   // Разогрев: мир живёт день до прихода игрока, чтобы у цен уже была история
   advanceHours(w, warmupHours);

@@ -4181,3 +4181,71 @@ button.pick {
   padding: 2px 4px;
   justify-self: start;
 }
+
+/* колоды: раскрывающиеся строки (ui/decks.tsx) */
+.deck-row {
+  border: 2px solid var(--line);
+  background: #0a0812;
+  margin-bottom: 8px;
+}
+.deck-row.open {
+  border-color: #00f0ff88;
+  box-shadow: 0 0 14px #00f0ff22;
+}
+.deck-row.battle .deck-name {
+  color: var(--yellow);
+}
+.deck-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  user-select: none;
+}
+.deck-head:hover {
+  background: #ffffff08;
+}
+.deck-caret {
+  width: 14px;
+  color: var(--cyan);
+  font-size: 12px;
+}
+.deck-name {
+  font-family: var(--font-px);
+  font-size: 14px;
+}
+.deck-name-input {
+  font-family: var(--font-px);
+  font-size: 14px;
+  width: 220px;
+  padding: 4px 8px;
+}
+.deck-rename {
+  padding: 2px 7px;
+  opacity: 0.55;
+}
+.deck-head:hover .deck-rename {
+  opacity: 1;
+}
+.deck-battle {
+  color: #050409;
+  background: var(--yellow);
+  border-color: var(--yellow);
+}
+.deck-stats,
+.deck-state {
+  font-size: 14px;
+}
+.deck-actions {
+  display: flex;
+  gap: 6px;
+}
+.deck-body {
+  padding: 0 12px 12px;
+}
+.deck-body .slots {
+  margin-top: 4px;
+}
