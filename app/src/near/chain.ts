@@ -107,7 +107,8 @@ export function chainCall<T = unknown>(label: string, method: string, args: Reco
   const run = async () => {
     try {
       const acc = new Account(s.accountId, provider, s.gameKey as `ed25519:${string}`);
-      const res = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas: 100_000_000_000_000n });
+      // 30 TGas: the heaviest call (record_battle) burns ~7; prepaid gas must be covered by the account balance
+      const res = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas: 30_000_000_000_000n });
       const status = res.status as { SuccessValue?: string; Failure?: unknown };
       tx.hash = res.transaction?.hash;
       if (status && typeof status === 'object' && 'Failure' in status) throw new Error(JSON.stringify(status.Failure).slice(0, 200));

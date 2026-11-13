@@ -33,10 +33,15 @@ A robot's market price follows its **relevance** (how often it wins and how many
 | Registration: 12 starter robots + 1000 CR | **on-chain** | [register tx](https://testnet.nearblocks.io/txns/9LkHUBch9gbU1rBH9TQAz8WzgFVaFnuo8fdkPHmGpgnk) |
 | Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
-| Sales and repairs | **on-chain** | `sell_robot`, `repair_robot` + `heat_index` events |
+| Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
 | Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 9 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
 | Email login → a NEAR account owned by the player's NEAR Auth (MPC) key | **on-chain** (account factory in the contract) | `account_for_owner_key` |
 | The 3 brokers' cash and stock, the 12 NPC teams, hourly prices, relevance, the battles themselves | **simulated in the browser** (deterministic engine in `app/src/engine/`) | — |
+
+Live history: besides real players, four clearly named demo bots (`bot-alpha`, `bot-bravo`, `bot-delta`,
+`bot-echo` `.heat-index-game.testnet`) play the real engine against the NPC teams and trade at the simulated market's
+prices through the same contract methods (`app/scripts/onchain-bots.ts`) — `stats()` shows 35+ battles and 35+
+trades.
 
 Honest limits: brokers and NPC teams have **in-game** wallets, not NEAR accounts; battle outcomes are computed in the
 client and only bounded by the contract (the seed is recorded so a verifier can replay them — not built yet); email

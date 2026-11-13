@@ -21,9 +21,21 @@ const C = 'heat-index-game.testnet';
 const BATTLES = Number(process.argv[2] ?? 8);
 const NAMES = process.argv.slice(3).length ? process.argv.slice(3) : ['bot-alpha', 'bot-bravo', 'bot-charlie', 'bot-delta'];
 const KEYS_DIR = join(homedir(), '.near-credentials', 'heat-index-bots'); // outside the repo
-const rpc = new JsonRpcProvider({ url: 'https://rpc.testnet.near.org' });
+// FastNEAR's public testnet RPC (the default one rate-limits bursts with HTTP 429)
+const rpc = new JsonRpcProvider({ url: process.env.NEAR_RPC ?? 'https://test.rpc.fastnear.com' });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const view = (method: string, args: Record<string, unknown>) => rpc.callFunction({ contractId: C, method, args });
+/** retry on rate limits (HTTP 429) with a growing pause */
+async function retry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= 8 || !/429|Too Many|rate/i.test(`${String(e)} ${String((e as { cause?: unknown })?.cause)}`)) throw e;
+      await sleep(4000 * (i + 1));
+    }
+  }
+}
+const view = (method: string, args: Record<string, unknown>) => retry(() => rpc.callFunction({ contractId: C, method, args }));
 
 interface ChainRobot {
   token_id: string;
@@ -39,12 +51,12 @@ async function botAccount(name: string): Promise<Account> {
   const owner = KeyPair.fromRandom('ed25519');
   const game = KeyPair.fromRandom('ed25519');
   const factory = new Account(C, rpc, creds.private_key);
-  const created = await factory.callFunction({
+  const created = await retry(() => factory.callFunction({
     contractId: C,
     methodName: 'create_player_account',
     args: { name, owner_key: owner.getPublicKey().toString(), game_key: game.getPublicKey().toString() },
     gas: 150_000_000_000_000n,
-  });
+  }));
   if (!created) throw new Error(`could not create ${id}`);
   writeFileSync(file, JSON.stringify({ accountId: id, ownerKey: owner.toString(), gameKey: game.toString() }), { mode: 0o600 });
   console.log(`[${name}] account created: ${id}`);
@@ -57,7 +69,7 @@ async function robotsOf(id: string): Promise<ChainRobot[]> {
 
 async function call(acc: Account, label: string, method: string, args: Record<string, unknown>) {
   try {
-    const r = await acc.callFunctionRaw({ contractId: C, methodName: method, args, gas: 100_000_000_000_000n });
+    const r = await retry(() => acc.callFunctionRaw({ contractId: C, methodName: method, args, gas: 30_000_000_000_000n }));
     console.log(`[${acc.accountId.split('.')[0]}] ${label} → ${r.transaction.hash}`);
     return r;
   } catch (e) {
@@ -66,10 +78,8 @@ async function call(acc: Account, label: string, method: string, args: Record<st
   }
 }
 
-async function runBot(name: string, w: World, seed: number) {
-  const acc = await botAccount(name);
-  const rng = new Rng(seed);
-  for (let i = 0; i < BATTLES; i++) {
+async function botRound(acc: Account, w: World, seed: number, rng: Rng, i: number) {
+  {
     // the deck = the bot's working robots on-chain (up to 15)
     const chain = (await robotsOf(acc.accountId)).filter((t) => t.metadata.durability > 0);
     const deck = chain.slice(0, 15).map((t) => ({
@@ -129,11 +139,24 @@ async function runBot(name: string, w: World, seed: number) {
           broker: pick.b.id,
         });
     }
-    advanceHours(w, 2); // the market moves between rounds
-    if (i < BATTLES - 1) await sleep(31_000); // the contract allows one battle per 30 s per account
   }
 }
 
 const w = createWorld(20261113, 'bots');
-await Promise.all(NAMES.map((n, i) => runBot(n, w, 1000 + i * 37)));
+// one bot at a time (public RPCs rate-limit bursts); a round = every bot plays one battle and makes one trade
+const bots: { acc: Account; rng: Rng; seed: number }[] = [];
+for (const [i, n] of NAMES.entries()) {
+  bots.push({ acc: await botAccount(n), rng: new Rng(1000 + i * 37), seed: 1000 + i * 37 });
+  await sleep(1500);
+}
+for (let round = 0; round < BATTLES; round++) {
+  const t0 = Date.now();
+  for (const b of bots) {
+    await botRound(b.acc, w, b.seed, b.rng, round);
+    await sleep(1500);
+  }
+  advanceHours(w, 2); // the market moves between rounds
+  const left = 31_000 - (Date.now() - t0); // the contract allows one battle per 30 s per account
+  if (round < BATTLES - 1 && left > 0) await sleep(left);
+}
 console.log('stats:', await view('stats', {}));
