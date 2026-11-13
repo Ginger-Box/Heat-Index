@@ -139,43 +139,37 @@ const TUT_MINE = ['bolt', 'dash', 'spark'];
 const TUT_ENEMY = ['spark', 'dash', 'drone', 'spark']; // no guards here, so the Core is always open
 const TUT_ENEMY_CORE = 8;
 type TutWait = 'next' | 'deploy' | 'end' | 'attack' | 'free';
-const TUT_STEPS: { text: string; wait: TutWait; focus: string }[] = [
+// One idea per step; `point` is what the arrow from the hint box points at.
+const TUT_STEPS: { text: string; wait: TutWait; focus: string; point?: string }[] = [
+  { text: 'Goal: break the ENEMY CORE (top) before they break YOUR CORE (bottom).', wait: 'next', focus: 'cores', point: '.b-core.side-1' },
+  { text: 'This is your ENERGY: 2 now, +1 every turn, up to 6.', wait: 'next', focus: 'energy', point: '.b-energy' },
   {
-    text: 'Welcome to the pit. Break the enemy Core (top) before they break yours (bottom). The ring shows how much is left.',
-    wait: 'next',
-    focus: 'cores',
-  },
-  {
-    text: 'This is your ENERGY (right). Deploying a robot costs energy — the number in the card corner. You have 2 now and get +1 every turn, up to 6.',
-    wait: 'next',
-    focus: 'energy',
-  },
-  {
-    text: 'Drag a robot from your hand into any slot.',
+    text: 'Drag a robot from your HAND into a free slot. The number in its corner is the energy it costs.',
     wait: 'deploy',
     focus: 'hand',
+    point: '.b-hand',
   },
   {
-    text: 'Every robot has ATTACK (orange) — the damage it deals, and HP (green) — how much it takes before it breaks. A robot waits a turn after landing. Press END TURN.',
-    wait: 'end',
-    focus: 'stats end',
+    text: 'ATTACK (orange) is the damage it deals. HP (green) is the damage it can take before it breaks.',
+    wait: 'next',
+    focus: 'stats',
+    point: '.b-board.side-0 .tok.hp',
   },
+  { text: 'A new robot waits one turn before it can attack. Press END TURN.', wait: 'end', focus: 'end', point: '.b-end' },
   {
-    text: 'Your turn. Drag an arrow from your robot to an enemy robot or straight to the enemy Core — or click the robot, then the target. Robots you hit strike back.',
+    text: 'Attack! Drag from your robot to the ENEMY CORE. (Or click your robot, then the target.)',
     wait: 'attack',
     focus: 'enemy',
+    point: '.b-core.side-1',
   },
   {
-    text: 'See the pips under your robot? That is HEAT: every attack +2. At the limit it overheats — skips a turn and wears out. ❄ COOL on a robot cools it instead of attacking.',
+    text: 'HEAT: every attack +2. At the limit the robot overheats and skips a turn. ❄ COOL on a robot cools it.',
     wait: 'next',
     focus: 'heat',
+    point: '.b-board.side-0 .heat',
   },
-  {
-    text: 'Every class has a special ability. Hover any robot to read what it does — for example, Charge robots attack on the very turn they land.',
-    wait: 'next',
-    focus: '',
-  },
-  { text: 'Now finish the job: break the enemy Core! (Press Got it to hide the hints.)', wait: 'free', focus: 'enemy' },
+  { text: 'Hover any robot to read its SPECIAL ABILITY.', wait: 'next', focus: '', point: '.b-board.side-1 .b-unit' },
+  { text: 'Now break the enemy Core!', wait: 'free', focus: 'enemy', point: '.b-core.side-1' },
 ];
 
 export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
@@ -1123,6 +1117,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
         <div className="b-table">
           {tutorial && TUT_STEPS[tut] && (
             <div className="tut-coach" key={tut}>
+              {TUT_STEPS[tut].point && <TutPointer target={TUT_STEPS[tut].point!} />}
               <span className="tut-step">
                 TRAINING {tut + 1}/{TUT_STEPS.length}
               </span>
@@ -1331,4 +1326,64 @@ function EndOverlay({ winner, onClose, children }: { winner: number | null | und
     </div>,
     document.body,
   );
+}
+
+/**
+ * Training: a yellow arrow from the hint box to the element the hint talks about.
+ * Drawn on <body> in viewport pixels; re-measured a few times a second, because cards and units move.
+ */
+function TutPointer({ target }: { target: string }) {
+  const [geo, setGeo] = useState<{ a: DOMRect; b: DOMRect } | null>(null);
+  const self = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const box = self.current?.closest('.tut-coach');
+      const el = document.querySelector(target);
+      setGeo(box && el ? { a: box.getBoundingClientRect(), b: el.getBoundingClientRect() } : null);
+    };
+    measure();
+    const id = setInterval(measure, 250);
+    addEventListener('resize', measure);
+    return () => {
+      clearInterval(id);
+      removeEventListener('resize', measure);
+    };
+  }, [target]);
+  let svg = null;
+  if (geo) {
+    const { a, b } = geo;
+    const bx = b.left + b.width / 2;
+    const by = b.top + b.height / 2;
+    // start on the edge of the hint box that faces the target
+    const ax = Math.max(a.left, Math.min(a.right, bx));
+    const ay = by < a.top ? a.top : by > a.bottom ? a.bottom : a.top + a.height / 2;
+    // stop at the edge of the target (a little outside it)
+    const ang = Math.atan2(by - ay, bx - ax);
+    const rx = b.width / 2 + 8;
+    const ry = b.height / 2 + 8;
+    const k = Math.min(Math.abs(rx / Math.cos(ang) || 1e9), Math.abs(ry / Math.sin(ang) || 1e9));
+    const ex = bx - Math.cos(ang) * k;
+    const ey = by - Math.sin(ang) * k;
+    const L = 16;
+    const W = 9;
+    const hx = ex - Math.cos(ang) * L;
+    const hy = ey - Math.sin(ang) * L;
+    const n = ang + Math.PI / 2;
+    if (Math.hypot(ex - ax, ey - ay) > 24)
+      svg = (
+        <svg className="tour-arrow tut-arrow" style={{ left: 0, top: 0, width: innerWidth, height: innerHeight }}>
+          <line x1={ax} y1={ay} x2={hx} y2={hy} />
+          <polygon
+            points={[
+              [ex, ey],
+              [hx + Math.cos(n) * W, hy + Math.sin(n) * W],
+              [hx - Math.cos(n) * W, hy - Math.sin(n) * W],
+            ]
+              .map((p) => p.map((v) => v.toFixed(1)).join(','))
+              .join(' ')}
+          />
+        </svg>
+      );
+  }
+  return <span ref={self}>{svg && createPortal(svg, document.body)}</span>;
 }

@@ -4412,25 +4412,23 @@ button.pick {
   }
 }
 
-/* обучение: кнопка END TURN — заметнее обычной пульсации своего хода */
-.arena3.tut-end.my-turn .b-end:not(:disabled),
-.arena3.tut-end .b-end {
-  outline: 3px solid var(--yellow);
-  outline-offset: 3px;
-  animation: tut-glow 0.8s steps(2) infinite;
+/* обучение: кнопка END TURN — ровное жёлтое кольцо вокруг кнопки (без outline и смещений) */
+.arena3.tut-end .b-end,
+.arena3.tut-end.my-turn .b-end:not(:disabled) {
+  animation: tut-end-ring 0.9s steps(2) infinite;
 }
-.arena3.tut-end .b-end::after {
-  content: '▼ PRESS HERE';
-  position: absolute;
-  left: 50%;
-  top: -22px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-family: var(--font-px);
-  font-size: 10px;
-  color: var(--yellow);
-  animation: blink 0.8s steps(1) infinite;
-}
-.arena3.tut-end .b-end {
-  position: relative;
+@keyframes tut-end-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px #050409,
+      0 0 0 6px var(--yellow),
+      0 0 18px #ffe60088;
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px #050409,
+      0 0 0 6px #fff59a,
+      0 0 30px #ffe600cc;
+  }
 }
