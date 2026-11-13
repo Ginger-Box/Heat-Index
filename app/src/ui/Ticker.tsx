@@ -1,60 +1,37 @@
-// Market ticker under the top bar: an LED stock-exchange strip with the biggest price moves of the day
-// and the latest market/broker headlines. The content is rebuilt once per game hour (not on every trade),
-// so the strip scrolls smoothly; hover pauses it.
+// Market pulse under the top bar: one quiet, static line — the two biggest risers and the two biggest fallers
+// of the day. No scrolling and no frame, so it doesn't compete with the screen; it refreshes once per game hour
+// (the numbers glitch when they change).
 
 import { useMemo } from 'react';
 import { MODELS } from '../engine/robots';
 import { refPrice, type World } from '../engine/world';
+import { Glitch } from './common';
 
 export function Ticker({ w }: { w: World }) {
-  const items = useMemo(() => {
+  const { up, down } = useMemo(() => {
     const moves = MODELS.map((m) => {
       const price = Math.round(refPrice(w, m.id));
       const start = w.dayStartPrice[m.id] ?? price;
-      return { m, price, ch: start ? ((price - start) / start) * 100 : 0 };
-    })
-      .sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch))
-      .slice(0, 12);
-    const news = w.events
-      .filter((e) => e.kind === 'price' || e.kind === 'broker')
-      .slice(-4)
-      .reverse()
-      .map((e) => e.text.toUpperCase());
-    return { moves, news };
+      return { m, price, ch: start ? Math.round(((price - start) / start) * 100) : 0 };
+    });
+    const sorted = [...moves].sort((a, b) => b.ch - a.ch);
+    return { up: sorted.filter((x) => x.ch > 0).slice(0, 2), down: sorted.filter((x) => x.ch < 0).slice(-2).reverse() };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [w.hour, w.season]);
-
-  const run = (key: string) => (
-    <div className="ticker-run" key={key} aria-hidden={key === 'b'}>
-      {items.moves.map(({ m, price, ch }, i) => {
-        const r = Math.round(ch);
-        return (
-          <span className="ticker-item" key={m.id}>
-            <b>{m.name.toUpperCase()}</b>
-            <span>{price} CR</span>
-            <span className={r > 0 ? 'up' : r < 0 ? 'down' : ''}>
-              {r > 0 ? '▲' : r < 0 ? '▼' : '•'} {Math.abs(r)}%
-            </span>
-            {i === 5 && items.news[0] && <span className="sep">◆</span>}
-            {i === 5 && items.news[0] && <span className="ticker-item news">{items.news[0]}</span>}
-          </span>
-        );
-      })}
-      {items.news.slice(1).map((t, i) => (
-        <span className="ticker-item news" key={i}>
-          <span className="sep">◆</span> {t}
-        </span>
-      ))}
-    </div>
+  const item = (x: (typeof up)[number]) => (
+    <span className="pulse-item" key={x.m.id}>
+      {x.m.name} <Glitch text={`${x.price} CR`} />{' '}
+      <b className={x.ch > 0 ? 'up' : 'down'}>
+        <Glitch text={`${x.ch > 0 ? '▲' : '▼'}${Math.abs(x.ch)}%`} />
+      </b>
+    </span>
   );
-
-  // two identical runs side by side, shifted by -50% → a seamless loop (fixed duration so updates never jump)
   return (
-    <div className="ticker" title="Market ticker — today's biggest price moves">
-      <div className="ticker-track">
-        {run('a')}
-        {run('b')}
-      </div>
+    <div className="pulse" title="Today's biggest price moves on the Market">
+      <span className="pulse-label">MARKET TODAY</span>
+      {up.map(item)}
+      {down.map(item)}
+      {!up.length && !down.length && <span className="pulse-item">quiet so far</span>}
     </div>
   );
 }

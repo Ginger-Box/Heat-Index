@@ -6,7 +6,7 @@ export function teamError(team: Robot[]): string | null {
   if (team.length < TEAM_MIN || team.length > TEAM_MAX)
     return `A deck needs ${TEAM_MIN}–${TEAM_MAX} robots (now ${team.length})`;
   const energy = teamEnergy(team);
-  if (energy > TEAM_ENERGY_CAP) return `Team limit is ${TEAM_ENERGY_CAP} energy (now ${energy})`;
+  if (energy > TEAM_ENERGY_CAP) return `Deck cost limit is ${TEAM_ENERGY_CAP} (now ${energy}) — the sum of the robots' energy costs`;
   const counts: Record<string, number> = {};
   for (const r of team) {
     if (r.durability <= 0) return `${model(r.modelId).name} is broken`;
@@ -21,7 +21,7 @@ export function partialTeamError(team: Robot[]): string | null {
   if (team.length > TEAM_MAX) return `A deck holds at most ${TEAM_MAX} robots`;
   if (new Set(team.map((r) => r.uid)).size !== team.length) return 'This robot is already in the team';
   const energy = teamEnergy(team);
-  if (energy > TEAM_ENERGY_CAP) return `Over the limit: would be ${energy} of ${TEAM_ENERGY_CAP} energy`;
+  if (energy > TEAM_ENERGY_CAP) return `Over the deck cost limit: would be ${energy} of ${TEAM_ENERGY_CAP}`;
   const counts: Record<string, number> = {};
   for (const r of team) {
     if (r.durability <= 0) return `${model(r.modelId).name} is broken — repair it first`;

@@ -455,67 +455,28 @@ details[open] > summary::before {
   padding: 12px 16px 16px;
   margin-bottom: 18px;
 }
-/* Бегущая строка рынка под верхней панелью (App.tsx · Ticker): LED-табло биржи с самыми заметными движениями цен */
+/* «Пульс рынка» под верхней панелью (ui/Ticker.tsx): одна тихая строка без движения и рамки */
 .topbar {
   margin-bottom: 0;
 }
-.ticker {
-  position: relative;
-  height: 24px;
-  margin: 4px 0 16px;
-  overflow: hidden;
-  background:
-    radial-gradient(circle, #ffffff10 0.6px, transparent 1px) 0 0 / 3px 3px,
-    #07060c;
-  border: 2px solid var(--line);
-  border-top-color: #000;
-  font-family: var(--font-px);
-  font-size: 12px;
-  line-height: 20px;
-  white-space: nowrap;
-  -webkit-mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
-  mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
-}
-.ticker-track {
-  display: inline-flex;
-  animation: ticker-run 90s linear infinite;
-  will-change: transform;
-}
-.ticker:hover .ticker-track {
-  animation-play-state: paused;
-}
-.ticker-run {
-  display: inline-flex;
-  gap: 28px;
-  padding-right: 28px;
-}
-.ticker-item {
-  display: inline-flex;
-  gap: 7px;
+.pulse {
+  display: flex;
+  align-items: baseline;
+  gap: 26px;
+  padding: 7px 18px 14px;
+  font-size: 13px;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
 }
-.ticker-item b {
-  color: var(--text);
+.pulse-label {
+  font-family: var(--font-px);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: #6b6290;
+}
+.pulse-item b {
   font-weight: normal;
-}
-.ticker-item .up {
-  color: var(--green);
-  text-shadow: 0 0 6px #39ff8866;
-}
-.ticker-item .down {
-  color: var(--red);
-  text-shadow: 0 0 6px #ff3b5c66;
-}
-.ticker-item.news {
-  color: var(--yellow);
-}
-.ticker-item .sep {
-  color: var(--magenta);
-}
-@keyframes ticker-run {
-  to {
-    transform: translateX(-50%);
-  }
 }
 .logo {
   position: relative;
@@ -1706,8 +1667,12 @@ th.sorted {
   animation: pop-in 0.12s ease-out;
   filter: drop-shadow(8px 8px 0 #000a);
 }
+.card-peek-zoom {
+  zoom: 2; /* = PEEK_ZOOM in Market.tsx */
+}
 /* подсказка карты здесь — справа от карты, а не над ней */
 .card-peek .cardtip {
+  zoom: 0.6; /* the ability text stays normal-sized next to the big card */
   left: calc(100% + 10px);
   top: 0;
   bottom: auto;
@@ -4260,4 +4225,14 @@ button.pick {
 }
 .deck-body .slots {
   margin-top: 4px;
+}
+.b-energy-label {
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--yellow);
+  margin-bottom: -6px;
+}
+.b-energy-label .muted {
+  font-family: var(--font);
+  font-size: 12px;
 }

@@ -32,7 +32,7 @@ export function DeckRow(props: {
         className="deck-head"
         onClick={() => {
           if (edit === null) {
-            sfx(props.open ? 'ui-close' : 'ui-open');
+            sfx(props.open ? 'deck-close' : 'deck-open');
             props.onToggle();
           }
         }}
@@ -69,7 +69,7 @@ export function DeckRow(props: {
         </button>
         {props.battle && <span className="tag deck-battle">BATTLE DECK</span>}
         <span className="deck-stats muted">
-          {robots.length ? `${robots.length} robots · ${energy}/${TEAM_ENERGY_CAP} energy` : 'empty'}
+          {robots.length ? `${robots.length} robots · deck cost ${energy}/${TEAM_ENERGY_CAP}` : 'empty'}
         </span>
         <span className={`deck-state ${err ? 'muted' : 'up'}`} title={err ?? undefined}>
           {err ? (robots.length < TEAM_MIN ? `needs ${TEAM_MIN}–${TEAM_MAX}` : 'not ready') : '✓ ready'}

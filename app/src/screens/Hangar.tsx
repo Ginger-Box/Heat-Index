@@ -217,7 +217,7 @@ export function Hangar({ w }: { w: World }) {
         <small className="muted">
           Drag robots between the Hangar and the slots of the open deck (drop on a taken slot to swap), or just click
           them. A robot can stand in one deck at a time. Changes save instantly.
-          A deck is {TEAM_MIN}–{TEAM_SIZE} robots, {TEAM_ENERGY_CAP} energy at most, at most 2 of the same model.
+          A deck is {TEAM_MIN}–{TEAM_SIZE} robots, total energy cost of all its robots at most {TEAM_ENERGY_CAP}, at most 2 of the same model.
         </small>
         {canClaimLoaner(w, PLAYER_ID) && (
           <div className="panel" style={{ marginTop: 10, borderColor: 'var(--yellow)' }}>

@@ -14,6 +14,8 @@ type Sfx =
   | 'lock'
   | 'shock-hit'
   | 'ui-scroll'
+  | 'deck-open'
+  | 'deck-close'
   | 'ui-tab'
   | 'ui-hover'
   | 'ui-error'
@@ -51,6 +53,9 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   // filters / toggles: a casino chip laid on the table + a quiet light-metal tap
   'ui-toggle': { files: ['ui-filter-1', 'ui-filter-2'], vol: 0.3, spread: 0.14 },
   'ui-open': { files: ['ui-open'], vol: 0.3, spread: 0.12 },
+  // decks: a fan of cards opening / a deck shoved shut
+  'deck-open': { files: ['deck-open'], vol: 0.4, spread: 0.08 },
+  'deck-close': { files: ['deck-close'], vol: 0.32, spread: 0.08 },
   'ui-close': { files: ['ui-close'], vol: 0.3, spread: 0.12 },
   'ui-sort': { files: ['ui-sort'], vol: 0.18, spread: 0.2 },
   // row select: a click with a faint metallic ring
@@ -776,7 +781,7 @@ export function crunch(step = 0, delay = 0) {
   const busy = gap < 70 ? 0.55 : 1; // rapid ticks are quieter
   const t = c.currentTime + delay;
   const out = c.createGain();
-  out.gain.value = 0.9 * busy;
+  out.gain.value = 1.9 * busy; // just a little quieter than a single row select
   out.connect(sfxBus ?? master);
   // two tiny grains a few ms apart — the "crunch" of a detent
   for (const [i, at] of [0, 0.005 + Math.random() * 0.004].entries()) {

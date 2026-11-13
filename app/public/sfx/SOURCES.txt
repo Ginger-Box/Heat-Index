@@ -66,3 +66,5 @@ core-break.mp3 <= Explosions/Medium Length/sfx_exp_medium3 ; glitch-spread.mp3 <
 shutdown.mp3 <= Weird Sounds/sfx_sound_shutdown1 ; confetti-pop.mp3 <= Explosions/Shortest/sfx_exp_shortest_soft2
 sparkle.mp3 <= Coins/sfx_coin_cluster3 ; fanfare.mp3 <= Fanfares/sfx_sounds_fanfare1
 (earlier Kenney entries for hit-*, hit-light-*, hit-heavy-*, destroy-*, core-hit-*, blast, block, ui-scroll, victory, defeat are replaced)
+deck-open.mp3 <= card-fan-1.ogg (Kenney Casino)
+deck-close.mp3 <= card-shove-2.ogg (Kenney Casino)

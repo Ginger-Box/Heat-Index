@@ -1080,7 +1080,13 @@ export function Arena({ w }: { w: World }) {
           <div className="b-turn">
             TURN <b>{Math.max(st.sides[0].turns, 1)}</b>/{MAX_TURNS}
           </div>
-          <div className="b-energy" title={`Energy ${st.sides[0].energy}/${maxEnergy}`}>
+          <div className="b-energy-label">
+            ENERGY <span className="muted">· {maxEnergy < 6 ? `${maxEnergy + 1} next turn` : 'max 6'}</span>
+          </div>
+          <div
+            className="b-energy"
+            title={`Energy this turn: ${st.sides[0].energy} left of ${maxEnergy}. Deploying a robot costs its energy (the number in the card's corner). You get 1 more every turn, up to 6.`}
+          >
             {Array.from({ length: 6 }, (_, i) => (
               <span key={i} className={i < st.sides[0].energy ? 'on' : i < maxEnergy ? 'spent' : 'locked'}>
                 <EnergyIcon />

@@ -7,7 +7,6 @@ import {
   getManager,
   netWorth,
   playNpcMatch,
-  type World,
 } from './engine/world';
 import { Analytics } from './screens/Analytics';
 import { Arena } from './screens/Arena';
@@ -29,7 +28,6 @@ const TABS = [
   ['brokers', 'Brokers'],
   ['analytics', 'Analytics'],
   ['ratings', 'Ratings'],
-  ['feed', 'City Feed'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -116,7 +114,6 @@ export default function App() {
         {tab === 'brokers' && <Brokers w={w} />}
         {tab === 'analytics' && <Analytics w={w} />}
         {tab === 'ratings' && <Ratings w={w} />}
-        {tab === 'feed' && <CityFeed w={w} />}
       </div>
       {ff && <FastForward onClose={() => setFf(false)} />}
     </div>
@@ -124,49 +121,6 @@ export default function App() {
 }
 
 /** Gear in the top-right corner: live world, volume, fast-forward and starting over. */
-type FeedFilter = 'all' | 'mine' | 'price' | 'broker' | 'match' | 'season';
-const FEED_FILTERS: [FeedFilter, string][] = [
-  ['all', 'Everything'],
-  ['mine', 'Mine'],
-  ['price', 'Prices'],
-  ['broker', 'Brokers'],
-  ['match', 'Battles'],
-  ['season', 'Seasons'],
-];
-
-/** Everything that happens in the city: price moves, broker news, battles, seasons and your own actions. */
-function CityFeed({ w }: { w: World }) {
-  const [f, setF] = useState<FeedFilter>('all');
-  const list = [...w.events]
-    .reverse()
-    .filter((e) =>
-      f === 'all' ? true : f === 'mine' ? e.kind === 'player' || e.kind === 'dividend' : e.kind === f,
-    )
-    .slice(0, 200);
-  return (
-    <div className="panel">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>City Feed</h2>
-        <div className="chips">
-          {FEED_FILTERS.map(([k, label]) => (
-            <button key={k} className={`small ${f === k ? 'primary' : ''}`} onClick={() => setF(k)}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="feed big-feed">
-        {list.map((e, i) => (
-          <div key={i} className={e.kind === 'player' || e.kind === 'dividend' ? 'mine' : ''}>
-            <span className="muted">day {e.day}</span> {e.text}
-          </div>
-        ))}
-        {!list.length && <div className="muted">Nothing here yet.</div>}
-      </div>
-    </div>
-  );
-}
-
 function SettingsMenu({
   live,
   setLive,
@@ -176,6 +130,7 @@ function SettingsMenu({
   setLive: (v: boolean) => void;
   onFastForward: () => void;
 }) {
+  const [sureReset, setSureReset] = useState(false);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -249,13 +204,20 @@ function SettingsMenu({
               <b>Start over</b>
               <div className="muted">Deletes all progress.</div>
             </div>
+            {/* in-app confirmation: window.confirm() is blocked in some embedded browsers, so Reset did nothing */}
             <button
               className="danger"
               onClick={() => {
-                if (confirm('Start over? All progress will be lost.')) resetGame();
+                if (!sureReset) {
+                  setSureReset(true);
+                  setTimeout(() => setSureReset(false), 4000);
+                  return;
+                }
+                setSureReset(false);
+                resetGame();
               }}
             >
-              Reset
+              {sureReset ? 'Sure? Click again' : 'Reset'}
             </button>
           </div>
         </div>

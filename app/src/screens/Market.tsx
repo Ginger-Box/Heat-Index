@@ -370,12 +370,12 @@ export function Market({ w }: { w: World }) {
         <div className="market-wrap" onMouseDown={startBox}>
           <table className="nowrap market-table">
             <colgroup>
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '19%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '19%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '20%' }} />
               <col style={{ width: '5%' }} />
             </colgroup>
             <thead>
@@ -551,6 +551,9 @@ export function Market({ w }: { w: World }) {
  * а на самой карте всплывает подробное описание способности.
  * Карта рисуется поверх всего (через портал), чтобы её не обрезала прокрутка таблицы.
  */
+/** the hover preview shows the card twice as big as in the lists */
+const PEEK_ZOOM = 2;
+
 function CardPeek({ modelId, children }: { modelId: string; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -567,7 +570,7 @@ function CardPeek({ modelId, children }: { modelId: string; children: React.Reac
     keep();
     const s = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
     const r = e.currentTarget.getBoundingClientRect();
-    const cardH = 190 * s;
+    const cardH = 190 * PEEK_ZOOM * s;
     const y = Math.min(Math.max(8, r.top + r.height / 2 - cardH / 2), window.innerHeight - cardH - 8);
     const cell = e.currentTarget.closest('td')?.getBoundingClientRect() ?? r; // справа от колонки, не поверх строки
     setPos({ x: (cell.right + 6) / s, y: y / s });
@@ -578,7 +581,9 @@ function CardPeek({ modelId, children }: { modelId: string; children: React.Reac
       {pos &&
         createPortal(
           <div className="card-peek" style={{ left: pos.x, top: pos.y }} onMouseEnter={keep} onMouseLeave={close}>
-            <RobotCard modelId={modelId} />
+            <div className="card-peek-zoom">
+              <RobotCard modelId={modelId} />
+            </div>
           </div>,
           document.getElementById('root') ?? document.body,
         )}

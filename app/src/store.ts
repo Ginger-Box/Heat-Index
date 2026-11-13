@@ -64,6 +64,10 @@ export function startGame(name: string) {
 }
 
 export function resetGame() {
+  if (saveTimer) {
+    clearTimeout(saveTimer); // a pending save would write the old world back
+    saveTimer = null;
+  }
   try {
     localStorage.removeItem(KEY);
     localStorage.removeItem(NAME_KEY);
