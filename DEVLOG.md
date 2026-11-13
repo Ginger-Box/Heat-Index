@@ -176,6 +176,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   a purchase and a battle recorded, on-chain credits equal to the game's.
 - GitHub Pages workflow for the public build.
 
+### Judge-readiness pass (Nov 13, night)
+- An impartial review of the track (a separate "jury" session, 111 entries) found the blocking issues: the repo was
+  private, the public demo returned 404, no submission yet — and a real hole: the contract trusted client-reported
+  prices and rewards with near-useless limits.
+- **Contract v0.3**: the model table (base price, max durability) lives on-chain; a purchase must be within the
+  market's possible range for the model, a sale can't exceed what a broker could pay at that wear, a repair can't be
+  cheaper than the game's minimum, a battle reward is capped (≤ 25% of the player's robots' value, ≤ 400 CR) and
+  limited to one per 30 s; unknown models are rejected. 9 unit tests (one per hole). Upgraded in place with a state
+  migration; an over-priced sale on testnet is now rejected.
+- README: a 2-minute path for judges and an honest "on-chain vs simulated" table with transaction links.
+- `app/scripts/onchain-bots.ts`: clearly named bot players (`bot-*.heat-index-game.testnet`) play the real engine
+  against the NPC teams and trade at the simulated market's prices, through the same contract methods as the game.
+- Brokers got faces (pixel portraits, names, bios, live remarks) and windows dressed like their owners; the training
+  battle now starts right after the first login.
+
 ## Next
 - Card art.
 - README for judges, demo video.
