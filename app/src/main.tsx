@@ -5,6 +5,7 @@ import App from './App.tsx'
 import { Boot } from './ui/Boot'
 import { initAudio } from './audio'
 import { initFx } from './ui/fx'
+import { installBridge } from './near/bridge'
 
 initAudio()
 
@@ -22,6 +23,9 @@ window.addEventListener('resize', applyUiScale)
 
 // Курсор и «ламповое» свечение под ним (ui/fx.ts)
 initFx()
+
+// NEAR: mirror the player's trades and battles on-chain when they are logged in (src/near)
+installBridge()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

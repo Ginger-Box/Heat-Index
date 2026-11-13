@@ -24,6 +24,17 @@ import { CLASSES, MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurabil
 import { buildTeam, partialTeamError, teamError } from './team';
 
 export const PLAYER_ID = 'player';
+
+/**
+ * Hooks for the human player's moves — the NEAR bridge (src/near/bridge.ts) mirrors them on-chain.
+ * The engine stays pure: it only calls these if someone set them.
+ */
+export const playerHooks: {
+  buy?: (r: OwnedRobot, price: number, brokerId: string) => void;
+  sell?: (r: OwnedRobot, price: number, brokerId: string) => void;
+  repair?: (r: OwnedRobot, cost: number) => void;
+  match?: (st: BattleState, opponentId: string, result: 0 | 1 | 2, reward: number) => void;
+} = {};
 /** NPC decks are cheaper than the player's limit (42) — easier opponents for the demo. */
 export const NPC_DECK_COST = 28;
 export const HOUSE = 'house'; // основатели брокера
@@ -87,7 +98,7 @@ export interface Broker {
   restockedToday?: Record<string, number>;
 }
 
-export type OwnedRobot = Robot & { owner: string; loaner?: boolean };
+export type OwnedRobot = Robot & { owner: string; loaner?: boolean; /** NEP-245 token id of this robot on NEAR, once it is on-chain */ chainId?: string };
 
 export interface WorldEvent {
   tick: number;
@@ -331,7 +342,11 @@ export function buy(w: World, managerId: string, brokerId: string, modelId: stri
   b.credits += price;
   r.owner = m.id;
   ledger(w, { kind: 'buy', from: m.id, to: b.id, uid: r.uid, amount: price });
-  if (m.id === PLAYER_ID) log(w, 'player', `You bought ${model(modelId).name} from ${b.name} for ${price} CR`);
+  if (m.id === PLAYER_ID) {
+    log(w, 'player', `You bought ${model(modelId).name} from ${b.name} for ${price} CR`);
+    r.chainId = undefined; // a fresh token is minted for it on-chain
+    playerHooks.buy?.(r, price, b.id);
+  }
   return null;
 }
 
@@ -358,8 +373,11 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
   m.team = m.team.filter((x) => x !== uid);
   syncDecks(w, m);
   ledger(w, { kind: r.durability <= 0 ? 'scrap' : 'sell', from: deal.broker.id, to: m.id, uid, amount: deal.price });
-  if (m.id === PLAYER_ID)
+  if (m.id === PLAYER_ID) {
     log(w, 'player', `You sold ${model(r.modelId).name} to ${deal.broker.name} for ${deal.price} CR`);
+    playerHooks.sell?.(r, deal.price, deal.broker.id);
+    r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
+  }
   return null;
 }
 
@@ -385,6 +403,7 @@ export function repair(w: World, managerId: string, uid: string): string | null 
   m.credits -= q.cost; // кредиты сгорают — сток экономики
   r.durability = maxDurability(r.modelId);
   ledger(w, { kind: 'repair', from: m.id, to: 'burn', uid, amount: q.cost });
+  if (m.id === PLAYER_ID) playerHooks.repair?.(r, q.cost);
   if (m.id === PLAYER_ID) log(w, 'player', `You repaired ${model(r.modelId).name} for ${q.cost} CR`);
   return null;
 }
@@ -603,6 +622,7 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     }
     const reward = battleReward(teamValue[s], teamValue[1 - s], res, m.id === PLAYER_ID ? ECON.playerPurseRate : ECON.purseRate);
     m.credits += reward;
+    if (m.id === PLAYER_ID) playerHooks.match?.(st, sides[1 - s].id, res === 1 ? 1 : res === 0 ? 0 : 2, reward);
     ledger(w, { kind: 'reward', from: 'arena', to: m.id, amount: reward });
     if (res === 1) m.wins++;
     else if (res === 0) m.losses++;

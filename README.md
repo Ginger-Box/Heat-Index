@@ -7,8 +7,35 @@ Robots are cards that **wear out**: every battle costs durability, repairs cost 
 A robot's market price follows its **relevance** (how often it wins and how many teams field it), so the market
 *is* the meta. AI brokers trade with a **reaction lag** — spot what's rising before they do and you profit.
 
-> Status: playable in the browser (everything simulated client-side). NEAR integration is in progress — see
-> [Roadmap](#roadmap).
+> **Play:** https://ginger-box.github.io/Heat-Index/ (wallet login) · locally on `http://localhost:3000` (email login).
+> Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet) on NEAR testnet.
+
+## On NEAR
+
+The game's economy runs in the browser (12 NPC teams, 3 AI brokers, hourly prices), and **the player's side of it is
+on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is a **NEP-245 multi-token** ledger.
+
+- **Credits** are the multi token `cr`; **every robot** is its own token `robot:<model>:<serial>` (supply 1) with
+  its model and durability on-chain. Standard views: `mt_balance_of`, `mt_batch_balance_of`, `mt_supply`,
+  `mt_token`, `mt_tokens_for_owner`, plus `mt_transfer`.
+- **Every move is a transaction**: buying a robot burns credits and mints a robot token, selling burns the robot and
+  mints credits, a repair burns credits and restores durability, a finished battle mints the prize and writes each
+  robot's wear. Each emits NEP-245 events (`mt_mint`, `mt_burn`, `mt_transfer`) and a `heat_index` event with the
+  game details, so the player's economy can be replayed from the chain.
+- **Login with email (NEAR Auth)**: email / Google / passkey through NEAR Auth → the MPC network derives the player's
+  own key → the contract creates `<name>.heat-index-game.testnet` owned by that key and registers the player
+  (12 starter robots + 1000 CR). The account also gets a limited key from the browser (game methods only), so the
+  game signs moves **without popups**. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
+  account creation is sent by the dev server (`vite.config.ts`, key read from the local near CLI credentials,
+  never shipped to the browser) — so email login works when you run the game locally.
+- **Login with a wallet (NEAR Connect)**: Meteor, Intear, MyNearWallet… — one approval adds the limited game key and
+  registers the player. Works on the public site.
+- The HUD's NEAR cell shows the account, on-chain credits, robots on-chain and the latest transactions with explorer
+  links.
+
+**Trust model (hackathon):** battles and prices are computed in the client, so the contract accepts results within
+sanity limits (bounded rewards and prices, robots must belong to the caller, durability can only go down in a battle,
+no overspending). Battles are recorded with their seed so a verifier can replay them — the next step.
 
 ## Two ways to play
 
@@ -47,7 +74,15 @@ clear counters.
 ```bash
 cd app
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:3000 (the port the email login needs)
+```
+
+Contract (Rust, near-sdk 5):
+
+```bash
+cd contract
+cargo test                              # unit tests: full loop, overspending, wear
+cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
 ```
 
 Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run economy`,
@@ -61,13 +96,17 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 | `app/src/screens/` | Arena, Hangar, Market, Brokers, Analytics, Ratings |
 | `app/src/ui/` | cards, drag & drop, effects, boot screen, procedural pixel robots |
 | `app/scripts/` | balance and economy simulations |
+| `app/src/near/` | NEAR session, login, transaction queue, game ↔ chain bridge |
+| `contract/` | the NEP-245 game contract (Rust) |
 | `DESIGN.md` | game design (Russian) |
 | `DEVLOG.md` | development history |
 
 ## Roadmap
 
 - [x] Playable game: combat, market, brokers, NPC economy, analytics
-- [ ] NEAR: NEP-245 contract on testnet for credits and robots, email login, trades and battle results on-chain
+- [x] NEAR: NEP-245 contract on testnet for credits and robots, trades and battle results on-chain
+- [x] Email login (NEAR Auth, localhost) and wallet login (NEAR Connect)
+- [ ] Battle verifier (replay from the recorded seed), second-device email login
 - [ ] Card art
 - [ ] Demo video
 

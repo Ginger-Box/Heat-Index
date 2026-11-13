@@ -20,6 +20,7 @@ import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
 import { FastForward } from './ui/FastForward';
 import { Tour } from './ui/Tour';
+import { NearCell, NearLogin } from './ui/NearPanel';
 
 const TUTORIAL_KEY = 'heat-index-tutorial';
 type TutorialStage = 'battle' | 'tour' | 'done';
@@ -93,6 +94,7 @@ export default function App() {
         <div style={{ flex: 1 }} />
         {/* HUD: four equal cells, label on top, a big value below */}
         <div className="hud">
+          <NearCell />
           <div className="hud-cell credits" title="Credits you can spend">
             <span>CREDITS</span>
             <b>
@@ -326,8 +328,14 @@ function Login() {
         }}
       >
         <input placeholder="What's your name?" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <button className="primary" disabled={!name.trim()}>
-          Enter the arena
+        {name.trim() ? (
+          // on NEAR: your robots and credits are tokens you own, every trade and battle is a transaction
+          <NearLogin name={name.trim()} onDone={() => startGame(name.trim())} />
+        ) : (
+          <small className="muted">Type a name to start.</small>
+        )}
+        <button className="login-offline" disabled={!name.trim()}>
+          or play offline (no blockchain)
         </button>
       </form>
     </div>

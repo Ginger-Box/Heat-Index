@@ -4527,7 +4527,6 @@ button.pick {
 /* HUD: живые эффекты — скан-линии, блик, пиксельные уголки, мигающие «светодиоды» у подписей */
 .hud {
   position: relative;
-  overflow: hidden;
   background:
     repeating-linear-gradient(0deg, #ffffff06 0 1px, transparent 1px 3px),
     linear-gradient(180deg, #0d0a16, #07060c);
@@ -4536,22 +4535,22 @@ button.pick {
 .hud::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -30%;
-  width: 22%;
-  background: linear-gradient(100deg, transparent, #ffffff10 40%, #ffffff22 50%, #ffffff10 60%, transparent);
-  transform: skewX(-18deg);
+  inset: 0;
+  /* the sweep moves inside the box via background-position, so the HUD needs no overflow clipping
+     (the NEAR drop-down panel hangs out of it) */
+  background: linear-gradient(100deg, transparent, #ffffff10 40%, #ffffff22 50%, #ffffff10 60%, transparent) no-repeat;
+  background-size: 22% 100%;
+  background-position: -40% 0;
   pointer-events: none;
   animation: hud-sweep 7s cubic-bezier(0.6, 0, 0.4, 1) infinite;
 }
 @keyframes hud-sweep {
   0%,
   62% {
-    left: -30%;
+    background-position: -40% 0;
   }
   100% {
-    left: 120%;
+    background-position: 140% 0;
   }
 }
 /* pixel corner brackets */
@@ -4643,4 +4642,107 @@ button.pick {
   .hud-cell > span::before {
     animation: none;
   }
+}
+
+/* NEAR: вход на экране логина, ячейка в HUD и выпадающая панель (ui/NearPanel.tsx) */
+.near-login {
+  display: grid;
+  gap: 8px;
+}
+.near-login button {
+  padding: 11px 14px;
+}
+.login-offline {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--muted);
+  text-decoration: underline;
+  font-size: 14px;
+}
+.hud-cell.near {
+  --led: var(--cyan);
+  --led-t: 3s;
+  position: relative;
+}
+.hud-cell.near .led-pending::before {
+  --led: var(--yellow);
+  animation: hud-led 0.4s steps(1) infinite;
+  background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
+}
+.hud-cell.near .led-error::before {
+  background: var(--red);
+  box-shadow: 0 0 6px var(--red);
+}
+.hud-cell.near .led-off::before {
+  background: var(--muted);
+  box-shadow: none;
+  animation: none;
+}
+.near-btn {
+  padding: 2px 8px;
+  font-family: var(--font-px);
+  font-size: 11px;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+.near-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 300;
+  width: 380px;
+  padding: 12px 14px;
+  text-align: left;
+  background: #0b0912;
+  border: 2px solid var(--cyan);
+  box-shadow:
+    0 0 0 3px #050409,
+    0 0 22px #00f0ff44;
+  font-size: 14px;
+}
+.near-panel h4 {
+  margin: 12px 0 6px;
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--cyan);
+}
+.near-panel a {
+  color: var(--cyan);
+  word-break: break-all;
+}
+.near-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+.near-txs {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+.near-tx {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.near-tx i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: var(--green);
+}
+.near-tx.pending i {
+  background: var(--yellow);
+  animation: blink 0.5s steps(1) infinite;
+}
+.near-tx.error i {
+  background: var(--red);
+}
+.near-tx.error span,
+.near-tx.error a {
+  color: var(--red);
 }

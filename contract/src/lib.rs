@@ -15,7 +15,7 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::{IterableSet, LookupMap};
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault};
+use near_sdk::{env, near, require, AccountId, Allowance, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseResult, PublicKey};
 
 pub const CREDITS: &str = "cr";
 const START_CREDITS: u128 = 1_000;
@@ -37,7 +37,15 @@ enum Key {
     Players,
     Owned,
     OwnedSet { account_hash: Vec<u8> },
+    OwnerKeys,
 }
+
+/// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
+const NEW_ACCOUNT_FUNDING: NearToken = NearToken::from_millinear(150);
+const GAME_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(120);
+const GAME_METHODS: &str = "register,buy_robot,sell_robot,repair_robot,record_battle";
+/// At most this many new accounts per hour (the sponsor key is public on testnet).
+const ACCOUNTS_PER_HOUR: u32 = 40;
 
 /// On-chain state of one robot token.
 #[near(serializers = [borsh, json])]
@@ -88,6 +96,24 @@ pub struct Contract {
     next_serial: u64,
     total_battles: u64,
     total_trades: u64,
+    /// NEAR Auth (email) key → the player account it owns, to find the account again after logging in
+    owner_keys: LookupMap<String, AccountId>,
+    hour_bucket: u64,
+    created_this_hour: u32,
+}
+
+/// State layout of v0.1 (before the account factory) — used once by `migrate`.
+#[near(serializers = [borsh])]
+struct ContractV1 {
+    owner_id: AccountId,
+    balances: LookupMap<String, u128>,
+    supply: LookupMap<String, u128>,
+    robots: LookupMap<String, Robot>,
+    players: LookupMap<AccountId, Player>,
+    owned: LookupMap<AccountId, IterableSet<String>>,
+    next_serial: u64,
+    total_battles: u64,
+    total_trades: u64,
 }
 
 fn bal_key(token_id: &str, account: &AccountId) -> String {
@@ -115,7 +141,93 @@ impl Contract {
             next_serial: 0,
             total_battles: 0,
             total_trades: 0,
+            owner_keys: LookupMap::new(Key::OwnerKeys),
+            hour_bucket: 0,
+            created_this_hour: 0,
         }
+    }
+
+    /// One-off upgrade from v0.1: keeps all balances and robots, adds the account factory fields.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let old: ContractV1 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.1 state"));
+        Self {
+            owner_id: old.owner_id,
+            balances: old.balances,
+            supply: old.supply,
+            robots: old.robots,
+            players: old.players,
+            owned: old.owned,
+            next_serial: old.next_serial,
+            total_battles: old.total_battles,
+            total_trades: old.total_trades,
+            owner_keys: LookupMap::new(Key::OwnerKeys),
+            hour_bucket: 0,
+            created_this_hour: 0,
+        }
+    }
+
+    // ---------------- account factory (email login without a server) ----------------
+
+    /// Creates `<name>.<this contract>` for a new player and registers them in one go.
+    /// * `owner_key` — the player's NEAR Auth (email login) key: full access, so the account is truly theirs;
+    /// * `game_key` — a key generated in the player's browser, limited to this contract's game methods,
+    ///   so the game can sign moves without a popup.
+    /// Called through a public, function-call-only "sponsor" key of this contract; the contract pays the
+    /// account's NEAR, and creation is rate-limited per hour.
+    pub fn create_player_account(&mut self, name: String, owner_key: PublicKey, game_key: PublicKey) -> Promise {
+        require!(
+            name.len() >= 2
+                && name.len() <= 24
+                && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'),
+            "Name: 2-24 chars, a-z 0-9 - _"
+        );
+        let key_str = String::from(&owner_key);
+        require!(self.owner_keys.get(&key_str).is_none(), "This login already has an account");
+        let hour = env::block_timestamp_ms() / 3_600_000;
+        if hour != self.hour_bucket {
+            self.hour_bucket = hour;
+            self.created_this_hour = 0;
+        }
+        require!(self.created_this_hour < ACCOUNTS_PER_HOUR, "Too many new accounts this hour, try later");
+        self.created_this_hour += 1;
+        let account_id: AccountId = format!("{name}.{}", env::current_account_id())
+            .parse()
+            .unwrap_or_else(|_| env::panic_str("Bad account name"));
+        Promise::new(account_id.clone())
+            .create_account()
+            .transfer(NEW_ACCOUNT_FUNDING)
+            .add_full_access_key(owner_key)
+            .add_access_key_allowance(
+                game_key,
+                Allowance::limited(GAME_KEY_ALLOWANCE).unwrap(),
+                env::current_account_id(),
+                GAME_METHODS.to_string(),
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(30))
+                    .on_player_account(account_id, key_str),
+            )
+    }
+
+    /// Callback: if the account was created, remember it for this login and register the player.
+    #[private]
+    pub fn on_player_account(&mut self, account_id: AccountId, owner_key: String) -> Option<AccountId> {
+        if !matches!(env::promise_result(0), PromiseResult::Successful(_)) {
+            return None; // e.g. the name was taken — nothing to undo
+        }
+        self.owner_keys.insert(owner_key, account_id.clone());
+        if self.players.get(&account_id).is_none() {
+            self.register_account(&account_id);
+        }
+        Some(account_id)
+    }
+
+    /// The player account created for a NEAR Auth (email) key, if any.
+    pub fn account_for_owner_key(&self, owner_key: String) -> Option<AccountId> {
+        self.owner_keys.get(&owner_key).cloned()
     }
 
     // ---------------- game actions (called by the player's game client) ----------------
@@ -124,6 +236,11 @@ impl Contract {
     pub fn register(&mut self) -> Vec<String> {
         let who = env::predecessor_account_id();
         require!(self.players.get(&who).is_none(), "Already registered");
+        self.register_account(&who)
+    }
+
+    fn register_account(&mut self, who: &AccountId) -> Vec<String> {
+        let who = who.clone();
         self.players.insert(
             who.clone(),
             Player { registered_at_ms: env::block_timestamp_ms(), ..Default::default() },

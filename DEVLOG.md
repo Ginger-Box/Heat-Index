@@ -162,8 +162,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   Classes now win 44–56% (Charge was 67%, Maneuver 34% midway through the tuning).
 - HUD got status LEDs, scanlines, a light sweep and pixel corner brackets.
 
+### NEAR (Nov 13, evening)
+- **Contract** `heat-index-game.testnet` (Rust, near-sdk 5.30): credits and robots as NEP-245 multi tokens,
+  `register`, `buy_robot`, `sell_robot`, `repair_robot`, `record_battle`, NEP-245 views and events; unit tests for
+  the full loop, overspending and "a battle can't heal". Upgraded once in place with a state migration.
+- **Account factory for email login**: NEAR Auth (email / Google / passkey, MPC-derived key) → the contract creates
+  `<name>.heat-index-game.testnet` with that key as the owner and a limited in-browser game key, and registers the
+  player in its callback. First version used a public function-call "sponsor" key embedded in the client; replaced
+  before shipping by a dev-server endpoint that reads the key from the local near CLI credentials (no keys in the
+  repo or the bundle). The shared testnet NEAR Auth app only accepts `http://localhost:3000` → dev port moved to 3000.
+- **Wallet login** via NEAR Connect (the wallet selector is deprecated).
+- **Bridge**: engine hooks for the player's buy / sell / repair / battle → a transaction queue signed with the game
+  key; robots are linked to their token ids. Checked end to end on testnet: account creation, starter robots linked,
+  a purchase and a battle recorded, on-chain credits equal to the game's.
+- GitHub Pages workflow for the public build.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
-- **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results
-  written on-chain.
 - README for judges, demo video.
