@@ -5,6 +5,7 @@
 
 type Sfx =
   | 'ui-click'
+  | 'ui-scroll'
   | 'ui-tab'
   | 'ui-hover'
   | 'ui-error'
@@ -35,11 +36,15 @@ type Sfx =
 const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   'ui-click': { files: ['ui-click', 'ui-click-2', 'ui-click-3'], vol: 0.5, spread: 0.18 },
   'ui-tab': { files: ['ui-tab', 'ui-tab-2', 'ui-tab-3'], vol: 0.35, spread: 0.16 },
-  'ui-toggle': { files: ['ui-toggle-1', 'ui-toggle-2'], vol: 0.22, spread: 0.18 },
+  // filters / toggles: a casino chip laid on the table + a quiet light-metal tap
+  'ui-toggle': { files: ['ui-filter-1', 'ui-filter-2'], vol: 0.3, spread: 0.14 },
   'ui-open': { files: ['ui-open'], vol: 0.3, spread: 0.12 },
   'ui-close': { files: ['ui-close'], vol: 0.3, spread: 0.12 },
   'ui-sort': { files: ['ui-sort'], vol: 0.18, spread: 0.2 },
-  'ui-select': { files: ['ui-select'], vol: 0.3, spread: 0.24 },
+  // row select: a click with a faint metallic ring
+  'ui-select': { files: ['ui-select-m1', 'ui-select-m2'], vol: 0.32, spread: 0.2 },
+  // ratchet tick while box/Shift-selecting rows; the pitch rises with each added row (opts.rate)
+  'ui-scroll': { files: ['ui-scroll'], vol: 0.22, spread: 0.04 },
   'ui-hover': { files: ['ui-hover'], vol: 0.12 },
   'ui-error': { files: ['ui-error'], vol: 0.28 },
   'ui-buy': { files: ['ui-buy'], vol: 0.55 },
@@ -142,7 +147,7 @@ async function load(name: string) {
 }
 
 /** Play a sound. volume multiplies the base volume. */
-export function sfx(name: Sfx, opts: { volume?: number; delay?: number } = {}) {
+export function sfx(name: Sfx, opts: { volume?: number; delay?: number; rate?: number } = {}) {
   if (!ctx || !master || !enabled || volume === 0) return;
   const now = performance.now();
   const gap = MIN_GAP_MS[name];
@@ -160,6 +165,7 @@ export function sfx(name: Sfx, opts: { volume?: number; delay?: number } = {}) {
   let rate = 1 - spread / 2 + Math.random() * spread;
   if (prev && Math.abs(rate - prev.rate) < spread / 4) rate = rate > 1 ? rate - spread / 3 : rate + spread / 3;
   lastVariant.set(name, { file, rate });
+  if (opts.rate) rate *= opts.rate;
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.playbackRate.value = rate;

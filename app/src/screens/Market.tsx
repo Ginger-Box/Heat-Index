@@ -107,6 +107,10 @@ export function Market({ w }: { w: World }) {
     sfx('ui-select');
     const multi = e.ctrlKey || e.metaKey;
     const order = visible.map((r) => r.m.id);
+    if (e.shiftKey && anchor.current && order.includes(anchor.current)) {
+      // Shift-range: a quick ratchet run, one tick per row in the range
+      ratchet(Math.abs(order.indexOf(anchor.current) - order.indexOf(id)) + 1);
+    }
     setSelected((cur) => {
       if (e.shiftKey && anchor.current && order.includes(anchor.current)) {
         const [i, j] = [order.indexOf(anchor.current), order.indexOf(id)].sort((a, b) => a - b);
@@ -136,6 +140,7 @@ export function Market({ w }: { w: World }) {
     const base = e.ctrlKey || e.metaKey ? new Set(selected) : new Set<string>();
     let moved = false;
     let hit = new Set<string>();
+    let lastCount = 0;
     const rowsEl = [...document.querySelectorAll<HTMLElement>('.market-table tbody tr[data-id]')];
     const boxEl = document.createElement('div');
     boxEl.className = 'select-box';
@@ -155,7 +160,13 @@ export function Market({ w }: { w: World }) {
         if (on) hit.add(r.dataset.id!);
         r.classList.toggle('box-hit', on || base.has(r.dataset.id!));
       }
-      setCursorMode('scan', `SCAN ×${new Set([...base, ...hit]).size}`);
+      const count = new Set([...base, ...hit]).size;
+      setCursorMode('scan', `SCAN ×${count}`);
+      // a ratchet tick for every row the box gains or loses; the pitch follows the count
+      if (count !== lastCount) {
+        sfx('ui-scroll', { rate: 0.85 + Math.min(count, 28) * 0.03 });
+        lastCount = count;
+      }
     };
     const move = (ev: globalThis.MouseEvent) => {
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
@@ -576,6 +587,12 @@ function CardPeek({ modelId, children }: { modelId: string; children: React.Reac
 }
 
 type Row = ReturnType<typeof computeRows>[number];
+
+/** A run of ratchet ticks (Shift-range selection): one per row, rising in pitch, at most 14 audible ticks. */
+function ratchet(rows: number) {
+  const n = Math.min(rows, 14);
+  for (let i = 0; i < n; i++) sfx('ui-scroll', { delay: 0.012 + i * 0.026, rate: 0.85 + i * 0.045 });
+}
 
 function computeRows(w: World) {
   const rel = actualRelevance(w);
