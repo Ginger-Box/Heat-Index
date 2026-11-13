@@ -147,8 +147,11 @@ async function load(name: string) {
 }
 
 /** Play a sound. volume multiplies the base volume. */
+/** The engine is up and actually playing (not held by the browser's autoplay policy). */
+const live = () => !!ctx && ctx.state === 'running';
+
 export function sfx(name: Sfx, opts: { volume?: number; delay?: number; rate?: number } = {}) {
-  if (!ctx || !master || !enabled || volume === 0) return;
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
   const now = performance.now();
   const gap = MIN_GAP_MS[name];
   if (gap && now - (lastPlayed.get(name) ?? 0) < gap) return;
@@ -232,31 +235,53 @@ function startAmbience(c: AudioContext, out: AudioNode) {
   ns.start();
 }
 
-/** Starts the engine on the first user gesture. Call once at app start. */
+/**
+ * Starts the audio engine right at page load. Browsers keep it suspended until the first click/keypress
+ * (autoplay policy) — some environments allow it straight away, then the boot screen is heard from the start.
+ * While suspended nothing is scheduled (see `live()`), so sounds don't pile up and burst out on unlock.
+ */
 export function initAudio() {
-  const start = () => {
-    window.removeEventListener('pointerdown', start);
-    window.removeEventListener('keydown', start);
-    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    ctx = new AC();
-    master = ctx.createGain();
-    master.gain.value = masterLevel();
-    master.connect(ctx.destination);
-    sfxBus = ctx.createGain();
-    sfxBus.gain.value = SFX_LEVEL;
-    sfxBus.connect(master);
-    for (const e of Object.values(BANK)) for (const f of e.files) void load(f);
-    startAmbience(ctx, master);
-    // Pause the sound while the tab is in the background
-    document.addEventListener('visibilitychange', () => {
-      if (!ctx) return;
-      if (document.hidden) void ctx.suspend();
-      else void ctx.resume();
+  const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AC) return;
+  ctx = new AC();
+  master = ctx.createGain();
+  master.gain.value = masterLevel();
+  master.connect(ctx.destination);
+  sfxBus = ctx.createGain();
+  sfxBus.gain.value = SFX_LEVEL;
+  sfxBus.connect(master);
+  for (const e of Object.values(BANK)) for (const f of e.files) void load(f);
+  let ambience = false;
+  const startAmb = () => {
+    if (ambience || !ctx || ctx.state !== 'running') return;
+    ambience = true;
+    startAmbience(ctx, master!);
+  };
+  startAmb();
+  const unlock = () => {
+    if (!ctx) return;
+    if (ctx.state === 'running') {
+      startAmb();
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+      return;
+    }
+    void ctx.resume().then(() => {
+      startAmb();
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
     });
   };
-  window.addEventListener('pointerdown', start);
-  window.addEventListener('keydown', start);
+  // capture phase: the context is running before any click handler asks for a sound
+  window.addEventListener('pointerdown', unlock, true);
+  window.addEventListener('keydown', unlock, true);
+  ctx.addEventListener('statechange', startAmb);
+  // Pause the sound while the tab is in the background
+  document.addEventListener('visibilitychange', () => {
+    if (!ctx || !ambience) return;
+    if (document.hidden) void ctx.suspend();
+    else void ctx.resume();
+  });
 
   // Interface sounds for all buttons: data-sfx="tab|buy|sell|none" overrides the default click
   document.addEventListener('pointerdown', (e) => {
@@ -284,8 +309,8 @@ export function initAudio() {
 // ---------- loading screen sounds (synthesized: old TV + old PC) ----------
 
 /** Short synthesized sounds for the boot screen. No files — generated on the fly. */
-export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'power-off') {
-  if (!ctx || !master || !enabled || volume === 0) return;
+export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'ready' | 'power-off') {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
   const c = ctx;
   const t = c.currentTime;
   const out = c.createGain();
@@ -302,33 +327,35 @@ export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'power-off
     return b;
   };
   if (kind === 'power-on') {
-    // low "thump" of the tube + static burst + the thin flyback whine fading out
+    // soft: a low hum swelling up as the tube warms, a muffled relay click and a faint high whine
     const o = c.createOscillator();
     o.type = 'sine';
-    o.frequency.setValueAtTime(90, t);
-    o.frequency.exponentialRampToValueAtTime(38, t + 0.35);
+    o.frequency.setValueAtTime(55, t);
+    o.frequency.linearRampToValueAtTime(62, t + 0.6);
     const g = c.createGain();
-    env(g, 0.9, 0.01, 0.45);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
     o.connect(g).connect(out);
     o.start(t);
-    o.stop(t + 0.5);
+    o.stop(t + 0.95);
     const n = c.createBufferSource();
-    n.buffer = noiseBuf(0.5);
+    n.buffer = noiseBuf(0.05);
     const nf = c.createBiquadFilter();
-    nf.type = 'highpass';
-    nf.frequency.value = 1500;
+    nf.type = 'lowpass';
+    nf.frequency.value = 900;
     const ng = c.createGain();
-    env(ng, 0.35, 0.005, 0.4);
+    env(ng, 0.12, 0.002, 0.04);
     n.connect(nf).connect(ng).connect(out);
     n.start(t);
     const w = c.createOscillator();
     w.type = 'sine';
-    w.frequency.value = 12000;
+    w.frequency.value = 11000;
     const wg = c.createGain();
-    env(wg, 0.035, 0.05, 1.6, t + 0.05);
+    env(wg, 0.012, 0.2, 1.2, t + 0.1);
     w.connect(wg).connect(out);
     w.start(t);
-    w.stop(t + 1.8);
+    w.stop(t + 1.6);
   } else if (kind === 'beep') {
     // the classic BIOS POST beep
     const o = c.createOscillator();
@@ -366,6 +393,18 @@ export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'power-off
     o.connect(g).connect(out);
     o.start(t);
     o.stop(t + 0.08);
+  } else if (kind === 'ready') {
+    // two soft rising blips: "system ready"
+    for (const [i, f] of [660, 990].entries()) {
+      const o = c.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = c.createGain();
+      env(g, 0.08, 0.005, 0.12, t + i * 0.09);
+      o.connect(g).connect(out);
+      o.start(t + i * 0.09);
+      o.stop(t + i * 0.09 + 0.16);
+    }
   } else {
     // power-off: the picture collapses with a falling "zap"
     const o = c.createOscillator();
@@ -383,5 +422,86 @@ export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'power-off
   }
 }
 
-/** Is the audio engine running yet (it starts on the first click/keypress). */
-export const audioReady = () => !!ctx;
+/** Is the audio engine running (browsers hold it until the first click/keypress). */
+export const audioReady = live;
+
+/**
+ * A quiet fax/modem handshake for the boot screen (~2.6 s), heard "down a phone line" (300–3400 Hz band):
+ * calling tone 1100 Hz → answer tone 2100 Hz → FSK warble → noisy training burst → short carrier.
+ * Returns a stop function (the boot can be skipped).
+ */
+export function faxSound(): () => void {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return () => {};
+  const c = ctx;
+  const t0 = c.currentTime + 0.02;
+  const out = c.createGain();
+  out.gain.value = 0.22; // keep it in the background
+  const hp = c.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 300;
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 3400;
+  out.connect(hp).connect(lp).connect(sfxBus ?? master);
+  const nodes: AudioScheduledSourceNode[] = [];
+  const tone = (type: OscillatorType, f: number, start: number, dur: number, peak: number) => {
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.value = f;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.linearRampToValueAtTime(peak, start + 0.01);
+    g.gain.setValueAtTime(peak, start + dur - 0.015);
+    g.gain.linearRampToValueAtTime(0.0001, start + dur);
+    o.connect(g).connect(out);
+    o.start(start);
+    o.stop(start + dur + 0.01);
+    nodes.push(o);
+    return o;
+  };
+  // 1) calling tone: two short 1100 Hz beeps
+  tone('sine', 1100, t0, 0.22, 0.5);
+  tone('sine', 1100, t0 + 0.42, 0.22, 0.5);
+  // 2) answer tone 2100 Hz with the phase "clicks" of a real modem (tiny gaps)
+  tone('sine', 2100, t0 + 0.75, 0.32, 0.4);
+  tone('sine', 2100, t0 + 1.08, 0.18, 0.4);
+  // 3) V.21-style FSK warble: random hops between 1650 and 1850 Hz at ~300 baud
+  const fsk = tone('square', 1750, t0 + 1.3, 0.42, 0.14);
+  for (let i = 0, ts = t0 + 1.3; ts < t0 + 1.72; i++, ts += 1 / 300) {
+    fsk.frequency.setValueAtTime(Math.random() < 0.5 ? 1650 : 1850, ts);
+  }
+  // 4) training: band-limited noise with a fast tremolo, the "kshhh" of a fax
+  const len = 0.62;
+  const buf = c.createBuffer(1, Math.floor(c.sampleRate * len), c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const n = c.createBufferSource();
+  n.buffer = buf;
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1800;
+  bp.Q.value = 0.9;
+  const ng = c.createGain();
+  const ts = t0 + 1.78;
+  ng.gain.setValueAtTime(0.0001, ts);
+  for (let i = 0; i < 24; i++) ng.gain.setValueAtTime(i % 2 ? 0.18 : 0.32, ts + i * (len / 24));
+  ng.gain.setValueAtTime(0.0001, ts + len);
+  n.connect(bp).connect(ng).connect(out);
+  n.start(ts);
+  nodes.push(n);
+  // 5) short carrier with a slight wobble, then silence
+  const car = tone('sine', 1300, t0 + 2.44, 0.2, 0.25);
+  car.frequency.setValueAtTime(1300, t0 + 2.44);
+  car.frequency.linearRampToValueAtTime(1500, t0 + 2.64);
+  return () => {
+    const now = c.currentTime;
+    out.gain.setTargetAtTime(0.0001, now, 0.02);
+    for (const x of nodes) {
+      try {
+        x.stop(now + 0.1);
+      } catch {
+        /* already stopped */
+      }
+    }
+  };
+}

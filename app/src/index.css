@@ -3001,32 +3001,39 @@ html.cy-on input:not([type]) {
   overflow: visible;
 }
 
-/* дежурный режим телевизора: ждём первого нажатия (нужно и для звука) */
-.standby {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-}
-.standby-text {
+/* финал загрузки: «PRESS ANY BUTTON TO CONTINUE» в стиле BIOS — инверсная плашка и мигающий блок-курсор */
+.boot-continue {
+  margin-top: 3vh;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   font-family: var(--font-px);
-  font-size: clamp(10px, 1.1vw, 15px);
-  color: #9389b4;
-  letter-spacing: 0.1em;
+  font-size: clamp(11px, 1.2vw, 17px);
+  letter-spacing: 0.06em;
+  color: #050409;
+  background: #7dffb0;
+  box-shadow:
+    0 0 10px #39ff1488,
+    0 0 26px #39ff1433;
+  text-shadow: none;
+  animation: boot-ready-in 0.24s steps(3);
 }
-.standby-led {
-  position: absolute;
-  right: 5vw;
-  bottom: 5vh;
-  width: 8px;
-  height: 8px;
-  background: #ff3b4e;
-  box-shadow: 0 0 8px #ff3b4e, 0 0 18px #ff3b4e88;
-  animation: led-breathe 2.4s ease-in-out infinite;
+.boot-continue .blink {
+  animation: blink 1s steps(1) infinite;
 }
-@keyframes led-breathe {
-  50% {
-    opacity: 0.35;
+.boot-caret {
+  width: 0.7em;
+  height: 1.1em;
+  background: #050409;
+  animation: blink 0.5s steps(1) infinite;
+}
+@keyframes boot-ready-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
   }
 }
 

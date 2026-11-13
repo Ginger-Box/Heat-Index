@@ -1,24 +1,25 @@
-// Loading screen like an old CRT TV: standby ("press any key to power on") → the tube switches on with a thump
-// → a "BIOS" boots the arena (beep, ticks, OK blips) → the picture collapses.
-// The standby step is needed for sound: browsers only allow audio after the first click/keypress.
-// After power-on any click or key skips it. Lives outside the game (rendered next to <App/>), disappears when done.
+// Loading screen like an old CRT TV + PC: the tube switches on softly → a "BIOS" boots the arena
+// (beep, a quiet fax/modem handshake, ticks, OK blips) → "PRESS ANY BUTTON TO CONTINUE" → the picture collapses.
+// Browsers only allow sound after the first click/keypress, so where autoplay is blocked the boot runs silently
+// and the sound starts with that final button press. A click during the boot skips straight to the game.
+// Lives outside the game (rendered next to <App/>), disappears when done.
 // Everything on screen is derived from the elapsed time, so it is deterministic and easy to tune.
 
 import { useEffect, useRef, useState } from 'react';
-import { bootSound } from '../audio';
+import { bootSound, faxSound } from '../audio';
 
 const TASKS = [
   'INITIALIZING NEON TUBES',
+  'DIALING MARKET UPLINK',
   'MOUNTING SCRAPYARD DRIVE',
   'LOADING ARENA PROTOCOLS',
   'SPAWNING 12 NPC TEAMS',
   'WAKING UP AI BROKERS (3)',
-  'SYNCING MARKET FEED',
   'CALIBRATING OVERHEAT SENSORS',
 ];
 const ON_MS = 380; // tube switch-on
 const MEM_MS = 520; // memory test counter
-const TASK_MS = 300; // per task
+const TASK_MS = 320; // per task
 const TASKS_START = ON_MS + MEM_MS;
 const BOOT_END = TASKS_START + TASKS.length * TASK_MS + 250;
 const OFF_MS = 330; // tube switch-off
@@ -26,29 +27,13 @@ const SPIN = ['|', '/', '-', '\\'];
 
 export function Boot() {
   const [t, setT] = useState(0); // ms since power-on
-  const [skipAt, setSkipAt] = useState<number | null>(null);
+  const [offAt, setOffAt] = useState<number | null>(null);
   const [done, setDone] = useState(false);
-  const [powered, setPowered] = useState(false);
   const start = useRef(performance.now());
-  const played = useRef({ beep: false, ticks: 0, oks: 0, off: false });
+  const played = useRef({ on: false, beep: false, fax: false, ticks: 0, oks: 0, ready: false, off: false });
+  const stopFax = useRef<() => void>(() => {});
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  // standby: the first click/key "turns the TV on" (and unlocks sound)
-  useEffect(() => {
-    if (powered || done) return;
-    const on = () => {
-      start.current = performance.now();
-      setPowered(true);
-      // the audio engine starts on this same gesture; give it a moment to come up
-      setTimeout(() => bootSound('power-on'), 30);
-    };
-    window.addEventListener('keydown', on, { once: true });
-    window.addEventListener('pointerdown', on, { once: true });
-    return () => {
-      window.removeEventListener('keydown', on);
-      window.removeEventListener('pointerdown', on);
-    };
-  }, [powered, done]);
+  const ready = t >= BOOT_END;
 
   // clock
   useEffect(() => {
@@ -56,7 +41,6 @@ export function Boot() {
       setDone(true);
       return;
     }
-    if (!powered) return;
     let raf = 0;
     const tick = () => {
       setT(performance.now() - start.current);
@@ -64,40 +48,51 @@ export function Boot() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [reduce, powered]);
+  }, [reduce]);
 
-  const endAt = skipAt !== null ? skipAt + OFF_MS : BOOT_END + OFF_MS;
   useEffect(() => {
-    if (!done && t >= endAt) setDone(true);
-  }, [t, endAt, done]);
+    if (!done && offAt !== null && t >= offAt + OFF_MS) setDone(true);
+  }, [t, offAt, done]);
 
-  // skip with any click or key — listeners live only while the screen is on
+  // any click or key: during the boot — skip to the game; on the prompt — continue
   useEffect(() => {
-    if (done || !powered) return;
-    const skip = () => setSkipAt((s) => s ?? Math.min(performance.now() - start.current, BOOT_END));
-    window.addEventListener('keydown', skip);
-    window.addEventListener('pointerdown', skip);
-    return () => {
-      window.removeEventListener('keydown', skip);
-      window.removeEventListener('pointerdown', skip);
+    if (done || offAt !== null) return;
+    const go = () => {
+      stopFax.current();
+      setOffAt(performance.now() - start.current);
     };
-  }, [done, powered]);
+    window.addEventListener('keydown', go);
+    window.addEventListener('pointerdown', go);
+    return () => {
+      window.removeEventListener('keydown', go);
+      window.removeEventListener('pointerdown', go);
+    };
+  }, [done, offAt]);
 
-  // sounds follow the picture: BIOS beep after the memory test, a tick per task, a blip per OK, a zap on power-off
+  // sounds follow the picture
   useEffect(() => {
-    if (!powered || done) return;
+    if (done) return;
     const p = played.current;
-    const offStart = skipAt ?? BOOT_END;
-    if (t >= offStart) {
+    if (offAt !== null) {
       if (!p.off) {
         p.off = true;
-        bootSound('power-off');
+        // the press that unlocked the audio arrives a moment before the context is running
+        setTimeout(() => bootSound('power-off'), 30);
       }
       return;
+    }
+    if (!p.on) {
+      p.on = true;
+      bootSound('power-on');
     }
     if (!p.beep && t >= ON_MS + MEM_MS) {
       p.beep = true;
       bootSound('beep');
+    }
+    // the modem dials in with the "market uplink" task
+    if (!p.fax && t >= TASKS_START + TASK_MS) {
+      p.fax = true;
+      stopFax.current = faxSound();
     }
     const started = Math.max(0, Math.min(TASKS.length, Math.floor((t - TASKS_START) / TASK_MS) + 1));
     if (t >= TASKS_START && started > p.ticks) {
@@ -109,20 +104,14 @@ export function Boot() {
       p.oks = oks;
       bootSound('ok');
     }
-  }, [t, powered, done, skipAt]);
+    if (!p.ready && ready) {
+      p.ready = true;
+      bootSound('ready');
+    }
+  }, [t, done, offAt, ready]);
 
   if (done) return null;
-  if (!powered)
-    return (
-      <div className="boot phase-standby" aria-label="Press any key to power on">
-        <div className="standby">
-          <div className="standby-text blink">PRESS ANY KEY TO POWER ON</div>
-          <div className="standby-led" title="standby" />
-        </div>
-      </div>
-    );
-  const offStart = skipAt ?? BOOT_END;
-  const phase = t < ON_MS ? 'on' : t >= offStart ? 'off' : 'boot';
+  const phase = t < ON_MS ? 'on' : offAt !== null ? 'off' : 'boot';
   const mem = Math.min(640, Math.floor(((t - ON_MS) / MEM_MS) * 640));
   const taskT = t - TASKS_START;
   const progress = Math.max(0, Math.min(1, (t - ON_MS) / (BOOT_END - ON_MS - 250)));
@@ -151,8 +140,15 @@ export function Boot() {
           <div className="boot-progress">
             <i style={{ width: `${progress * 100}%` }} />
           </div>
-          <div className="boot-pct">LOADING {Math.round(progress * 100)}%</div>
-          <div className="boot-hint">{progress >= 1 ? 'ENTERING THE ARENA…' : 'click or press any key to skip'}</div>
+          <div className="boot-pct">{ready ? 'SYSTEM READY' : `LOADING ${Math.round(progress * 100)}%`}</div>
+          {ready ? (
+            <div className="boot-continue">
+              <span className="blink">▶ PRESS ANY BUTTON TO CONTINUE</span>
+              <i className="boot-caret" />
+            </div>
+          ) : (
+            <div className="boot-hint">click or press any key to skip</div>
+          )}
         </div>
       </div>
     </div>
