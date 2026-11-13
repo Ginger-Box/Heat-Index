@@ -35,10 +35,32 @@ function nearRelayer(): Plugin {
             const { Account, JsonRpcProvider } = await import('near-api-js')
             const provider = new JsonRpcProvider({ url: 'https://rpc.testnet.near.org' })
             const relayer = new Account(CONTRACT_ID, provider, creds.private_key)
+            const view = (method: string, args: Record<string, unknown>) =>
+              provider.callFunction({ contractId: CONTRACT_ID, method, args })
+            // this login already has an account, but the browser lost its game key (e.g. another device):
+            // release the old link so the login gets a fresh account
+            if (await view('account_for_owner_key', { owner_key: ownerKey })) {
+              await relayer.callFunction({
+                contractId: CONTRACT_ID,
+                methodName: 'forget_owner_key',
+                args: { owner_key: ownerKey },
+              })
+            }
+            // first free name: max, max-2, max-3…
+            const exists = async (id: string) => {
+              try {
+                await provider.query({ request_type: 'view_account', finality: 'final', account_id: id })
+                return true
+              } catch {
+                return false
+              }
+            }
+            let free = name
+            for (let i = 2; await exists(`${free}.${CONTRACT_ID}`) && i < 50; i++) free = `${name}-${i}`
             const accountId = await relayer.callFunction({
               contractId: CONTRACT_ID,
               methodName: 'create_player_account',
-              args: { name, owner_key: ownerKey, game_key: gameKey },
+              args: { name: free, owner_key: ownerKey, game_key: gameKey },
               gas: 150_000_000_000_000n,
             })
             if (!accountId) throw new Error('The account was not created (is the name taken?)')

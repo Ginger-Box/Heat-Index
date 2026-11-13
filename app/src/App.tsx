@@ -75,7 +75,10 @@ export default function App() {
         if (r) await linkRobots();
         setResume({ busy: false, error: null });
       })
-      .catch((e) => setResume({ busy: false, error: e instanceof Error ? e.message : String(e) }));
+      .catch((e) => {
+        console.error('[NEAR] email login', e);
+        setResume({ busy: false, error: e instanceof Error ? e.message : String(e) });
+      });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

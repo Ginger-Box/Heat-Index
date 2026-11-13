@@ -225,6 +225,13 @@ impl Contract {
         Some(account_id)
     }
 
+    /// Owner only: forget which account a NEAR Auth key created, so the same login can get a new account
+    /// (used when the player's browser lost its game key — e.g. a new device in this demo).
+    pub fn forget_owner_key(&mut self, owner_key: String) {
+        require!(env::predecessor_account_id() == self.owner_id, "Owner only");
+        self.owner_keys.remove(&owner_key);
+    }
+
     /// The player account created for a NEAR Auth (email) key, if any.
     pub fn account_for_owner_key(&self, owner_key: String) -> Option<AccountId> {
         self.owner_keys.get(&owner_key).cloned()

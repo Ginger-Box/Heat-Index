@@ -189,23 +189,40 @@ export const emailLoginPending = () => {
   }
 };
 
-/** Back from the login page: finish the email login. Returns the player name and account, or null if not pending. */
-export async function resumeEmailLogin(): Promise<{ name: string; accountId: string } | null> {
-  if (!emailLoginPending()) return null;
-  let name = 'player';
-  try {
-    name = (JSON.parse(localStorage.getItem(EMAIL_PENDING) ?? '{}') as { name?: string }).name ?? name;
-    localStorage.removeItem(EMAIL_PENDING);
-  } catch {
-    /* ignore */
-  }
-  const client = await nearAuthClient();
-  // the provider handles the ?code=&state= callback inside isLoggedIn()
-  const provider = (client as unknown as { provider: { isLoggedIn: () => Promise<boolean> } }).provider;
-  const ok = await provider.isLoggedIn();
-  history.replaceState(null, '', location.pathname); // drop ?code=&state= from the address bar
-  if (!ok) throw new Error('The email login was cancelled');
-  return { name, accountId: await finishEmailLogin(client, name) };
+let resuming: Promise<{ name: string; accountId: string } | null> | null = null;
+
+/**
+ * Back from the login page: finish the email login. Returns the player name and account, or null if not pending.
+ * Runs once per page load even if called twice (React StrictMode runs effects twice in development — the second
+ * call used to see the "pending" flag already cleared and show the login screen again). The Auth0 session lives
+ * only in this page's memory, so the account has to be finished right here, on the page the login returned to.
+ */
+export function resumeEmailLogin(): Promise<{ name: string; accountId: string } | null> {
+  resuming ??= (async () => {
+    if (!emailLoginPending()) return null;
+    let name = 'player';
+    try {
+      name = (JSON.parse(localStorage.getItem(EMAIL_PENDING) ?? '{}') as { name?: string }).name ?? name;
+    } catch {
+      /* ignore */
+    }
+    try {
+      const client = await nearAuthClient();
+      // the provider handles the ?code=&state= callback inside isLoggedIn()
+      const provider = (client as unknown as { provider: { isLoggedIn: () => Promise<boolean> } }).provider;
+      const ok = await provider.isLoggedIn();
+      history.replaceState(null, '', location.pathname); // drop ?code=&state= from the address bar
+      if (!ok) throw new Error('The email login did not complete — please try again');
+      return { name, accountId: await finishEmailLogin(client, name) };
+    } finally {
+      try {
+        localStorage.removeItem(EMAIL_PENDING);
+      } catch {
+        /* ignore */
+      }
+    }
+  })();
+  return resuming;
 }
 
 /** After Auth0: the player's NEAR Auth key → their account (created on first login). */
@@ -220,9 +237,8 @@ async function finishEmailLogin(client: Awaited<ReturnType<typeof nearAuthClient
       saveSession(prev);
       return existing;
     }
-    throw new Error(
-      `Your account ${existing} was created on another device. On-chain play from a second device isn't supported in this demo yet.`,
-    );
+    // this browser has no game key for that account (another device, or it was lost): the dev server gives
+    // this login a fresh account below
   }
   const game = KeyPair.fromRandom('ed25519');
   const res = await fetch('/api/near/create-player', {
