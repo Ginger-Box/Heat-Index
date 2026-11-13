@@ -309,6 +309,17 @@ export function initAudio() {
     else void ctx.resume();
   });
 
+  // Typing sound in every text field (searches, deck names, the login name)
+  document.addEventListener('keydown', (e) => {
+    const el = e.target as HTMLElement | null;
+    if (!el || e.repeat || e.metaKey || e.ctrlKey) return;
+    const isText = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|)$/.test((el as HTMLInputElement).type));
+    if (!isText) return;
+    if (e.key === ' ' || e.key === 'Enter') keyClick('space');
+    else if (e.key === 'Backspace' || e.key === 'Delete') keyClick('back');
+    else if (e.key.length === 1) keyClick('key');
+  });
+
   // Interface sounds for all buttons: data-sfx="tab|buy|sell|none" overrides the default click
   document.addEventListener('pointerdown', (e) => {
     const b = (e.target as HTMLElement).closest('button');
@@ -778,21 +789,81 @@ export function crunch(step = 0, delay = 0) {
     const f = c.createBiquadFilter();
     f.type = 'bandpass';
     f.frequency.value = (i ? 3200 : 1900) + Math.min(step, 30) * 35 + Math.random() * 300;
-    f.Q.value = 1.1;
+    f.Q.value = 3.5; // narrower: a metallic detent rather than plain gravel
     const g = c.createGain();
-    g.gain.value = i ? 0.09 : 0.14;
+    g.gain.value = i ? 0.1 : 0.16;
     n.connect(f).connect(g).connect(out);
     n.start(t + at);
   }
-  // a faint low body so it isn't only hiss
+  // the cyberpunk part: a tiny digital blip that drops in pitch, like a data packet being read
   const o = c.createOscillator();
-  o.type = 'sine';
-  o.frequency.value = 180 + Math.min(step, 30) * 4;
+  o.type = 'square';
+  o.frequency.setValueAtTime(1500 + Math.min(step, 30) * 30, t);
+  o.frequency.exponentialRampToValueAtTime(620, t + 0.022);
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1400;
+  bp.Q.value = 2;
   const og = c.createGain();
   og.gain.setValueAtTime(0.0001, t);
-  og.gain.exponentialRampToValueAtTime(0.035, t + 0.002);
-  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-  o.connect(og).connect(out);
+  og.gain.exponentialRampToValueAtTime(0.05, t + 0.002);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.026);
+  o.connect(bp).connect(og).connect(out);
   o.start(t);
-  o.stop(t + 0.035);
+  o.stop(t + 0.03);
+}
+
+// ---------- typing: a mechanical cyberdeck key, synthesized ----------
+
+let lastKey = 0;
+/** One key press: a sharp switch click, a soft low "thock" and a faint digital tick. Space/Enter sound deeper. */
+export function keyClick(kind: 'key' | 'space' | 'back' = 'key') {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const now = performance.now();
+  if (now - lastKey < 22) return;
+  lastKey = now;
+  const c = ctx;
+  const t = c.currentTime;
+  const out = c.createGain();
+  out.gain.value = 0.8;
+  out.connect(sfxBus ?? master);
+  const deep = kind === 'space' ? 0.7 : kind === 'back' ? 0.85 : 1;
+  // switch click
+  const len = 0.012;
+  const b = c.createBuffer(1, Math.floor(c.sampleRate * len), c.sampleRate);
+  const d = b.getChannelData(0);
+  for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * (1 - j / d.length) ** 4;
+  const n = c.createBufferSource();
+  n.buffer = b;
+  const f = c.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = (3800 + Math.random() * 900) * deep;
+  f.Q.value = 2.2;
+  const ng = c.createGain();
+  ng.gain.value = 0.22;
+  n.connect(f).connect(ng).connect(out);
+  n.start(t);
+  // thock
+  const o = c.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(190 * deep + Math.random() * 20, t + 0.004);
+  o.frequency.exponentialRampToValueAtTime(90 * deep, t + 0.04);
+  const og = c.createGain();
+  og.gain.setValueAtTime(0.0001, t + 0.004);
+  og.gain.exponentialRampToValueAtTime(0.09, t + 0.007);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  o.connect(og).connect(out);
+  o.start(t + 0.004);
+  o.stop(t + 0.055);
+  // digital tick
+  const q = c.createOscillator();
+  q.type = 'square';
+  q.frequency.value = kind === 'back' ? 1800 : 2600 + Math.random() * 400;
+  const qg = c.createGain();
+  qg.gain.setValueAtTime(0.0001, t + 0.01);
+  qg.gain.exponentialRampToValueAtTime(0.012, t + 0.012);
+  qg.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+  q.connect(qg).connect(out);
+  q.start(t + 0.01);
+  q.stop(t + 0.035);
 }

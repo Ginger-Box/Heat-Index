@@ -3459,20 +3459,32 @@ html.cy-on input:not([type]) {
 .b-vent {
   position: absolute;
   z-index: 6;
-  top: -10px;
-  right: -10px;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  font-size: 15px;
-  line-height: 1;
-  color: #7fd8ff;
+  top: 64px; /* over the art, clear of the GUARD badge and the heat pips */
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  font-family: var(--font-px);
+  font-size: 9px;
+  white-space: nowrap;
+  color: #050409;
+  background: #7fd8ff;
   border-color: #7fd8ff;
-  opacity: 0.85;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+/* shown on hover, and always when the robot is close to overheating */
+.b-unit:hover .b-vent,
+.b-vent.hot {
+  opacity: 1;
+  pointer-events: auto;
+}
+.b-vent.hot {
+  animation: blink 1s steps(1) infinite;
 }
 .b-vent:hover {
-  opacity: 1;
   box-shadow: 0 0 12px #7fd8ff;
+  animation: none;
 }
 .b-unit.fx-hurt .card {
   animation: hurt 0.45s ease-out;

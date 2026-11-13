@@ -969,13 +969,13 @@ export function Arena({ w }: { w: World }) {
                 {u.offline && <span className="b-badge offline">OFFLINE</span>}
                 {canAct && u.heat > 0 && (
                   <button
-                    className="b-vent"
+                    className={`b-vent ${u.heat >= heatCap(u.modelId) - 2 ? 'hot' : ''}`}
                     data-sfx="none"
-                    title="Cool down: −3 heat instead of attacking"
+                    title="Cool down: −3 heat instead of attacking this turn (heat at the limit = overheat, the robot skips a turn)"
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={() => void doAction({ t: 'vent', uid: u.uid })}
                   >
-                    ❄
+                    ❄ COOL −3
                   </button>
                 )}
                 {floatsOf(u.uid)}

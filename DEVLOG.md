@@ -129,6 +129,16 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   lightning, flames, fuses, steam, shield glints); Analytics got bigger model buttons and a search; the piercing
   whine at the start of the boot screen is gone.
 
+### Decks and polish (Nov 13, night)
+- **Five named decks**: edit one at a time in the Hangar (the pool shows robots that stand in no deck), pick the
+  battle deck in the Arena, rename inline. Deck grids are 3 rows of 5.
+- Ability texts rewritten for the current combat (they still described the old lane battle). Checked by simulation
+  that guards hold: every Core hit through a guard in 300 battles came from a Maneuver flanker — now the battle says
+  "FLANK" when that happens and marks a guarded Core.
+- Defeat: a clean pixel wave pours out of the Core, covers the screen and cuts to black, then DEFEAT (the overlay
+  used to sit under the glitch canvas). Victory: confetti pours from two corner cannons with popper and paper sounds.
+- Typing sound in text fields; a cyber "crunch" for row selection; the cool-down button is labelled.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results
