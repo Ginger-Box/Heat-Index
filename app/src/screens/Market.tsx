@@ -104,6 +104,7 @@ export function Market({ w }: { w: World }) {
       return;
     }
     if ((e.target as HTMLElement).closest('button, input, a')) return;
+    sfx('ui-select');
     const multi = e.ctrlKey || e.metaKey;
     const order = visible.map((r) => r.m.id);
     setSelected((cur) => {
@@ -187,7 +188,10 @@ export function Market({ w }: { w: World }) {
     <th
       className={`sortable ${sort.key === key ? 'sorted' : ''}`}
       title={tip}
-      onClick={() => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' && key !== 'class' && key !== 'best' }))}
+      onClick={() => {
+        sfx('ui-sort');
+        setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' && key !== 'class' && key !== 'best' }));
+      }}
     >
       {label}
       <span className="sort-arrow">{sort.key === key ? (sort.desc ? ' ▼' : ' ▲') : ' ↕'}</span>
@@ -236,6 +240,7 @@ export function Market({ w }: { w: World }) {
           {classStats.map((s) => (
             <button
               key={s.c}
+              data-sfx="toggle"
               className={`class-tile ${cls === s.c ? 'active' : ''}`}
               title={CLASS_HELP[s.c]}
               onClick={() => setCls(cls === s.c ? 'all' : s.c)}
@@ -273,6 +278,7 @@ export function Market({ w }: { w: World }) {
             </span>
             <div className="info-wrap">
               <button
+                data-sfx={help ? 'close' : 'open'}
                 className={`info-btn ${help ? 'on' : ''}`}
                 onClick={() => setHelp(!help)}
                 title="How to read the market"
@@ -317,11 +323,16 @@ export function Market({ w }: { w: World }) {
             onChange={(e) => setQ(e.target.value)}
           />
           <div className="chips">
-            <button className={`small ${cls === 'all' ? 'primary' : ''}`} onClick={() => setCls('all')}>
+            <button data-sfx="toggle" className={`small ${cls === 'all' ? 'primary' : ''}`} onClick={() => setCls('all')}>
               All classes
             </button>
             {CLASSES.map((c) => (
-              <button key={c} className={`small ${cls === c ? 'primary' : ''}`} onClick={() => setCls(cls === c ? 'all' : c)}>
+              <button
+                key={c}
+                data-sfx="toggle"
+                className={`small ${cls === c ? 'primary' : ''}`}
+                onClick={() => setCls(cls === c ? 'all' : c)}
+              >
                 {CLASS_ICON[c]} {CLASS_LABEL[c]}
               </button>
             ))}
@@ -337,7 +348,7 @@ export function Market({ w }: { w: World }) {
                 ['owned', 'Owned'],
               ] as [Show, string][]
             ).map(([k, label]) => (
-              <button key={k} className={`small ${show === k ? 'primary' : ''}`} onClick={() => setShow(k)}>
+              <button key={k} data-sfx="toggle" className={`small ${show === k ? 'primary' : ''}`} onClick={() => setShow(k)}>
                 {label}
               </button>
             ))}
@@ -453,6 +464,7 @@ export function Market({ w }: { w: World }) {
                           )}
                           <button
                             className="small expand-btn"
+                            data-sfx={expanded ? 'close' : 'open'}
                             title="Compare all brokers"
                             onClick={() =>
                               setOpen((o) => {

@@ -24,12 +24,22 @@ type Sfx =
   | 'defeat'
   | 'fast-forward'
   | 'card-pick'
-  | 'card-drop';
+  | 'card-drop'
+  | 'ui-toggle'
+  | 'ui-open'
+  | 'ui-close'
+  | 'ui-sort'
+  | 'ui-select';
 
-// Sound -> files (variants are picked at random) and base volume
-const BANK: Record<Sfx, { files: string[]; vol: number }> = {
-  'ui-click': { files: ['ui-click'], vol: 0.5 },
-  'ui-tab': { files: ['ui-tab'], vol: 0.35 },
+// Sound -> files (variants), base volume and pitch spread (so repeats don't get boring)
+const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
+  'ui-click': { files: ['ui-click', 'ui-click-2', 'ui-click-3'], vol: 0.5, spread: 0.18 },
+  'ui-tab': { files: ['ui-tab', 'ui-tab-2', 'ui-tab-3'], vol: 0.35, spread: 0.16 },
+  'ui-toggle': { files: ['ui-toggle-1', 'ui-toggle-2'], vol: 0.22, spread: 0.18 },
+  'ui-open': { files: ['ui-open'], vol: 0.3, spread: 0.12 },
+  'ui-close': { files: ['ui-close'], vol: 0.3, spread: 0.12 },
+  'ui-sort': { files: ['ui-sort'], vol: 0.18, spread: 0.2 },
+  'ui-select': { files: ['ui-select'], vol: 0.3, spread: 0.24 },
   'ui-hover': { files: ['ui-hover'], vol: 0.12 },
   'ui-error': { files: ['ui-error'], vol: 0.28 },
   'ui-buy': { files: ['ui-buy'], vol: 0.55 },
@@ -62,6 +72,7 @@ let sfxBus: GainNode | null = null;
 const SFX_LEVEL = 0.4;
 const buffers = new Map<string, AudioBuffer>();
 const lastPlayed = new Map<Sfx, number>();
+const lastVariant = new Map<Sfx, { file: string; rate: number }>();
 let enabled = readPref();
 let volume = readVolume();
 const VOL_KEY = 'neon-pit-volume';
@@ -138,12 +149,20 @@ export function sfx(name: Sfx, opts: { volume?: number; delay?: number } = {}) {
   if (gap && now - (lastPlayed.get(name) ?? 0) < gap) return;
   lastPlayed.set(name, now);
   const entry = BANK[name];
-  const file = entry.files[Math.floor(Math.random() * entry.files.length)];
+  const prev = lastVariant.get(name);
+  // a different file than last time (if there are several) …
+  const pool = entry.files.length > 1 ? entry.files.filter((f) => f !== prev?.file) : entry.files;
+  const file = pool[Math.floor(Math.random() * pool.length)];
   const buf = buffers.get(file);
   if (!buf) return;
+  // … and a noticeably different pitch, so repeated clicks don't sound identical
+  const spread = entry.spread ?? 0.12;
+  let rate = 1 - spread / 2 + Math.random() * spread;
+  if (prev && Math.abs(rate - prev.rate) < spread / 4) rate = rate > 1 ? rate - spread / 3 : rate + spread / 3;
+  lastVariant.set(name, { file, rate });
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.value = 0.94 + Math.random() * 0.12; // so repeats don't sound identical
+  src.playbackRate.value = rate;
   const g = ctx.createGain();
   g.gain.value = entry.vol * (opts.volume ?? 1);
   src.connect(g).connect(sfxBus ?? master);
@@ -180,11 +199,20 @@ function startAmbience(c: AudioContext, out: AudioNode) {
   }
   filter.connect(droneGain).connect(bus);
 
-  // Neon-tube hiss/crackle: filtered noise
-  const len = c.sampleRate * 2;
+  // Neon-tube hiss/crackle: filtered noise. The loop is 8 s and its ends are cross-faded into each other,
+  // otherwise the jump at the loop seam is heard as a click every couple of seconds.
+  const len = c.sampleRate * 8;
+  const fade = Math.floor(c.sampleRate * 0.25);
+  const raw = new Float32Array(len + fade);
+  for (let i = 0; i < raw.length; i++) raw[i] = (Math.random() * 2 - 1) * (Math.random() < 0.0006 ? 0.55 : 0.25);
   const noise = c.createBuffer(1, len, c.sampleRate);
   const d = noise.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.002 ? 1 : 0.25);
+  for (let i = 0; i < len; i++) {
+    if (i < fade) {
+      const k = i / fade;
+      d[i] = raw[i] * k + raw[len + i] * (1 - k); // the tail flows into the head
+    } else d[i] = raw[i];
+  }
   const ns = c.createBufferSource();
   ns.buffer = noise;
   ns.loop = true;
@@ -230,7 +258,15 @@ export function initAudio() {
     if (!b || b.disabled) return;
     const kind = b.dataset.sfx;
     if (kind === 'none') return;
-    sfx(kind === 'tab' ? 'ui-tab' : 'ui-click');
+    const map: Record<string, Sfx> = {
+      tab: 'ui-tab',
+      toggle: 'ui-toggle',
+      open: 'ui-open',
+      close: 'ui-close',
+      sort: 'ui-sort',
+      select: 'ui-select',
+    };
+    sfx(map[kind ?? ''] ?? 'ui-click');
   });
   document.addEventListener('pointerover', (e) => {
     const b = (e.target as HTMLElement).closest('button');
@@ -238,3 +274,108 @@ export function initAudio() {
     if (b && b !== from && !b.disabled) sfx('ui-hover');
   });
 }
+
+// ---------- loading screen sounds (synthesized: old TV + old PC) ----------
+
+/** Short synthesized sounds for the boot screen. No files — generated on the fly. */
+export function bootSound(kind: 'power-on' | 'beep' | 'tick' | 'ok' | 'power-off') {
+  if (!ctx || !master || !enabled || volume === 0) return;
+  const c = ctx;
+  const t = c.currentTime;
+  const out = c.createGain();
+  out.connect(sfxBus ?? master);
+  const env = (g: GainNode, peak: number, attack: number, decay: number, start = t) => {
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(peak, start + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + attack + decay);
+  };
+  const noiseBuf = (sec: number) => {
+    const b = c.createBuffer(1, Math.floor(c.sampleRate * sec), c.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  };
+  if (kind === 'power-on') {
+    // low "thump" of the tube + static burst + the thin flyback whine fading out
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.35);
+    const g = c.createGain();
+    env(g, 0.9, 0.01, 0.45);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.5);
+    const n = c.createBufferSource();
+    n.buffer = noiseBuf(0.5);
+    const nf = c.createBiquadFilter();
+    nf.type = 'highpass';
+    nf.frequency.value = 1500;
+    const ng = c.createGain();
+    env(ng, 0.35, 0.005, 0.4);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t);
+    const w = c.createOscillator();
+    w.type = 'sine';
+    w.frequency.value = 12000;
+    const wg = c.createGain();
+    env(wg, 0.035, 0.05, 1.6, t + 0.05);
+    w.connect(wg).connect(out);
+    w.start(t);
+    w.stop(t + 1.8);
+  } else if (kind === 'beep') {
+    // the classic BIOS POST beep
+    const o = c.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 880;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.12, t + 0.005);
+    g.gain.setValueAtTime(0.12, t + 0.13);
+    g.gain.linearRampToValueAtTime(0.0001, t + 0.15);
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 3000;
+    o.connect(f).connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.16);
+  } else if (kind === 'tick') {
+    // a disk/relay click
+    const n = c.createBufferSource();
+    n.buffer = noiseBuf(0.03);
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 2500 + Math.random() * 1500;
+    f.Q.value = 2;
+    const g = c.createGain();
+    env(g, 0.35, 0.001, 0.025);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
+  } else if (kind === 'ok') {
+    const o = c.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(1180 + Math.random() * 120, t);
+    const g = c.createGain();
+    env(g, 0.09, 0.004, 0.06);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.08);
+  } else {
+    // power-off: the picture collapses with a falling "zap"
+    const o = c.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.28);
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 2200;
+    const g = c.createGain();
+    env(g, 0.12, 0.005, 0.3);
+    o.connect(f).connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.32);
+  }
+}
+
+/** Is the audio engine running yet (it starts on the first click/keypress). */
+export const audioReady = () => !!ctx;

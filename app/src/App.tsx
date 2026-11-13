@@ -53,8 +53,8 @@ export default function App() {
   return (
     <div className="app">
       <div className="panel topbar">
-        <div className="logo" data-text="NEON PIT">
-          NEON PIT
+        <div className="logo" data-text="HEAT INDEX">
+          HEAT INDEX
         </div>
         <div className="nav">
           {TABS.map(([id, label]) => (
@@ -310,8 +310,8 @@ function Login() {
   const [name, setName] = useState('');
   return (
     <div className="panel login">
-      <div className="logo" data-text="NEON PIT" style={{ fontSize: 40, marginBottom: 8 }}>
-        NEON PIT
+      <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 40, marginBottom: 8 }}>
+        HEAT INDEX
       </div>
       <p className="muted">
         An underground robot arena. Build a team and fight for the title — or play the market: buy robots while they are

@@ -1,5 +1,5 @@
 /* =====================================================================
-   NEON PIT — пиксели, неон и мусор.
+   HEAT INDEX — пиксели, неон и мусор.
    Пиксельные рамки сделаны через box-shadow (уголки остаются «выбитыми»),
    поэтому подсказки и всплывающие окна не обрезаются.
    ===================================================================== */
@@ -453,19 +453,52 @@ details[open] > summary::before {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 12px 16px 18px;
+  padding: 12px 16px 16px;
   margin-bottom: 18px;
 }
-/* Предупредительная лента под верхней панелью */
+/* Неоновая трубка под верхней панелью: светится, по ней медленно бежит блик, изредка «подмигивает» */
 .topbar::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 6px;
-  background: repeating-linear-gradient(-45deg, var(--yellow) 0 8px, #111 8px 16px);
-  opacity: 0.85;
+  left: 10px;
+  right: 10px;
+  bottom: 3px;
+  height: 2px;
+  background:
+    linear-gradient(90deg, transparent, #ffffffcc 50%, transparent) 0 0 / 22% 100% no-repeat,
+    linear-gradient(90deg, var(--cyan), var(--magenta) 50%, var(--cyan));
+  box-shadow:
+    0 0 6px var(--magenta),
+    0 0 14px #00f0ff88;
+  animation:
+    tube-sweep 6s linear infinite,
+    tube-wink 7s steps(1) infinite;
+}
+@keyframes tube-sweep {
+  from {
+    background-position: -30% 0, 0 0;
+  }
+  to {
+    background-position: 130% 0, 0 0;
+  }
+}
+@keyframes tube-wink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  83% {
+    opacity: 0.35;
+  }
+  84% {
+    opacity: 1;
+  }
+  86% {
+    opacity: 0.6;
+  }
+  87% {
+    opacity: 1;
+  }
 }
 .logo {
   position: relative;
@@ -2415,7 +2448,7 @@ html.cy-on input:not([type]) {
 @media (prefers-reduced-motion: reduce) {
   .cy-arrow .gm,
   .cy-arrow .gc,
-  .cy-glitch *,
+  .cy-hit *,
   #cursor-glow i,
   .g-halo::before {
     animation: none !important;
@@ -2623,113 +2656,74 @@ html.cy-on input:not([type]) {
   fill: #39ff141f;
 }
 
-/* ---------- удар клика: «глич сигнала» (ui/fx.ts) ---------- */
-.cy-glitch {
+/* ---------- удар клика: две «стрелы» в стороны (ui/fx.ts) ---------- */
+.cy-hit {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 2147482999;
   pointer-events: none;
 }
-/* срезы-«иглы»: толстые в середине и плавно сходят на нет к концам; сквозь них виден настоящий интерфейс,
-   но со сдвигом цвета, а по центру бежит яркая полоса */
-.cy-glitch .slice {
+.cy-hit .ray {
   position: absolute;
-  clip-path: polygon(0% 50%, 18% 15%, 50% 0%, 82% 15%, 100% 50%, 82% 85%, 50% 100%, 18% 85%);
-  -webkit-backdrop-filter: hue-rotate(var(--h)) saturate(2.4) brightness(1.35) contrast(1.25);
-  backdrop-filter: hue-rotate(var(--h)) saturate(2.4) brightness(1.35) contrast(1.25);
-  background:
-    linear-gradient(90deg, transparent, #ffffff66 50%, transparent) center / 100% 1px no-repeat,
-    linear-gradient(90deg, transparent, color-mix(in srgb, var(--edge) 45%, transparent) 50%, transparent);
-  opacity: 0.92;
-  animation: cy-slice 0.16s steps(1) forwards;
+  top: -2px;
+  height: 4px;
+  width: var(--len);
+  /* игла: толстая у точки клика, острая на конце */
+  background: linear-gradient(90deg, #ffffff 0%, #bff9ff 25%, var(--cyan) 60%, transparent 100%);
+  filter: drop-shadow(0 0 3px var(--cyan)) drop-shadow(0 0 6px #00f0ff88);
+  animation: cy-ray 0.22s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
 }
-@keyframes cy-slice {
+.cy-hit .ray.r {
+  left: 2px;
+  transform-origin: left center;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.cy-hit .ray.l {
+  right: 2px;
+  transform-origin: right center;
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+  background: linear-gradient(270deg, #ffffff 0%, #bff9ff 25%, var(--cyan) 60%, transparent 100%);
+}
+/* розовый след чуть ниже — едва заметное расслоение */
+.cy-hit .ray.trail {
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #ff2a8a99, transparent);
+  filter: none;
+  animation-duration: 0.26s;
+}
+.cy-hit .ray.l.trail {
+  background: linear-gradient(270deg, #ff2a8a99, transparent);
+}
+@keyframes cy-ray {
   0% {
-    transform: translateX(var(--x1));
-  }
-  30% {
-    transform: translateX(var(--x2));
-  }
-  60% {
-    transform: translateX(var(--x3));
-    opacity: 0.7;
-  }
-  85% {
-    transform: translateX(calc(var(--x1) * -1));
-    opacity: 0.35;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-/* RGB-расслоение: голубая и розовая рамки, разъехавшиеся в стороны */
-.cy-glitch .rgb {
-  position: absolute;
-  left: -24px;
-  top: -5px;
-  width: 48px;
-  height: 10px;
-  border: 1px solid;
-  clip-path: polygon(0% 50%, 12% 0%, 88% 0%, 100% 50%, 88% 100%, 12% 100%);
-  animation: cy-rgb 0.13s steps(2) forwards;
-  opacity: 0.7;
-}
-.cy-glitch .rgb.c {
-  border-color: var(--cyan);
-  --dx: -3px;
-}
-.cy-glitch .rgb.m {
-  border-color: var(--magenta);
-  --dx: 3px;
-}
-@keyframes cy-rgb {
-  0% {
-    transform: translateX(var(--dx)) scale(0.8);
-  }
-  50% {
-    transform: translateX(calc(var(--dx) * 2)) scale(1.25);
-    opacity: 0.8;
-  }
-  100% {
-    transform: translateX(calc(var(--dx) * 3)) scale(1.6);
-    opacity: 0;
-  }
-}
-/* «цифровая пыль» */
-.cy-glitch .dust {
-  position: absolute;
-  width: 2px;
-  height: 2px;
-  opacity: 0;
-  animation: cy-dust 0.15s steps(1) forwards;
-}
-@keyframes cy-dust {
-  25% {
+    transform: scaleX(0.15);
     opacity: 1;
   }
-  70% {
-    opacity: 0.6;
-    transform: translateX(3px);
+  45% {
+    transform: scaleX(1);
+    opacity: 1;
   }
   100% {
+    transform: scaleX(1.25) scaleY(0.4);
     opacity: 0;
   }
 }
-/* инверсия ровно в точке удара — на один кадр */
-.cy-glitch .inv {
+.cy-hit .spark {
   position: absolute;
-  left: -7px;
-  top: -3px;
-  width: 14px;
-  height: 6px;
-  -webkit-backdrop-filter: invert(1);
-  backdrop-filter: invert(1);
-  opacity: 0.8;
-  animation: cy-inv 0.06s steps(1) forwards;
+  left: -4px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  filter: drop-shadow(0 0 4px var(--cyan));
+  animation: cy-spark-d 0.14s ease-out forwards;
 }
-@keyframes cy-inv {
+@keyframes cy-spark-d {
   to {
+    transform: scale(0.2);
     opacity: 0;
   }
 }
@@ -2984,4 +2978,33 @@ html.cy-on input:not([type]) {
 /* таблица рынка помещается по ширине — без прокрутки, чтобы подсказки верхних строк не обрезались */
 .market-wrap {
   overflow: visible;
+}
+
+/* дежурный режим телевизора: ждём первого нажатия (нужно и для звука) */
+.standby {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.standby-text {
+  font-family: var(--font-px);
+  font-size: clamp(10px, 1.1vw, 15px);
+  color: #9389b4;
+  letter-spacing: 0.1em;
+}
+.standby-led {
+  position: absolute;
+  right: 5vw;
+  bottom: 5vh;
+  width: 8px;
+  height: 8px;
+  background: #ff3b4e;
+  box-shadow: 0 0 8px #ff3b4e, 0 0 18px #ff3b4e88;
+  animation: led-breathe 2.4s ease-in-out infinite;
+}
+@keyframes led-breathe {
+  50% {
+    opacity: 0.35;
+  }
 }

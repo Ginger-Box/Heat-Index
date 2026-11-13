@@ -217,29 +217,16 @@ export function initFx() {
 }
 
 /**
- * Click impact — a signal glitch.
- * Slices: through them the real interface under the cursor is visible, but color-shifted and overexposed
- * (backdrop-filter); over three frames they jump sideways. Plus an RGB-split frame, a scatter of "digital dust"
- * pixels and a one-frame inverted block at the point of impact. ~0.16 s, frame by frame, in a narrow band.
+ * Click impact — two "arrows": sharp needles shoot left and right from the click point
+ * (white-hot core, cyan glow, tapering to a point), with a faint magenta trail and a tiny diamond flash.
  */
 function glitchHit(x: number, y: number) {
   const box = document.createElement('div');
-  box.className = 'cy-glitch';
+  box.className = 'cy-hit';
   box.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-  const r = (a: number, b: number) => Math.round(a + Math.random() * (b - a));
-  const sign = () => (Math.random() < 0.5 ? -1 : 1);
-  let html = '<b class="inv"></b><b class="rgb c"></b><b class="rgb m"></b>';
-  for (let i = 0; i < 4; i++) {
-    const w = r(70, 170); // wide horizontally…
-    const h = [3, 4, 4, 6][r(0, 3)];
-    const top = r(-8, 5); // …but a narrow band vertically
-    const hue = sign() * r(60, 150);
-    html += `<i class="slice" style="width:${w}px;height:${h}px;top:${top}px;left:${-w / 2 + r(-14, 14)}px;--h:${hue}deg;--x1:${sign() * r(4, 16)}px;--x2:${sign() * r(8, 26)}px;--x3:${sign() * r(2, 10)}px;--edge:${i % 2 ? '#00f0ff' : '#ff2a8a'}"></i>`;
-  }
-  for (let i = 0; i < 10; i++) {
-    html += `<i class="dust" style="left:${r(-60, 60)}px;top:${r(-6, 6)}px;background:${['#ffffff', '#00f0ff', '#ff2a8a', '#ffe600'][i % 4]}"></i>`;
-  }
-  box.innerHTML = html;
+  const len = 46 + Math.round(Math.random() * 22);
+  box.style.setProperty('--len', `${len}px`);
+  box.innerHTML = '<i class="ray l trail"></i><i class="ray r trail"></i><i class="ray l"></i><i class="ray r"></i><b class="spark"></b>';
   document.body.appendChild(box);
-  setTimeout(() => box.remove(), 200);
+  setTimeout(() => box.remove(), 260);
 }
