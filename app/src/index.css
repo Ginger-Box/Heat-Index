@@ -4701,8 +4701,27 @@ button.pick {
   }
 }
 /* hovering a cell lights it up */
-.hud-cell:hover {
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--led) 14%, transparent));
+/* hovering a cell: no background fill (it was cut off by the strip's inner shadow and the dividers) —
+   a neon underline in the cell's colour grows from the middle and the value brightens */
+.hud-cell::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 3px;
+  height: 2px;
+  background: var(--led, var(--cyan));
+  box-shadow: 0 0 8px var(--led, var(--cyan));
+  transform: scaleX(0);
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+  pointer-events: none;
+}
+.hud-cell:hover::after {
+  transform: scaleX(1);
+}
+.hud-cell:hover b {
+  animation: none;
+  filter: brightness(1.35);
 }
 @media (prefers-reduced-motion: reduce) {
   .hud::before,
