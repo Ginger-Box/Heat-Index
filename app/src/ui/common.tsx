@@ -251,8 +251,11 @@ export function LineChart({
   height = 260,
   yLabel,
   labels,
+  highlight,
 }: {
   series: { name: string; color: string; data: number[] }[];
+  /** a series highlighted from outside (e.g. hovering its name in a legend below the chart) */
+  highlight?: string | null;
   height?: number;
   yLabel?: string;
   /** caption for each point (e.g. "day 3 · 14:00") for the tooltip */
@@ -273,7 +276,7 @@ export function LineChart({
   const x = (i: number) => pad.l + (i / Math.max(1, n - 1)) * plotW;
   const y = (v: number) => pad.t + (1 - (v - min) / span) * (height - pad.t - pad.b);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + span * f);
-  const focus = pinned ?? hoverName;
+  const focus = pinned ?? hoverName ?? (highlight && series.some((s) => s.name === highlight) ? highlight : null);
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
