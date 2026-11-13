@@ -1,0 +1,2987 @@
+/* =====================================================================
+   NEON PIT — пиксели, неон и мусор.
+   Пиксельные рамки сделаны через box-shadow (уголки остаются «выбитыми»),
+   поэтому подсказки и всплывающие окна не обрезаются.
+   ===================================================================== */
+:root {
+  --bg: #07060c;
+  --panel: #120f1c;
+  --panel2: #1c1629;
+  --line: #3b3156;
+  --text: #f1ebff;
+  --muted: #9389b4;
+  --cyan: #00f0ff;
+  --magenta: #ff2a8a;
+  --yellow: #ffe600;
+  --green: #39ff14;
+  --red: #ff3b4e;
+  --orange: #ff8a00;
+  --rust: #9a4a1c;
+  --steel: #5d5478;
+  --radius: 0px;
+  --px: 3px; /* размер «пикселя» рамок */
+  --font-px: 'Press Start 2P', monospace;
+  --font: 'Tiny5', monospace; /* пиксельный шрифт с нормальной кириллицей */
+  color-scheme: dark;
+  font-family: var(--font);
+  font-size: 18px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+/* Весь интерфейс масштабируется под размер окна (см. applyUiScale в main.tsx) */
+#root {
+  zoom: var(--ui-scale, 1);
+  position: relative;
+  z-index: 1; /* поверх свечения курсора */
+}
+/* «Ламповое» свечение под курсором — позади панелей (см. ui/fx.ts).
+   Три слоя догоняют курсор с разной скоростью: при движении цвета расходятся, как послесвечение кинескопа. */
+#cursor-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s;
+  mix-blend-mode: screen;
+  /* строки развёртки внутри света */
+  -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 2px, #0007 2px 4px);
+  mask-image: repeating-linear-gradient(to bottom, #000 0 2px, #0007 2px 4px);
+}
+#cursor-glow i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  will-change: transform;
+  /* мерцание — на слоях, а не на контейнере: его прозрачность управляется из JS */
+  animation: tube-flicker 4.3s steps(1) infinite;
+}
+#cursor-glow i::before {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+}
+.g-halo::before {
+  width: 640px;
+  height: 640px;
+  left: -320px;
+  top: -320px;
+  background: radial-gradient(circle, #00f0ff2e 0%, #00f0ff14 35%, transparent 68%);
+  animation: tube-breathe 3.1s ease-in-out infinite;
+}
+.g-bloom::before {
+  width: 320px;
+  height: 320px;
+  left: -160px;
+  top: -160px;
+  background: radial-gradient(circle, #ff2a8a55 0%, #ff2a8a22 40%, transparent 70%);
+}
+.g-core::before {
+  width: 110px;
+  height: 110px;
+  left: -55px;
+  top: -55px;
+  background: radial-gradient(circle, #ffe2c27a 0%, #ff9fd040 45%, transparent 72%);
+}
+#cursor-glow.flare .g-core::before,
+#cursor-glow.flare .g-bloom::before {
+  animation: tube-flare 0.45s ease-out;
+}
+@keyframes tube-breathe {
+  50% {
+    transform: scale(1.08);
+    opacity: 0.85;
+  }
+}
+@keyframes tube-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  31% {
+    opacity: 0.86;
+  }
+  32% {
+    opacity: 1;
+  }
+  67% {
+    opacity: 0.93;
+  }
+  68% {
+    opacity: 0.78;
+  }
+  69% {
+    opacity: 1;
+  }
+}
+@keyframes tube-flare {
+  0% {
+    transform: scale(1.5);
+    filter: brightness(1.8);
+  }
+}
+
+::selection {
+  background: var(--magenta);
+  color: #000;
+}
+
+/* Пиксельная рамка цвета --b: четыре сдвинутые тени без размытия */
+.px-border,
+.panel,
+button,
+input,
+.tag {
+  --b: var(--line);
+  box-shadow:
+    0 calc(-1 * var(--px)) 0 0 var(--b),
+    0 var(--px) 0 0 var(--b),
+    calc(-1 * var(--px)) 0 0 0 var(--b),
+    var(--px) 0 0 0 var(--b);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image:
+    /* сетка неонового пола */
+    linear-gradient(#ff2a8a0d 1px, transparent 1px),
+    linear-gradient(90deg, #00f0ff0a 1px, transparent 1px),
+    /* грязные пятна света */
+    radial-gradient(900px 500px at 8% -10%, #3a0f4a 0%, transparent 60%),
+    radial-gradient(800px 500px at 105% 0%, #06323d 0%, transparent 60%),
+    radial-gradient(700px 400px at 50% 120%, #3d1c06 0%, transparent 60%);
+  background-size: 24px 24px, 24px 24px, auto, auto, auto;
+  background-attachment: fixed;
+}
+/* ЭЛТ-развёртка и шум поверх всего экрана */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 2px, #0000002e 2px 3px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  background: radial-gradient(ellipse at center, transparent 55%, #000000a0 100%);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  margin: 0 0 14px;
+}
+/* Заголовок панели — наклейка на скотче */
+h2 {
+  display: inline-block;
+  font-size: 13px;
+  color: #0b0910;
+  background: var(--yellow);
+  padding: 7px 10px 6px;
+  transform: rotate(-1deg);
+  box-shadow: 4px 4px 0 #000;
+  text-shadow: none;
+}
+h2 .muted {
+  color: #3d3500;
+}
+h3 {
+  font-size: 11px;
+  color: var(--cyan);
+  text-shadow: 0 0 6px #00f0ff99;
+}
+h3::before {
+  content: '▮ ';
+  color: var(--magenta);
+}
+code {
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--green);
+}
+
+button {
+  --b: var(--steel);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
+  background-color: var(--panel2);
+  border: none;
+  border-radius: 0;
+  margin: var(--px);
+  padding: 6px 12px;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  position: relative;
+  isolation: isolate;
+  transition: filter 0.1s;
+}
+button:hover:not(:disabled) {
+  --b: var(--cyan);
+  color: var(--cyan);
+  filter: drop-shadow(0 0 6px #00f0ff88);
+  /* снизу кнопку «подсвечивает» дизерингом, как пиксели старого экрана */
+  background-image: var(--dither-btn);
+  background-position: left bottom;
+  background-size: 4px 14px;
+  background-repeat: repeat-x;
+}
+/* Нажатие: кнопка не уходит вглубь, а вспыхивает — экран засвечивается шахматным дизерингом
+   и медленно гаснет, как люминофор ЭЛТ-трубки после засветки. */
+button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  background-image: conic-gradient(currentColor 25%, transparent 0 50%, currentColor 0 75%, transparent 0);
+  background-size: 4px 4px;
+  transition: opacity 0.45s steps(5);
+}
+button:active:not(:disabled)::after {
+  opacity: 0.45;
+  transition: none;
+}
+button:active:not(:disabled) {
+  filter: brightness(1.5) drop-shadow(0 0 12px currentColor);
+}
+button:disabled {
+  opacity: 0.35;
+  cursor: var(--cur-arrow);
+  --ck: default;
+}
+button.primary {
+  --b: #000;
+  background-color: var(--magenta);
+  color: #0b0910;
+  font-weight: 400;
+  text-shadow: none;
+  box-shadow:
+    0 calc(-1 * var(--px)) 0 0 var(--b),
+    0 var(--px) 0 0 var(--b),
+    calc(-1 * var(--px)) 0 0 0 var(--b),
+    var(--px) 0 0 0 var(--b),
+    5px 5px 0 0 #00f0ff66;
+}
+button.primary:hover:not(:disabled) {
+  --b: #000;
+  color: #0b0910;
+  background-color: #ff5aa5;
+  background-image: none;
+  filter: drop-shadow(0 0 10px #ff2a8aaa);
+}
+button.primary::after {
+  color: #ffffff;
+}
+button.danger {
+  --b: #ff3b4e88;
+  color: var(--red);
+}
+button.small {
+  padding: 2px 8px;
+  font-size: 14px;
+}
+input {
+  --b: var(--steel);
+  font: inherit;
+  color: var(--green);
+  background: #050409;
+  border: none;
+  border-radius: 0;
+  padding: 9px 11px;
+  margin: var(--px);
+}
+input:focus {
+  --b: var(--green);
+  outline: none;
+}
+input::placeholder {
+  color: #4f6b45;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px dashed #2d2544;
+}
+/* Широкие таблицы (рынок) прокручиваются вбок, а не ломают цифры */
+table.nowrap th,
+table.nowrap td {
+  white-space: nowrap;
+}
+tbody tr:hover td {
+  background: #ff2a8a0f;
+}
+th {
+  font-family: var(--font-px);
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 9px;
+  text-transform: uppercase;
+  border-bottom: 3px solid var(--line);
+}
+
+/* Панель — лист железа на заклёпках */
+.panel {
+  --b: var(--line);
+  position: relative;
+  /* панели полупрозрачные: сквозь них видно сетку пола и свечение под курсором */
+  background-color: #120f1cc7;
+  /* сверху — розовая дымка дизерингом, по всей панели — мелкая точка */
+  background-image: var(--dither-panel), radial-gradient(#ffffff07 1px, transparent 1px);
+  background-size: 4px 28px, 4px 4px;
+  background-repeat: repeat-x, repeat;
+  border: none;
+  border-radius: 0;
+  margin: var(--px);
+  padding: 18px;
+  box-shadow:
+    0 calc(-1 * var(--px)) 0 0 var(--b),
+    0 var(--px) 0 0 var(--b),
+    calc(-1 * var(--px)) 0 0 0 var(--b),
+    var(--px) 0 0 0 var(--b),
+    8px 8px 0 0 #000000aa;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--steel), var(--steel)) top left / 4px 4px no-repeat,
+    linear-gradient(var(--steel), var(--steel)) top right / 4px 4px no-repeat,
+    linear-gradient(var(--steel), var(--steel)) bottom left / 4px 4px no-repeat,
+    linear-gradient(var(--steel), var(--steel)) bottom right / 4px 4px no-repeat;
+}
+.muted {
+  color: var(--muted);
+}
+.up {
+  color: var(--green);
+}
+.down {
+  color: var(--red);
+}
+.cr {
+  color: var(--yellow);
+  font-weight: 700;
+  text-shadow: 0 0 6px #ffe60066;
+}
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.grid {
+  display: grid;
+  gap: 18px;
+}
+.error {
+  color: var(--red);
+  font-weight: 600;
+}
+.error::before {
+  content: '⚠ ';
+}
+.tag {
+  --b: var(--line);
+  display: inline-block;
+  padding: 0 6px;
+  margin: var(--px);
+  border: none;
+  border-radius: 0;
+  font-size: 13px;
+  color: var(--muted);
+  background: #0b0912;
+}
+details > summary {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  color: var(--muted);
+  font-family: var(--font-px);
+  font-size: 10px;
+  list-style: none;
+}
+details > summary::before {
+  content: '▶ ';
+  color: var(--magenta);
+}
+details[open] > summary::before {
+  content: '▼ ';
+}
+
+/* Пиксельные полосы прокрутки */
+* {
+  scrollbar-color: var(--magenta) #0b0912;
+  scrollbar-width: thin;
+}
+
+/* ---------- каркас ---------- */
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 14px 16px 40px;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px 18px;
+  margin-bottom: 18px;
+}
+/* Предупредительная лента под верхней панелью */
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--yellow) 0 8px, #111 8px 16px);
+  opacity: 0.85;
+}
+.logo {
+  position: relative;
+  font-family: var(--font-px);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  color: var(--magenta);
+  text-shadow:
+    -2px 0 0 var(--cyan),
+    2px 0 0 #ff000088,
+    0 0 12px #ff2a8a;
+  animation: flicker 6s infinite steps(1);
+}
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  91% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 0.35;
+  }
+  93% {
+    opacity: 1;
+  }
+  95% {
+    opacity: 0.6;
+  }
+  96% {
+    opacity: 1;
+  }
+}
+.nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.nav button {
+  font-family: var(--font-px);
+  font-size: 10px;
+  padding: 8px 10px;
+}
+.nav button.active {
+  --b: var(--cyan);
+  color: #0b0910;
+  background-color: var(--cyan);
+  background-image: none;
+  /* сначала разгорается, потом мягко «дышит» цветом, как неоновая трубка */
+  animation:
+    tab-ignite 0.5s steps(5),
+    tab-breathe 2.4s ease-in-out 0.5s infinite;
+}
+.nav button.active::after {
+  color: #ffffff;
+  animation: tab-dither 2.4s ease-in-out 0.5s infinite;
+}
+@keyframes tab-ignite {
+  0% { background-color: #0b3a40; filter: brightness(0.6); }
+  40% { background-color: #7ff8ff; filter: brightness(1.6) drop-shadow(0 0 14px var(--cyan)); }
+  60% { background-color: #0e6a75; }
+  100% { background-color: var(--cyan); filter: drop-shadow(0 0 8px #00f0ff88); }
+}
+@keyframes tab-breathe {
+  0%, 100% {
+    background-color: var(--cyan);
+    filter: drop-shadow(0 0 6px #00f0ff77);
+  }
+  50% {
+    background-color: #6af6ff;
+    filter: drop-shadow(0 0 14px #00f0ffcc) drop-shadow(0 0 3px #ff2a8a66);
+  }
+}
+/* лёгкая шахматная «рябь» поверх активной вкладки на пике свечения */
+@keyframes tab-dither {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.18; }
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.stat b {
+  font-family: var(--font-px);
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--green);
+  text-shadow: 0 0 6px #39ff1466;
+}
+.stat > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.layout > *,
+.grid > * {
+  min-width: 0;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+/* Лента города — терминал */
+.feed {
+  max-height: calc(var(--app-h, 100vh) * 0.7);
+  overflow: auto;
+  font-size: 15px;
+  color: #b9f5a8;
+}
+.feed div {
+  padding: 5px 0;
+  border-bottom: 1px dashed #2d2544;
+}
+.feed div::before {
+  content: '> ';
+  color: var(--green);
+}
+
+/* ---------- карточка робота ---------- */
+.card {
+  position: relative;
+  width: 132px;
+  min-height: 178px;
+  border-radius: 10px;
+  padding: 8px;
+  background: linear-gradient(160deg, var(--panel2), #0c0e1e);
+  border: 2px solid var(--c, var(--line));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--c) 35%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  user-select: none;
+  cursor: default;
+}
+.card.clickable {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.card.clickable:hover {
+  transform: translateY(-3px);
+}
+.card.selected {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+.card.broken > :not(.cardtip) {
+  filter: grayscale(1) brightness(0.6);
+}
+.card.dim > :not(.cardtip) {
+  opacity: 0.4;
+}
+.card .cardtip {
+  position: absolute;
+  z-index: 60;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  width: 240px;
+  padding: 10px 12px;
+  background: #050409;
+  border: 3px solid var(--c, var(--cyan));
+  box-shadow: 6px 6px 0 #000;
+  font-size: 15px;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), 6px);
+  transition: opacity 0.15s, transform 0.15s;
+  transition-delay: 0s;
+}
+.card:hover .cardtip {
+  opacity: 1;
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), 0);
+  transition-delay: 0.2s;
+}
+/* места сверху нет — подсказка снизу карты */
+.card.tip-below .cardtip {
+  bottom: auto;
+  top: calc(100% + 10px);
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), -6px);
+}
+.card.tip-below:hover .cardtip {
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), 0);
+}
+.cardtip .tt-name {
+  font-family: var(--font-px);
+  font-size: 11px;
+  font-weight: 400;
+  margin-bottom: 4px;
+}
+.cardtip .tt-stats {
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+.card .cost {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  background: var(--c);
+  color: #050510;
+}
+.card .art {
+  height: 62px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  background:
+    repeating-linear-gradient(45deg, #ffffff08 0 6px, transparent 6px 12px),
+    color-mix(in srgb, var(--c) 18%, #0a0c1a);
+}
+.card .name {
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+}
+.card .ability {
+  font-size: 12px;
+  text-align: center;
+  color: var(--cyan);
+  min-height: 16px;
+}
+.card .stats {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 800;
+  font-size: 16px;
+  margin-top: auto;
+}
+.card .atk {
+  color: var(--orange);
+}
+.card .hp {
+  color: var(--green);
+}
+.dur {
+  height: 5px;
+  border-radius: 3px;
+  background: #ffffff18;
+  overflow: hidden;
+}
+.dur i {
+  display: block;
+  height: 100%;
+}
+
+/* ---------- арена ---------- */
+.board {
+  display: grid;
+  gap: 10px;
+}
+.side-row {
+  display: grid;
+  grid-template-columns: 140px repeat(3, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.lane {
+  min-height: 196px;
+  border: 2px dashed #34294e;
+  display: grid;
+  place-items: center;
+  position: relative;
+  background:
+    var(--dither-lane) left bottom / 4px 40px repeat-x,
+    repeating-linear-gradient(-45deg, #ffffff05 0 6px, transparent 6px 12px),
+    #0a0812;
+}
+.lane.target {
+  border: 2px solid var(--yellow);
+  background:
+    repeating-linear-gradient(-45deg, #ffe60014 0 8px, transparent 8px 16px),
+    #0a0812;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.lane .hpbar {
+  position: absolute;
+  bottom: 4px;
+  left: 8px;
+  right: 8px;
+}
+.core {
+  text-align: center;
+  padding: 12px 8px;
+  border: 3px solid var(--line);
+  background: var(--dither-core) left bottom / 4px 24px repeat-x, #07060c;
+  box-shadow: 5px 5px 0 #000;
+}
+.core b {
+  font-family: var(--font-px);
+  font-weight: 400;
+  font-size: 22px;
+  display: block;
+  margin: 6px 0 2px;
+  text-shadow: 0 0 10px currentColor;
+}
+.hand {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+.round-log {
+  font-size: 15px;
+  max-height: 220px;
+  overflow: auto;
+}
+.flash {
+  animation: flash 0.6s ease-out;
+}
+@keyframes flash {
+  from {
+    box-shadow: 0 0 0 3px var(--red);
+  }
+}
+
+/* ---------- графики и подсказки ---------- */
+.tip {
+  position: relative;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  border-bottom: 1px dotted var(--muted);
+}
+.tip .tipbox {
+  display: none;
+  position: absolute;
+  z-index: 50;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 290px;
+  padding: 10px 12px;
+  background: #050409;
+  border: 3px solid var(--cyan);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text);
+  font-weight: 400;
+  box-shadow: 6px 6px 0 #000;
+}
+.tip:hover .tipbox {
+  display: block;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(to bottom, #04030ae6 0 2px, #0a0414e6 2px 4px);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.overlay .panel {
+  width: min(1100px, 100%);
+  max-height: calc(var(--app-h, 100vh) * 0.94);
+  overflow: auto;
+}
+.progress {
+  height: 14px;
+  padding: 2px;
+  background: #050409;
+  border: 2px solid var(--line);
+}
+/* Полоса из отдельных «пикселей» */
+.progress i {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(90deg, var(--green) 0 8px, transparent 8px 10px);
+  filter: drop-shadow(0 0 4px #39ff1488);
+}
+.login {
+  max-width: 520px;
+  margin: calc(var(--app-h, 100vh) * 0.12) auto;
+  text-align: center;
+}
+.login .logo {
+  font-size: 34px !important;
+  line-height: 1.3;
+}
+
+/* ---------- анимации боя ---------- */
+.battle-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.caption {
+  flex: 1;
+  min-width: 200px;
+  text-align: center;
+  font-family: var(--font-px);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--yellow);
+  text-shadow: 0 0 8px #ffe60088;
+  min-height: 24px;
+}
+.pips {
+  letter-spacing: 1px;
+  font-size: 18px;
+  filter: drop-shadow(0 0 4px #ffe60088);
+}
+.pips .off {
+  opacity: 0.2;
+}
+.slot {
+  position: relative;
+}
+.core {
+  position: relative;
+  transition: box-shadow 0.2s;
+}
+.core .bar {
+  height: 8px;
+  background: #ffffff14;
+  margin-top: 6px;
+}
+.core .bar i {
+  display: block;
+  height: 100%;
+  transition: width 0.4s;
+}
+.float {
+  position: absolute;
+  left: 50%;
+  top: 35%;
+  z-index: 20;
+  font-family: var(--font-px);
+  font-weight: 400;
+  font-size: 20px;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 0 8px #000, 0 0 2px #000;
+  animation: floatUp 1.1s ease-out forwards;
+}
+.float.dmg {
+  color: var(--red);
+}
+.float.heal {
+  color: var(--green);
+}
+.float.block {
+  color: #c9d6ff;
+  font-size: 12px;
+}
+@keyframes floatUp {
+  0% {
+    transform: translate(-50%, 10px) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(-50%, 0) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50px) scale(1);
+    opacity: 0;
+  }
+}
+.lane.fx-lunge-up .slot {
+  animation: lungeUp 0.55s ease-in-out;
+}
+.lane.fx-lunge-down .slot {
+  animation: lungeDown 0.55s ease-in-out;
+}
+@keyframes lungeUp {
+  45% {
+    transform: translateY(-48px) scale(1.06);
+  }
+}
+@keyframes lungeDown {
+  45% {
+    transform: translateY(48px) scale(1.06);
+  }
+}
+.lane.fx-hurt .card,
+.core.fx-hurt {
+  animation: hurt 0.5s 0.22s ease-out;
+}
+@keyframes hurt {
+  0%,
+  100% {
+    transform: none;
+  }
+  15% {
+    transform: translateX(-7px);
+    box-shadow: 0 0 24px var(--red);
+    filter: brightness(1.8) saturate(0.4);
+  }
+  35% {
+    transform: translateX(7px);
+  }
+  55% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+.lane.fx-heal .card,
+.core.fx-heal {
+  animation: heal 0.9s ease-out;
+}
+@keyframes heal {
+  30% {
+    box-shadow: 0 0 28px var(--green);
+    filter: brightness(1.3);
+  }
+}
+.lane.fx-pop .slot {
+  animation: pop 0.45s ease-out;
+}
+@keyframes pop {
+  from {
+    transform: scale(0.5) translateY(20px);
+    opacity: 0;
+  }
+}
+.lane.fx-dying .card {
+  animation: dying 0.75s ease-in forwards;
+}
+@keyframes dying {
+  30% {
+    filter: brightness(2.5);
+    transform: scale(1.08) rotate(-3deg);
+  }
+  100% {
+    filter: brightness(0.3) grayscale(1);
+    transform: scale(0.4) rotate(12deg);
+    opacity: 0;
+  }
+}
+.lane.fx-blast {
+  animation: blast 0.8s ease-out;
+}
+@keyframes blast {
+  20% {
+    background: #ff9f2b55;
+    box-shadow: 0 0 40px var(--orange);
+  }
+}
+.lane.pickable,
+.core.pickable {
+  border: 3px solid var(--green);
+  box-shadow: 0 0 18px #3bff9a55;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.lane.pickable::after,
+.core.pickable::after {
+  content: '🔧 here';
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 700;
+  text-shadow: 0 0 6px #39ff14;
+}
+.core.pickable::after {
+  top: auto;
+  bottom: -22px;
+  right: 50%;
+  transform: translateX(50%);
+  white-space: nowrap;
+}
+.layout.focus {
+  grid-template-columns: 1fr;
+}
+
+/* ---------- ангар ---------- */
+.slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 14px 0 8px;
+}
+.slot-cell {
+  min-height: 214px;
+  border: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 4px;
+  background: #ffffff04;
+  transition: 0.15s;
+}
+.slot-cell.empty {
+  border-style: dashed;
+  background: repeating-linear-gradient(-45deg, #ffffff05 0 6px, transparent 6px 12px);
+}
+.slot-cell.over,
+.pool-over {
+  border-color: var(--yellow);
+  background: #f7f33b12;
+}
+.pool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.lane.fx-zap .slot {
+  animation: zap 0.7s ease-out;
+}
+@keyframes zap {
+  20% {
+    filter: brightness(2) drop-shadow(0 0 14px #a6c8ff);
+    transform: scale(1.06);
+  }
+}
+.lane.fx-stunned .card {
+  filter: saturate(0.3) brightness(0.75);
+  outline: 2px dashed #a6c8ff;
+  outline-offset: 2px;
+}
+
+/* Логотип: изредка «рвётся» — две копии текста сдвигаются полосками */
+.logo::before,
+.logo::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  pointer-events: none;
+  opacity: 0;
+}
+.logo::before {
+  color: var(--cyan);
+  text-shadow: none;
+  animation: logo-tear-a 4.7s infinite steps(1);
+}
+.logo::after {
+  color: var(--yellow);
+  text-shadow: none;
+  animation: logo-tear-b 4.7s infinite steps(1);
+}
+@keyframes logo-tear-a {
+  0%, 86%, 100% { opacity: 0; }
+  87% { opacity: 1; clip-path: inset(10% 0 62% 0); transform: translateX(-5px); }
+  89% { opacity: 1; clip-path: inset(55% 0 18% 0); transform: translateX(4px); }
+  91% { opacity: 1; clip-path: inset(30% 0 45% 0); transform: translateX(-2px); }
+  92% { opacity: 0; }
+}
+@keyframes logo-tear-b {
+  0%, 87%, 100% { opacity: 0; }
+  88% { opacity: 0.9; clip-path: inset(68% 0 6% 0); transform: translateX(6px); }
+  90% { opacity: 0.9; clip-path: inset(20% 0 66% 0); transform: translateX(-4px); }
+  91% { opacity: 0; }
+}
+
+/* ---------- глитч при смене значения ---------- */
+.glitch {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+/* Место занимает новое значение (невидимое), шум лежит поверх и на вёрстку не влияет */
+.glitch .g-size {
+  visibility: hidden;
+}
+.glitch .g-live,
+.glitch.on::before,
+.glitch.on::after {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.glitch.on .g-live {
+  animation: glitch-flash 0.3s linear;
+}
+.glitch.on::before,
+.glitch.on::after {
+  content: attr(data-text);
+  text-shadow: none;
+  opacity: 0.85;
+}
+.glitch.on::before {
+  color: var(--cyan);
+  animation: glitch-slice-a 0.3s steps(4) infinite;
+}
+.glitch.on::after {
+  color: var(--magenta);
+  animation: glitch-slice-b 0.3s steps(4) infinite;
+}
+@keyframes glitch-flash {
+  0% { filter: brightness(2.2); }
+  100% { filter: brightness(1); }
+}
+@keyframes glitch-slice-a {
+  0% { clip-path: inset(0 0 60% 0); transform: translateX(-2px); }
+  25% { clip-path: inset(45% 0 20% 0); transform: translateX(2px); }
+  50% { clip-path: inset(70% 0 0 0); transform: translateX(-1px); }
+  75% { clip-path: inset(20% 0 55% 0); transform: translateX(1px); }
+}
+@keyframes glitch-slice-b {
+  0% { clip-path: inset(55% 0 10% 0); transform: translateX(2px); }
+  25% { clip-path: inset(0 0 70% 0); transform: translateX(-2px); }
+  50% { clip-path: inset(25% 0 45% 0); transform: translateX(1px); }
+  75% { clip-path: inset(65% 0 5% 0); transform: translateX(-1px); }
+}
+/* Если человек просит меньше движения — без тряски и мерцания */
+@media (prefers-reduced-motion: reduce) {
+  .glitch.on .g-live,
+  .glitch.on::before,
+  .glitch.on::after,
+  .logo,
+  .logo::before,
+  .logo::after,
+  .nav button.active,
+  .nav button.active::after {
+    animation: none !important;
+  }
+}
+
+/* ---------- дизеринг (Bayer 4×4, сгенерировано скриптом) ---------- */
+:root {
+  --dither-panel: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='28' shape-rendering='crispEdges'><g fill='%23ff2a8a33'><rect x='0' y='0' width='1' height='1'/><rect x='1' y='0' width='1' height='1'/><rect x='2' y='0' width='1' height='1'/><rect x='3' y='0' width='1' height='1'/><rect x='1' y='1' width='1' height='1'/><rect x='3' y='1' width='1' height='1'/><rect x='0' y='2' width='1' height='1'/><rect x='1' y='2' width='1' height='1'/><rect x='2' y='2' width='1' height='1'/><rect x='3' y='2' width='1' height='1'/><rect x='1' y='3' width='1' height='1'/><rect x='3' y='3' width='1' height='1'/><rect x='0' y='4' width='1' height='1'/><rect x='1' y='4' width='1' height='1'/><rect x='2' y='4' width='1' height='1'/><rect x='3' y='4' width='1' height='1'/><rect x='1' y='5' width='1' height='1'/><rect x='3' y='5' width='1' height='1'/><rect x='0' y='6' width='1' height='1'/><rect x='2' y='6' width='1' height='1'/><rect x='3' y='6' width='1' height='1'/><rect x='1' y='7' width='1' height='1'/><rect x='3' y='7' width='1' height='1'/><rect x='0' y='8' width='1' height='1'/><rect x='1' y='8' width='1' height='1'/><rect x='2' y='8' width='1' height='1'/><rect x='1' y='9' width='1' height='1'/><rect x='3' y='9' width='1' height='1'/><rect x='0' y='10' width='1' height='1'/><rect x='2' y='10' width='1' height='1'/><rect x='1' y='11' width='1' height='1'/><rect x='3' y='11' width='1' height='1'/><rect x='0' y='12' width='1' height='1'/><rect x='2' y='12' width='1' height='1'/><rect x='1' y='13' width='1' height='1'/><rect x='3' y='13' width='1' height='1'/><rect x='0' y='14' width='1' height='1'/><rect x='2' y='14' width='1' height='1'/><rect x='3' y='15' width='1' height='1'/><rect x='0' y='16' width='1' height='1'/><rect x='2' y='16' width='1' height='1'/><rect x='1' y='17' width='1' height='1'/><rect x='0' y='18' width='1' height='1'/><rect x='2' y='18' width='1' height='1'/><rect x='0' y='20' width='1' height='1'/><rect x='2' y='20' width='1' height='1'/><rect x='2' y='22' width='1' height='1'/><rect x='0' y='24' width='1' height='1'/></g></svg>");
+  --dither-lane: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='40' shape-rendering='crispEdges'><g fill='%2300f0ff1f'><rect x='0' y='4' width='1' height='1'/><rect x='2' y='6' width='1' height='1'/><rect x='0' y='8' width='1' height='1'/><rect x='2' y='8' width='1' height='1'/><rect x='2' y='10' width='1' height='1'/><rect x='0' y='12' width='1' height='1'/><rect x='2' y='12' width='1' height='1'/><rect x='0' y='14' width='1' height='1'/><rect x='2' y='14' width='1' height='1'/><rect x='0' y='16' width='1' height='1'/><rect x='2' y='16' width='1' height='1'/><rect x='1' y='17' width='1' height='1'/><rect x='0' y='18' width='1' height='1'/><rect x='2' y='18' width='1' height='1'/><rect x='3' y='19' width='1' height='1'/><rect x='0' y='20' width='1' height='1'/><rect x='2' y='20' width='1' height='1'/><rect x='1' y='21' width='1' height='1'/><rect x='3' y='21' width='1' height='1'/><rect x='0' y='22' width='1' height='1'/><rect x='2' y='22' width='1' height='1'/><rect x='3' y='23' width='1' height='1'/><rect x='0' y='24' width='1' height='1'/><rect x='2' y='24' width='1' height='1'/><rect x='1' y='25' width='1' height='1'/><rect x='3' y='25' width='1' height='1'/><rect x='0' y='26' width='1' height='1'/><rect x='2' y='26' width='1' height='1'/><rect x='1' y='27' width='1' height='1'/><rect x='3' y='27' width='1' height='1'/><rect x='0' y='28' width='1' height='1'/><rect x='1' y='28' width='1' height='1'/><rect x='2' y='28' width='1' height='1'/><rect x='1' y='29' width='1' height='1'/><rect x='3' y='29' width='1' height='1'/><rect x='0' y='30' width='1' height='1'/><rect x='2' y='30' width='1' height='1'/><rect x='3' y='30' width='1' height='1'/><rect x='1' y='31' width='1' height='1'/><rect x='3' y='31' width='1' height='1'/><rect x='0' y='32' width='1' height='1'/><rect x='1' y='32' width='1' height='1'/><rect x='2' y='32' width='1' height='1'/><rect x='1' y='33' width='1' height='1'/><rect x='3' y='33' width='1' height='1'/><rect x='0' y='34' width='1' height='1'/><rect x='2' y='34' width='1' height='1'/><rect x='3' y='34' width='1' height='1'/><rect x='1' y='35' width='1' height='1'/><rect x='3' y='35' width='1' height='1'/><rect x='0' y='36' width='1' height='1'/><rect x='1' y='36' width='1' height='1'/><rect x='2' y='36' width='1' height='1'/><rect x='3' y='36' width='1' height='1'/><rect x='1' y='37' width='1' height='1'/><rect x='3' y='37' width='1' height='1'/><rect x='0' y='38' width='1' height='1'/><rect x='1' y='38' width='1' height='1'/><rect x='2' y='38' width='1' height='1'/><rect x='3' y='38' width='1' height='1'/><rect x='1' y='39' width='1' height='1'/><rect x='3' y='39' width='1' height='1'/></g></svg>");
+  --dither-btn: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='14' shape-rendering='crispEdges'><g fill='%2300f0ff55'><rect x='2' y='2' width='1' height='1'/><rect x='0' y='4' width='1' height='1'/><rect x='2' y='4' width='1' height='1'/><rect x='1' y='5' width='1' height='1'/><rect x='0' y='6' width='1' height='1'/><rect x='2' y='6' width='1' height='1'/><rect x='3' y='7' width='1' height='1'/><rect x='0' y='8' width='1' height='1'/><rect x='2' y='8' width='1' height='1'/><rect x='1' y='9' width='1' height='1'/><rect x='3' y='9' width='1' height='1'/><rect x='0' y='10' width='1' height='1'/><rect x='2' y='10' width='1' height='1'/><rect x='3' y='10' width='1' height='1'/><rect x='1' y='11' width='1' height='1'/><rect x='3' y='11' width='1' height='1'/><rect x='0' y='12' width='1' height='1'/><rect x='1' y='12' width='1' height='1'/><rect x='2' y='12' width='1' height='1'/><rect x='3' y='12' width='1' height='1'/><rect x='0' y='13' width='1' height='1'/><rect x='1' y='13' width='1' height='1'/><rect x='3' y='13' width='1' height='1'/></g></svg>");
+  --dither-core: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='24' shape-rendering='crispEdges'><g fill='%23ffffff14'><rect x='0' y='4' width='1' height='1'/><rect x='0' y='6' width='1' height='1'/><rect x='2' y='6' width='1' height='1'/><rect x='0' y='8' width='1' height='1'/><rect x='2' y='8' width='1' height='1'/><rect x='1' y='9' width='1' height='1'/><rect x='0' y='10' width='1' height='1'/><rect x='2' y='10' width='1' height='1'/><rect x='3' y='11' width='1' height='1'/><rect x='0' y='12' width='1' height='1'/><rect x='2' y='12' width='1' height='1'/><rect x='1' y='13' width='1' height='1'/><rect x='3' y='13' width='1' height='1'/><rect x='0' y='14' width='1' height='1'/><rect x='2' y='14' width='1' height='1'/><rect x='1' y='15' width='1' height='1'/><rect x='3' y='15' width='1' height='1'/><rect x='0' y='16' width='1' height='1'/><rect x='1' y='16' width='1' height='1'/><rect x='2' y='16' width='1' height='1'/><rect x='1' y='17' width='1' height='1'/><rect x='3' y='17' width='1' height='1'/><rect x='0' y='18' width='1' height='1'/><rect x='2' y='18' width='1' height='1'/><rect x='3' y='18' width='1' height='1'/><rect x='1' y='19' width='1' height='1'/><rect x='3' y='19' width='1' height='1'/><rect x='0' y='20' width='1' height='1'/><rect x='1' y='20' width='1' height='1'/><rect x='2' y='20' width='1' height='1'/><rect x='3' y='20' width='1' height='1'/><rect x='0' y='21' width='1' height='1'/><rect x='1' y='21' width='1' height='1'/><rect x='3' y='21' width='1' height='1'/><rect x='0' y='22' width='1' height='1'/><rect x='1' y='22' width='1' height='1'/><rect x='2' y='22' width='1' height='1'/><rect x='3' y='22' width='1' height='1'/><rect x='1' y='23' width='1' height='1'/><rect x='2' y='23' width='1' height='1'/><rect x='3' y='23' width='1' height='1'/></g></svg>");
+}
+
+/* ---------- громкость ---------- */
+.sound-ctl {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Пиксельный ползунок: дорожка с дизерингом, заполненная часть — неон, ручка — квадрат */
+.sound-ctl input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 96px;
+  height: 14px;
+  margin: 0 6px;
+  padding: 0;
+  box-shadow: none;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  background:
+    linear-gradient(90deg, var(--magenta) var(--fill, 70%), transparent var(--fill, 70%)) center / 100% 6px no-repeat,
+    conic-gradient(#3b3156 25%, transparent 0 50%, #3b3156 0 75%, transparent 0) center / 4px 4px;
+  background-clip: content-box, content-box;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  filter: drop-shadow(0 0 4px #ff2a8a66);
+}
+.sound-ctl input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 14px;
+  background: var(--cyan);
+  border: 2px solid #000;
+  box-shadow: 0 0 6px var(--cyan);
+}
+.sound-ctl input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  border-radius: 0;
+  background: var(--cyan);
+  border: 2px solid #000;
+  box-shadow: 0 0 6px var(--cyan);
+}
+.sound-ctl input[type='range']:focus-visible {
+  outline: 2px dashed var(--cyan);
+  outline-offset: 3px;
+}
+
+/* ---------- перетаскивание карт ---------- */
+.slots,
+.pool-item,
+.hand,
+.drag-handle {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drag-handle.can-drag {
+  cursor: var(--cur-grab);
+  --ck: grab;
+  touch-action: none; /* на тачскрине палец тащит карту, а не страницу */
+}
+.drag-handle .card {
+  transition: transform 0.18s ease-out, filter 0.18s, opacity 0.18s;
+}
+.drag-handle.can-drag:hover .card {
+  transform: translateY(-5px);
+  filter: drop-shadow(0 8px 0 #0008);
+}
+body.is-dragging,
+body.is-dragging * {
+  cursor: var(--cur-grabbing) !important;
+  --ck: grabbing;
+  user-select: none !important;
+}
+/* во время перетаскивания подсказки не всплывают и ничего не прыгает */
+body.is-dragging .cardtip {
+  display: none;
+}
+body.is-dragging .drag-handle .card {
+  transform: none;
+}
+/* место, откуда взяли карту: пустой «отпечаток» */
+.drag-src .card {
+  opacity: 0.22;
+  filter: grayscale(1) brightness(0.7);
+  outline: 2px dashed var(--muted);
+  outline-offset: 2px;
+}
+/* сама поднятая карта */
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 500;
+  pointer-events: none;
+  will-change: transform;
+}
+.drag-ghost .card {
+  transform: scale(1.08);
+  filter: drop-shadow(0 22px 14px #000c) drop-shadow(0 0 12px var(--c, var(--cyan)));
+  animation: lift 0.16s ease-out;
+  transition:
+    transform 0.13s ease-out,
+    filter 0.13s ease-out;
+}
+@keyframes lift {
+  from {
+    transform: scale(1);
+    filter: none;
+  }
+}
+/* на подлёте к месту карта «опускается» обратно в обычный размер */
+.drag-ghost.settling .card {
+  transform: scale(1);
+  filter: drop-shadow(0 4px 4px #0008);
+}
+/* куда можно положить */
+body.is-dragging [data-drop^='slot-'] {
+  border-color: #6b5a99;
+}
+.slot-cell.over,
+.pool-over {
+  border-color: var(--cyan) !important;
+  background:
+    var(--dither-lane) left bottom / 4px 40px repeat-x,
+    #00f0ff12 !important;
+  box-shadow: 0 0 18px #00f0ff55, inset 0 0 18px #00f0ff22;
+}
+.slot-cell.over.empty::before {
+  content: '+';
+  font-family: var(--font-px);
+  font-size: 22px;
+  color: var(--cyan);
+  text-shadow: 0 0 10px var(--cyan);
+}
+.slot-cell.over.empty > span {
+  display: none;
+}
+/* приземление: карта падает с отскоком, вспышка и ударная волна */
+.just-landed {
+  position: relative;
+}
+.just-landed .card {
+  animation: land 0.32s ease-out;
+}
+.just-landed::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--cyan);
+  pointer-events: none;
+  animation: shockwave 0.4s ease-out forwards;
+}
+/* мягкая посадка: лёгкое «проседание» и короткая подсветка */
+@keyframes land {
+  0% {
+    transform: scale(1);
+    filter: brightness(1.35);
+  }
+  40% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes shockwave {
+  from {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+/* отказ (не влезает в лимит и т. п.): карта мотает «нет» */
+.deny .card {
+  animation: deny 0.4s ease-out;
+}
+@keyframes deny {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateX(-4px);
+    filter: drop-shadow(0 0 8px #ff3b4e99);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .just-landed .card,
+  .just-landed::after,
+  .deny .card,
+  .drag-ghost .card {
+    animation: none !important;
+  }
+}
+
+.lane.drop-over {
+  border: 2px solid var(--cyan);
+  box-shadow: 0 0 18px #00f0ff55, inset 0 0 22px #00f0ff22;
+}
+
+/* ---------- рынок ---------- */
+.class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.class-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  margin: 3px;
+  background-color: #0b0912;
+}
+.class-tile .ct-head {
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--cyan);
+}
+.class-tile .ct-index {
+  font-size: 20px;
+  color: var(--text);
+}
+.class-tile .ct-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+.class-tile .ct-meta b {
+  color: var(--text);
+  font-weight: 400;
+}
+.class-tile.active {
+  --b: var(--yellow);
+  background-color: #ffe60014;
+  filter: drop-shadow(0 0 8px #ffe60055);
+}
+.market-controls {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 8px;
+}
+.market-controls .search {
+  width: min(420px, 100%);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.market-help ul {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  font-size: 15px;
+}
+th.sortable {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  user-select: none;
+}
+th.sortable:hover {
+  color: var(--cyan);
+}
+th.sorted {
+  color: var(--yellow);
+}
+.sort-arrow {
+  opacity: 0.6;
+}
+.relbar {
+  position: relative;
+  width: 90px;
+  height: 16px;
+  background: conic-gradient(#2a2340 25%, transparent 0 50%, #2a2340 0 75%, transparent 0) 0 0 / 4px 4px;
+}
+.relbar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #00f0ff55, var(--cyan));
+  transition: width 0.4s steps(6);
+}
+.relbar span {
+  position: absolute;
+  right: 4px;
+  top: -1px;
+  font-size: 14px;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+}
+.signal {
+  display: inline-block;
+  padding: 0 6px;
+  font-family: var(--font-px);
+  font-size: 9px;
+  line-height: 18px;
+}
+.signal.buy {
+  color: #0b0910;
+  background: var(--green);
+  box-shadow: 0 0 8px #39ff1466;
+}
+.signal.sell {
+  color: #0b0910;
+  background: var(--red);
+  box-shadow: 0 0 8px #ff3b4e66;
+}
+.signal.fair {
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 14px;
+}
+.market-table tr.expanded td {
+  background: #00f0ff0a;
+}
+.market-table tr.broker-row td {
+  background: #05040a;
+  padding: 10px 14px;
+}
+.offer {
+  min-width: 190px;
+}
+.tip .tipbox {
+  white-space: normal;
+  text-align: left;
+}
+
+.drag-ghost.vanish .card {
+  transition: transform 0.14s ease-in, opacity 0.14s ease-in;
+  transform: scale(0.85);
+  opacity: 0;
+}
+
+/* ---------- кнопка «i» со справкой ---------- */
+.info-wrap {
+  position: relative;
+}
+.info-btn {
+  --b: var(--cyan);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-family: var(--font-px);
+  font-size: 12px;
+  color: var(--cyan);
+}
+.info-btn.on {
+  background-color: var(--cyan);
+  color: #0b0910;
+}
+.info-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 60;
+  width: 380px;
+  padding: 12px 14px;
+  background: #050409;
+  border: 3px solid var(--cyan);
+  box-shadow: 6px 6px 0 #000;
+  font-size: 15px;
+  line-height: 1.4;
+  animation: pop-in 0.14s ease-out;
+}
+.info-pop ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.info-pop li + li {
+  margin-top: 4px;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ---------- выделение строк рынка ---------- */
+.market-table tbody tr:not(.broker-row) {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.market-table tr.selected td {
+  background: #00f0ff17;
+  box-shadow:
+    inset 0 2px 0 var(--cyan),
+    inset 0 -2px 0 var(--cyan);
+}
+.market-table tr.selected td:first-child {
+  box-shadow:
+    inset 0 2px 0 var(--cyan),
+    inset 0 -2px 0 var(--cyan),
+    inset 4px 0 0 var(--cyan);
+}
+.market-table tr.selected td:last-child {
+  box-shadow:
+    inset 0 2px 0 var(--cyan),
+    inset 0 -2px 0 var(--cyan),
+    inset -2px 0 0 var(--cyan);
+}
+/* соседние выделенные строки сливаются в один блок */
+.market-table tr.selected + tr.selected td {
+  box-shadow: inset 0 -2px 0 var(--cyan);
+}
+.market-table tr.selected + tr.selected td:first-child {
+  box-shadow:
+    inset 0 -2px 0 var(--cyan),
+    inset 4px 0 0 var(--cyan);
+}
+.market-table tr.selected + tr.selected td:last-child {
+  box-shadow:
+    inset 0 -2px 0 var(--cyan),
+    inset -2px 0 0 var(--cyan);
+}
+
+/* ---------- карта при наведении на имя ---------- */
+.peek-name {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+  border-bottom: 1px dotted var(--muted);
+}
+.card-peek {
+  position: fixed;
+  z-index: 400;
+  animation: pop-in 0.12s ease-out;
+  filter: drop-shadow(8px 8px 0 #000a);
+}
+/* подсказка карты здесь — справа от карты, а не над ней */
+.card-peek .cardtip {
+  left: calc(100% + 10px);
+  top: 0;
+  bottom: auto;
+  transform: translateX(-4px);
+}
+.card-peek .card:hover .cardtip {
+  transform: none;
+}
+
+/* ---------- брокеры ---------- */
+.broker-card.closed {
+  --b: #ff3b4e88;
+}
+.tag.warn {
+  color: var(--yellow);
+  --b: #ffe60088;
+}
+.tag.up {
+  --b: #39ff1488;
+}
+.tag.down {
+  --b: #ff3b4e88;
+}
+.yield-box {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background:
+    var(--dither-lane) left bottom / 4px 40px repeat-x,
+    #05040a;
+  border: 2px solid #2d2544;
+}
+.yield-box b {
+  font-family: var(--font-px);
+  font-weight: 400;
+  font-size: 18px;
+  color: var(--green);
+  text-shadow: 0 0 8px #39ff1466;
+}
+.profit-bars {
+  display: block;
+  margin-top: 4px;
+}
+.broker-facts {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 15px;
+}
+.broker-facts li + li {
+  margin-top: 4px;
+}
+.my-stake {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 2px dashed #2d2544;
+}
+.my-stake.has {
+  border: 2px solid var(--cyan);
+  background: #00f0ff0d;
+}
+
+/* ---------- пиксельные иконки и настройки ---------- */
+.px-icon {
+  display: inline-block;
+  vertical-align: -2px;
+}
+button .px-icon {
+  margin-right: 4px;
+}
+button.icon-btn .px-icon,
+.gear-btn .px-icon {
+  margin: 0;
+}
+/* шестерёнка всегда в правом верхнем углу верхней панели */
+.topbar {
+  padding-right: 74px;
+}
+.topbar .settings {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+}
+.gear-btn {
+  --b: var(--steel);
+  --px: 2px; /* рамка тоньше, чтобы не наезжать на полосу внизу панели */
+  width: 34px;
+  height: 34px;
+  margin: 2px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.gear-btn .px-icon {
+  transition: transform 0.4s steps(4);
+}
+.gear-btn:hover:not(:disabled) .px-icon {
+  transform: rotate(45deg);
+}
+.gear-btn.on,
+.gear-btn.on:hover:not(:disabled) {
+  --b: var(--cyan);
+  color: #0b0910;
+  background-color: var(--cyan);
+  background-image: none;
+}
+.gear-btn.on .px-icon {
+  transform: rotate(90deg);
+}
+.settings-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 14px);
+  z-index: 80;
+  width: 400px;
+  padding: 6px 14px;
+  background: #050409;
+  border: 3px solid var(--cyan);
+  box-shadow: 8px 8px 0 #000;
+  animation: pop-in 0.14s ease-out;
+}
+.set-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px dashed #2d2544;
+}
+.set-row:last-child {
+  border-bottom: none;
+}
+.set-row .muted {
+  font-size: 14px;
+}
+.vol-num {
+  width: 26px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 14px;
+}
+.paused-tag {
+  color: var(--yellow);
+  --b: #ffe60088;
+  animation: blink 1.2s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+body.tip-cooldown .cardtip {
+  display: none;
+}
+
+/* ---------- компактная таблица рынка ---------- */
+.model-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cost-pip {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  color: #050510;
+  font-family: var(--font-px);
+  font-size: 10px;
+  box-shadow: 2px 2px 0 #000;
+}
+.model-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.model-sub .tag {
+  margin: 0;
+  font-size: 12px;
+}
+.market-table td {
+  vertical-align: middle;
+}
+.select-box {
+  position: fixed;
+  left: 0;
+  top: 0;
+  will-change: transform, width, height;
+  z-index: 300;
+  pointer-events: none;
+  border: 2px dashed var(--cyan);
+  background: #00f0ff14;
+  box-shadow: 0 0 12px #00f0ff44;
+}
+@media (max-width: 1300px) {
+  .broker-short {
+    display: none;
+  }
+}
+
+.broker-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.broker-badges .tip {
+  border-bottom: none;
+}
+.broker-badges .tag {
+  font-size: 15px;
+  padding: 2px 8px;
+  color: var(--text);
+}
+.stake-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.stake-grid > div {
+  display: flex;
+  flex-direction: column;
+}
+.stake-grid b {
+  font-size: 18px;
+  color: var(--cyan);
+}
+.stake-grid .muted {
+  font-size: 14px;
+}
+/* мелкий текст по всей игре — не меньше 15px (Tiny5 мелкий сам по себе) */
+.muted {
+  font-size: max(1em, 15px);
+}
+small,
+.model-sub,
+.stat > span,
+.vol-num,
+.set-row .muted,
+.ct-meta,
+.feed {
+  font-size: max(0.9em, 15px) !important;
+}
+
+/* ---------- бой «Перегрев» ---------- */
+.arena2 .field {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.side-line {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.mid-line {
+  height: 6px;
+  background: repeating-linear-gradient(-45deg, #ff2a8a55 0 6px, transparent 6px 12px);
+  opacity: 0.7;
+}
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 8px;
+  min-height: 236px;
+  border: 2px dashed transparent;
+  background:
+    var(--dither-lane) left bottom / 4px 40px repeat-x,
+    #0a0812;
+}
+.board-row.can-drop {
+  border-color: #ffe60088;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.board-row.drop-over {
+  border-color: var(--cyan);
+  box-shadow: inset 0 0 22px #00f0ff33;
+}
+.unit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+}
+.unit.empty {
+  border: 2px dashed #2d2544;
+  min-height: 210px;
+  justify-content: center;
+}
+.unit .card {
+  transition: box-shadow 0.15s, filter 0.15s;
+}
+.unit.ready .card {
+  box-shadow:
+    0 0 0 2px var(--green),
+    0 0 14px #39ff1477;
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+.unit.ready:hover .card {
+  transform: translateY(-4px);
+}
+.unit.selected-unit .card {
+  box-shadow:
+    0 0 0 3px var(--yellow),
+    0 0 20px #ffe600aa;
+  transform: translateY(-6px);
+}
+.unit.targetable .card,
+.core.targetable {
+  cursor: var(--cur-target);
+  --ck: target;
+  animation: target-pulse 0.9s steps(2) infinite;
+}
+@keyframes target-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--red),
+      0 0 12px #ff3b4e88;
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px #ff8a99,
+      0 0 22px #ff3b4ecc;
+  }
+}
+.unit.offline .card {
+  filter: grayscale(0.85) brightness(0.6);
+}
+.offline-badge {
+  position: absolute;
+  z-index: 5;
+  top: 70px;
+  font-family: var(--font-px);
+  font-size: 9px;
+  color: #0b0910;
+  background: var(--orange);
+  padding: 3px 6px;
+  box-shadow: 2px 2px 0 #000;
+  animation: blink 1s steps(1) infinite;
+}
+.guard-badge {
+  position: absolute;
+  z-index: 4;
+  top: -2px;
+  right: 6px;
+  font-size: 18px;
+  filter: drop-shadow(0 0 4px #00f0ff);
+}
+/* шкала нагрева: пиксельные деления */
+.heat {
+  display: flex;
+  gap: 3px;
+}
+.heat i {
+  width: 12px;
+  height: 7px;
+  background: #2a2340;
+  box-shadow: inset 0 0 0 1px #3b3156;
+}
+.heat i.warm {
+  background: var(--orange);
+  box-shadow: 0 0 5px #ff8a0088;
+}
+.heat i.hot {
+  background: var(--red);
+  box-shadow: 0 0 7px #ff3b4ecc;
+}
+.action-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 44px;
+  margin-top: 6px;
+}
+/* эффекты на роботах */
+.unit.fx-hurt .card,
+.core.fx-hurt {
+  animation: hurt 0.45s ease-out;
+}
+.unit.fx-pop .card {
+  animation: pop 0.4s ease-out;
+}
+.unit.fx-heal .card,
+.core.fx-heal {
+  animation: heal 0.8s ease-out;
+}
+.unit.fx-dying .card {
+  animation: dying 0.7s ease-in forwards;
+}
+.unit.fx-zap .card {
+  animation: zap 0.6s ease-out;
+}
+.unit.fx-cool .card {
+  animation: cool 0.7s ease-out;
+}
+@keyframes cool {
+  30% {
+    box-shadow: 0 0 26px #7fd8ff;
+    filter: brightness(1.3) hue-rotate(20deg);
+  }
+}
+.unit.fx-overheat .card {
+  animation: overheat 0.9s ease-out;
+}
+@keyframes overheat {
+  0% {
+    filter: brightness(2) sepia(1) saturate(5) hue-rotate(-30deg);
+    box-shadow: 0 0 30px var(--orange);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+  100% {
+    filter: grayscale(0.85) brightness(0.6);
+  }
+}
+.float.heat {
+  color: var(--orange);
+  font-size: 13px;
+}
+.float.cool {
+  color: #7fd8ff;
+  font-size: 18px;
+}
+@media (max-width: 1100px) {
+  .side-line {
+    grid-template-columns: 1fr;
+  }
+}
+
+.content {
+  min-width: 0;
+}
+.big-feed {
+  max-height: none;
+  margin-top: 14px;
+  font-size: 17px !important;
+}
+.big-feed div.mine {
+  color: var(--cyan);
+}
+
+/* слоты команды: карты всегда на одной высоте, место под кнопку ремонта зарезервировано */
+.slot-cell {
+  justify-content: flex-start !important;
+}
+.slot-cell.empty {
+  justify-content: center !important;
+}
+.slot-actions {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+}
+/* карта под курсором поднимается над соседями — её подсказку никто не перекрывает */
+.card:hover {
+  z-index: 70;
+}
+
+/* ---------- пиксельные киберпанк-курсоры (сгенерированы скриптом) ---------- */
+:root {
+  --cur-arrow: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' shape-rendering='crispEdges'><rect x='2' y='2' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='28' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='2' y='30' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='30' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='30' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='30' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='30' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='32' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='32' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='32' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='0' y='0' width='2' height='2' fill='%230b0012'/><rect x='0' y='2' width='2' height='2' fill='%230b0012'/><rect x='2' y='2' width='2' height='2' fill='%230b0012'/><rect x='0' y='4' width='2' height='2' fill='%230b0012'/><rect x='2' y='4' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='4' width='2' height='2' fill='%230b0012'/><rect x='0' y='6' width='2' height='2' fill='%230b0012'/><rect x='2' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='6' width='2' height='2' fill='%230b0012'/><rect x='0' y='8' width='2' height='2' fill='%230b0012'/><rect x='2' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='8' width='2' height='2' fill='%23e8feff'/><rect x='6' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='8' width='2' height='2' fill='%230b0012'/><rect x='0' y='10' width='2' height='2' fill='%230b0012'/><rect x='2' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='10' width='2' height='2' fill='%23e8feff'/><rect x='6' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='10' width='2' height='2' fill='%230b0012'/><rect x='0' y='12' width='2' height='2' fill='%230b0012'/><rect x='2' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='12' width='2' height='2' fill='%230b0012'/><rect x='0' y='14' width='2' height='2' fill='%230b0012'/><rect x='2' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='14' width='2' height='2' fill='%230b0012'/><rect x='0' y='16' width='2' height='2' fill='%230b0012'/><rect x='2' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='16' width='2' height='2' fill='%230b0012'/><rect x='0' y='18' width='2' height='2' fill='%230b0012'/><rect x='2' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='18' width='2' height='2' fill='%230b0012'/><rect x='0' y='20' width='2' height='2' fill='%230b0012'/><rect x='2' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='20' width='2' height='2' fill='%230b0012'/><rect x='14' y='20' width='2' height='2' fill='%230b0012'/><rect x='16' y='20' width='2' height='2' fill='%230b0012'/><rect x='18' y='20' width='2' height='2' fill='%230b0012'/><rect x='20' y='20' width='2' height='2' fill='%230b0012'/><rect x='0' y='22' width='2' height='2' fill='%230b0012'/><rect x='2' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='22' width='2' height='2' fill='%230b0012'/><rect x='0' y='24' width='2' height='2' fill='%230b0012'/><rect x='2' y='24' width='2' height='2' fill='%2300f0ff'/><rect x='4' y='24' width='2' height='2' fill='%230b0012'/><rect x='8' y='24' width='2' height='2' fill='%230b0012'/><rect x='10' y='24' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='24' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='24' width='2' height='2' fill='%230b0012'/><rect x='0' y='26' width='2' height='2' fill='%230b0012'/><rect x='2' y='26' width='2' height='2' fill='%230b0012'/><rect x='8' y='26' width='2' height='2' fill='%230b0012'/><rect x='10' y='26' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='26' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='26' width='2' height='2' fill='%230b0012'/><rect x='0' y='28' width='2' height='2' fill='%230b0012'/><rect x='10' y='28' width='2' height='2' fill='%230b0012'/><rect x='12' y='28' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='28' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='28' width='2' height='2' fill='%230b0012'/><rect x='10' y='30' width='2' height='2' fill='%230b0012'/><rect x='12' y='30' width='2' height='2' fill='%230b0012'/><rect x='14' y='30' width='2' height='2' fill='%230b0012'/></svg>") 0 0, default;
+  --cur-pointer: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' shape-rendering='crispEdges'><rect x='2' y='2' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='4' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='4' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='6' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='6' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='6' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='8' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='8' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='8' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='8' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='10' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='10' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='10' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='10' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='10' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='12' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='14' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='16' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='18' y='18' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='18' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='20' y='20' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='18' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='20' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='22' y='22' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='8' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='24' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='6' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='26' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='4' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='10' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='28' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='2' y='30' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='30' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='30' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='30' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='18' y='30' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='12' y='32' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='14' y='32' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='16' y='32' width='2' height='2' fill='%2300f0ff' fill-opacity='.55'/><rect x='0' y='0' width='2' height='2' fill='%230b0012'/><rect x='0' y='2' width='2' height='2' fill='%230b0012'/><rect x='2' y='2' width='2' height='2' fill='%230b0012'/><rect x='0' y='4' width='2' height='2' fill='%230b0012'/><rect x='2' y='4' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='4' width='2' height='2' fill='%230b0012'/><rect x='0' y='6' width='2' height='2' fill='%230b0012'/><rect x='2' y='6' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='6' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='6' width='2' height='2' fill='%230b0012'/><rect x='0' y='8' width='2' height='2' fill='%230b0012'/><rect x='2' y='8' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='8' width='2' height='2' fill='%23ffd1e6'/><rect x='6' y='8' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='8' width='2' height='2' fill='%230b0012'/><rect x='0' y='10' width='2' height='2' fill='%230b0012'/><rect x='2' y='10' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='10' width='2' height='2' fill='%23ffd1e6'/><rect x='6' y='10' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='10' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='10' width='2' height='2' fill='%230b0012'/><rect x='0' y='12' width='2' height='2' fill='%230b0012'/><rect x='2' y='12' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='12' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='12' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='12' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='12' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='12' width='2' height='2' fill='%230b0012'/><rect x='0' y='14' width='2' height='2' fill='%230b0012'/><rect x='2' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='14' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='14' width='2' height='2' fill='%230b0012'/><rect x='0' y='16' width='2' height='2' fill='%230b0012'/><rect x='2' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='16' width='2' height='2' fill='%23ff2a8a'/><rect x='16' y='16' width='2' height='2' fill='%230b0012'/><rect x='0' y='18' width='2' height='2' fill='%230b0012'/><rect x='2' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='16' y='18' width='2' height='2' fill='%23ff2a8a'/><rect x='18' y='18' width='2' height='2' fill='%230b0012'/><rect x='0' y='20' width='2' height='2' fill='%230b0012'/><rect x='2' y='20' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='20' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='20' width='2' height='2' fill='%23ff2a8a'/><rect x='8' y='20' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='20' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='20' width='2' height='2' fill='%230b0012'/><rect x='14' y='20' width='2' height='2' fill='%230b0012'/><rect x='16' y='20' width='2' height='2' fill='%230b0012'/><rect x='18' y='20' width='2' height='2' fill='%230b0012'/><rect x='20' y='20' width='2' height='2' fill='%230b0012'/><rect x='0' y='22' width='2' height='2' fill='%230b0012'/><rect x='2' y='22' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='22' width='2' height='2' fill='%23ff2a8a'/><rect x='6' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='22' width='2' height='2' fill='%23ff2a8a'/><rect x='10' y='22' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='22' width='2' height='2' fill='%230b0012'/><rect x='0' y='24' width='2' height='2' fill='%230b0012'/><rect x='2' y='24' width='2' height='2' fill='%23ff2a8a'/><rect x='4' y='24' width='2' height='2' fill='%230b0012'/><rect x='8' y='24' width='2' height='2' fill='%230b0012'/><rect x='10' y='24' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='24' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='24' width='2' height='2' fill='%230b0012'/><rect x='0' y='26' width='2' height='2' fill='%230b0012'/><rect x='2' y='26' width='2' height='2' fill='%230b0012'/><rect x='8' y='26' width='2' height='2' fill='%230b0012'/><rect x='10' y='26' width='2' height='2' fill='%23ff2a8a'/><rect x='12' y='26' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='26' width='2' height='2' fill='%230b0012'/><rect x='0' y='28' width='2' height='2' fill='%230b0012'/><rect x='10' y='28' width='2' height='2' fill='%230b0012'/><rect x='12' y='28' width='2' height='2' fill='%23ff2a8a'/><rect x='14' y='28' width='2' height='2' fill='%23ff2a8a'/><rect x='16' y='28' width='2' height='2' fill='%230b0012'/><rect x='10' y='30' width='2' height='2' fill='%230b0012'/><rect x='12' y='30' width='2' height='2' fill='%230b0012'/><rect x='14' y='30' width='2' height='2' fill='%230b0012'/></svg>") 0 0, pointer;
+  --cur-grab: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' shape-rendering='crispEdges'><rect x='12' y='2' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='2' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='4' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='6' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='0' width='2' height='2' fill='%230b0012'/><rect x='12' y='0' width='2' height='2' fill='%230b0012'/><rect x='8' y='2' width='2' height='2' fill='%230b0012'/><rect x='10' y='2' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='2' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='2' width='2' height='2' fill='%230b0012'/><rect x='18' y='2' width='2' height='2' fill='%230b0012'/><rect x='20' y='2' width='2' height='2' fill='%230b0012'/><rect x='8' y='4' width='2' height='2' fill='%230b0012'/><rect x='10' y='4' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='4' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='4' width='2' height='2' fill='%230b0012'/><rect x='16' y='4' width='2' height='2' fill='%230b0012'/><rect x='18' y='4' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='4' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='4' width='2' height='2' fill='%230b0012'/><rect x='4' y='6' width='2' height='2' fill='%230b0012'/><rect x='6' y='6' width='2' height='2' fill='%230b0012'/><rect x='8' y='6' width='2' height='2' fill='%230b0012'/><rect x='10' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='6' width='2' height='2' fill='%230b0012'/><rect x='16' y='6' width='2' height='2' fill='%230b0012'/><rect x='18' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='6' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='6' width='2' height='2' fill='%230b0012'/><rect x='24' y='6' width='2' height='2' fill='%230b0012'/><rect x='2' y='8' width='2' height='2' fill='%230b0012'/><rect x='4' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='8' width='2' height='2' fill='%230b0012'/><rect x='10' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='8' width='2' height='2' fill='%230b0012'/><rect x='16' y='8' width='2' height='2' fill='%230b0012'/><rect x='18' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='8' width='2' height='2' fill='%230b0012'/><rect x='24' y='8' width='2' height='2' fill='%2300f0ff'/><rect x='26' y='8' width='2' height='2' fill='%230b0012'/><rect x='2' y='10' width='2' height='2' fill='%230b0012'/><rect x='4' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='10' width='2' height='2' fill='%230b0012'/><rect x='10' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='10' width='2' height='2' fill='%230b0012'/><rect x='16' y='10' width='2' height='2' fill='%230b0012'/><rect x='18' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='10' width='2' height='2' fill='%230b0012'/><rect x='24' y='10' width='2' height='2' fill='%2300f0ff'/><rect x='26' y='10' width='2' height='2' fill='%230b0012'/><rect x='2' y='12' width='2' height='2' fill='%230b0012'/><rect x='4' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='12' width='2' height='2' fill='%230b0012'/><rect x='10' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='24' y='12' width='2' height='2' fill='%2300f0ff'/><rect x='26' y='12' width='2' height='2' fill='%230b0012'/><rect x='2' y='14' width='2' height='2' fill='%230b0012'/><rect x='4' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='6' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='24' y='14' width='2' height='2' fill='%2300f0ff'/><rect x='26' y='14' width='2' height='2' fill='%230b0012'/><rect x='4' y='16' width='2' height='2' fill='%230b0012'/><rect x='6' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='24' y='16' width='2' height='2' fill='%2300f0ff'/><rect x='26' y='16' width='2' height='2' fill='%230b0012'/><rect x='4' y='18' width='2' height='2' fill='%230b0012'/><rect x='6' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='8' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='18' width='2' height='2' fill='%2300f0ff'/><rect x='24' y='18' width='2' height='2' fill='%230b0012'/><rect x='6' y='20' width='2' height='2' fill='%230b0012'/><rect x='8' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='20' width='2' height='2' fill='%2300f0ff'/><rect x='24' y='20' width='2' height='2' fill='%230b0012'/><rect x='6' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='10' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='12' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='14' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='16' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='18' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='20' y='22' width='2' height='2' fill='%2300f0ff'/><rect x='22' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='24' width='2' height='2' fill='%230b0012'/><rect x='10' y='24' width='2' height='2' fill='%230b0012'/><rect x='12' y='24' width='2' height='2' fill='%230b0012'/><rect x='14' y='24' width='2' height='2' fill='%230b0012'/><rect x='16' y='24' width='2' height='2' fill='%230b0012'/><rect x='18' y='24' width='2' height='2' fill='%230b0012'/><rect x='20' y='24' width='2' height='2' fill='%230b0012'/><rect x='22' y='24' width='2' height='2' fill='%230b0012'/></svg>") 14 8, grab;
+  --cur-grabbing: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' shape-rendering='crispEdges'><rect x='10' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='8' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='10' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='12' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='14' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='4' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='16' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='28' y='18' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='6' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='20' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='26' y='22' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='24' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='10' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='12' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='14' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='16' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='18' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='20' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='22' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='24' y='26' width='2' height='2' fill='%23ff2a8a' fill-opacity='.55'/><rect x='8' y='6' width='2' height='2' fill='%230b0012'/><rect x='10' y='6' width='2' height='2' fill='%230b0012'/><rect x='14' y='6' width='2' height='2' fill='%230b0012'/><rect x='16' y='6' width='2' height='2' fill='%230b0012'/><rect x='20' y='6' width='2' height='2' fill='%230b0012'/><rect x='22' y='6' width='2' height='2' fill='%230b0012'/><rect x='6' y='8' width='2' height='2' fill='%230b0012'/><rect x='8' y='8' width='2' height='2' fill='%23ffe600'/><rect x='10' y='8' width='2' height='2' fill='%23ffe600'/><rect x='12' y='8' width='2' height='2' fill='%230b0012'/><rect x='14' y='8' width='2' height='2' fill='%23ffe600'/><rect x='16' y='8' width='2' height='2' fill='%23ffe600'/><rect x='18' y='8' width='2' height='2' fill='%230b0012'/><rect x='20' y='8' width='2' height='2' fill='%23ffe600'/><rect x='22' y='8' width='2' height='2' fill='%23ffe600'/><rect x='24' y='8' width='2' height='2' fill='%230b0012'/><rect x='4' y='10' width='2' height='2' fill='%230b0012'/><rect x='6' y='10' width='2' height='2' fill='%230b0012'/><rect x='8' y='10' width='2' height='2' fill='%23ffe600'/><rect x='10' y='10' width='2' height='2' fill='%23ffe600'/><rect x='12' y='10' width='2' height='2' fill='%230b0012'/><rect x='14' y='10' width='2' height='2' fill='%23ffe600'/><rect x='16' y='10' width='2' height='2' fill='%23ffe600'/><rect x='18' y='10' width='2' height='2' fill='%230b0012'/><rect x='20' y='10' width='2' height='2' fill='%23ffe600'/><rect x='22' y='10' width='2' height='2' fill='%23ffe600'/><rect x='24' y='10' width='2' height='2' fill='%230b0012'/><rect x='26' y='10' width='2' height='2' fill='%230b0012'/><rect x='2' y='12' width='2' height='2' fill='%230b0012'/><rect x='4' y='12' width='2' height='2' fill='%23ffe600'/><rect x='6' y='12' width='2' height='2' fill='%23ffe600'/><rect x='8' y='12' width='2' height='2' fill='%230b0012'/><rect x='10' y='12' width='2' height='2' fill='%23ffe600'/><rect x='12' y='12' width='2' height='2' fill='%23ffe600'/><rect x='14' y='12' width='2' height='2' fill='%23ffe600'/><rect x='16' y='12' width='2' height='2' fill='%23ffe600'/><rect x='18' y='12' width='2' height='2' fill='%23ffe600'/><rect x='20' y='12' width='2' height='2' fill='%23ffe600'/><rect x='22' y='12' width='2' height='2' fill='%23ffe600'/><rect x='24' y='12' width='2' height='2' fill='%23ffe600'/><rect x='26' y='12' width='2' height='2' fill='%230b0012'/><rect x='2' y='14' width='2' height='2' fill='%230b0012'/><rect x='4' y='14' width='2' height='2' fill='%23ffe600'/><rect x='6' y='14' width='2' height='2' fill='%23ffe600'/><rect x='8' y='14' width='2' height='2' fill='%23ffe600'/><rect x='10' y='14' width='2' height='2' fill='%23ffe600'/><rect x='12' y='14' width='2' height='2' fill='%23ffe600'/><rect x='14' y='14' width='2' height='2' fill='%23ffe600'/><rect x='16' y='14' width='2' height='2' fill='%23ffe600'/><rect x='18' y='14' width='2' height='2' fill='%23ffe600'/><rect x='20' y='14' width='2' height='2' fill='%23ffe600'/><rect x='22' y='14' width='2' height='2' fill='%23ffe600'/><rect x='24' y='14' width='2' height='2' fill='%23ffe600'/><rect x='26' y='14' width='2' height='2' fill='%230b0012'/><rect x='4' y='16' width='2' height='2' fill='%230b0012'/><rect x='6' y='16' width='2' height='2' fill='%23ffe600'/><rect x='8' y='16' width='2' height='2' fill='%23ffe600'/><rect x='10' y='16' width='2' height='2' fill='%23ffe600'/><rect x='12' y='16' width='2' height='2' fill='%23ffe600'/><rect x='14' y='16' width='2' height='2' fill='%23ffe600'/><rect x='16' y='16' width='2' height='2' fill='%23ffe600'/><rect x='18' y='16' width='2' height='2' fill='%23ffe600'/><rect x='20' y='16' width='2' height='2' fill='%23ffe600'/><rect x='22' y='16' width='2' height='2' fill='%23ffe600'/><rect x='24' y='16' width='2' height='2' fill='%23ffe600'/><rect x='26' y='16' width='2' height='2' fill='%230b0012'/><rect x='4' y='18' width='2' height='2' fill='%230b0012'/><rect x='6' y='18' width='2' height='2' fill='%23ffe600'/><rect x='8' y='18' width='2' height='2' fill='%23ffe600'/><rect x='10' y='18' width='2' height='2' fill='%23ffe600'/><rect x='12' y='18' width='2' height='2' fill='%23ffe600'/><rect x='14' y='18' width='2' height='2' fill='%23ffe600'/><rect x='16' y='18' width='2' height='2' fill='%23ffe600'/><rect x='18' y='18' width='2' height='2' fill='%23ffe600'/><rect x='20' y='18' width='2' height='2' fill='%23ffe600'/><rect x='22' y='18' width='2' height='2' fill='%23ffe600'/><rect x='24' y='18' width='2' height='2' fill='%230b0012'/><rect x='6' y='20' width='2' height='2' fill='%230b0012'/><rect x='8' y='20' width='2' height='2' fill='%23ffe600'/><rect x='10' y='20' width='2' height='2' fill='%23ffe600'/><rect x='12' y='20' width='2' height='2' fill='%23ffe600'/><rect x='14' y='20' width='2' height='2' fill='%23ffe600'/><rect x='16' y='20' width='2' height='2' fill='%23ffe600'/><rect x='18' y='20' width='2' height='2' fill='%23ffe600'/><rect x='20' y='20' width='2' height='2' fill='%23ffe600'/><rect x='22' y='20' width='2' height='2' fill='%23ffe600'/><rect x='24' y='20' width='2' height='2' fill='%230b0012'/><rect x='6' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='22' width='2' height='2' fill='%23ffe600'/><rect x='10' y='22' width='2' height='2' fill='%23ffe600'/><rect x='12' y='22' width='2' height='2' fill='%23ffe600'/><rect x='14' y='22' width='2' height='2' fill='%23ffe600'/><rect x='16' y='22' width='2' height='2' fill='%23ffe600'/><rect x='18' y='22' width='2' height='2' fill='%23ffe600'/><rect x='20' y='22' width='2' height='2' fill='%23ffe600'/><rect x='22' y='22' width='2' height='2' fill='%230b0012'/><rect x='8' y='24' width='2' height='2' fill='%230b0012'/><rect x='10' y='24' width='2' height='2' fill='%230b0012'/><rect x='12' y='24' width='2' height='2' fill='%230b0012'/><rect x='14' y='24' width='2' height='2' fill='%230b0012'/><rect x='16' y='24' width='2' height='2' fill='%230b0012'/><rect x='18' y='24' width='2' height='2' fill='%230b0012'/><rect x='20' y='24' width='2' height='2' fill='%230b0012'/><rect x='22' y='24' width='2' height='2' fill='%230b0012'/></svg>") 14 14, grabbing;
+  --cur-target: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' shape-rendering='crispEdges'><rect x='16' y='2' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='4' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='6' y='8' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='8' y='8' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='8' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='24' y='8' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='26' y='8' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='6' y='10' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='26' y='10' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='2' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='4' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='8' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='24' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='28' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='30' y='16' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='6' y='22' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='26' y='22' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='6' y='24' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='8' y='24' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='24' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='24' y='24' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='26' y='24' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='28' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='16' y='30' width='2' height='2' fill='%230b0012' fill-opacity='.55'/><rect x='14' y='0' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='2' width='2' height='2' fill='%23ff3b4e'/><rect x='4' y='6' width='2' height='2' fill='%23ff3b4e'/><rect x='6' y='6' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='6' width='2' height='2' fill='%23ff3b4e'/><rect x='22' y='6' width='2' height='2' fill='%23ff3b4e'/><rect x='24' y='6' width='2' height='2' fill='%23ff3b4e'/><rect x='4' y='8' width='2' height='2' fill='%23ff3b4e'/><rect x='24' y='8' width='2' height='2' fill='%23ff3b4e'/><rect x='0' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='2' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='6' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='14' width='2' height='2' fill='%23ffffff'/><rect x='22' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='26' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='28' y='14' width='2' height='2' fill='%23ff3b4e'/><rect x='4' y='20' width='2' height='2' fill='%23ff3b4e'/><rect x='24' y='20' width='2' height='2' fill='%23ff3b4e'/><rect x='4' y='22' width='2' height='2' fill='%23ff3b4e'/><rect x='6' y='22' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='22' width='2' height='2' fill='%23ff3b4e'/><rect x='22' y='22' width='2' height='2' fill='%23ff3b4e'/><rect x='24' y='22' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='26' width='2' height='2' fill='%23ff3b4e'/><rect x='14' y='28' width='2' height='2' fill='%23ff3b4e'/></svg>") 15 15, crosshair;
+}
+
+html,
+body {
+  cursor: var(--cur-arrow);
+  --ck: default;
+}
+a,
+label,
+summary,
+select,
+input[type='range'],
+input[type='checkbox'],
+.card.clickable,
+.class-tile {
+  cursor: var(--cur-pointer);
+  --ck: pointer;
+}
+input[type='text'],
+input:not([type]) {
+  cursor: text;
+  --ck: text;
+}
+button:disabled {
+  cursor: var(--cur-arrow);
+  --ck: default;
+}
+
+/* ---------- киберпанк-курсор (ui/fx.ts) ---------- */
+html.cy-on,
+html.cy-on * {
+  cursor: none !important;
+}
+html.cy-on input[type='text'],
+html.cy-on input:not([type]) {
+  cursor: text !important;
+}
+#cy-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  will-change: transform;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#cy-cursor.st-text {
+  opacity: 0 !important;
+}
+.cy-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  filter: drop-shadow(0 0 3px #00f0ff88);
+  transition: transform 0.12s, opacity 0.12s;
+  transform-origin: 0 0;
+}
+/* пиксельная стрелка: контур, тёмная заливка и шахматный дизеринг внутри */
+.cy-arrow .o {
+  fill: var(--cyan);
+}
+.cy-arrow .f {
+  fill: #12091f;
+}
+.cy-arrow .d {
+  fill: #ff2a8a66;
+}
+/* пиксельные хроматические «двойники» контура: обычно на 1 пиксель в сторону, изредка — глитч-рывок */
+.cy-arrow .gm,
+.cy-arrow .gc {
+  opacity: 0.55;
+}
+.cy-arrow .gm {
+  fill: var(--magenta);
+  transform: translate(2px, 0);
+  animation: cy-glitch-m 3.7s steps(1) infinite;
+}
+.cy-arrow .gc {
+  fill: #7ff8ff;
+  transform: translate(-2px, 0);
+  opacity: 0.35;
+  animation: cy-glitch-c 3.7s steps(1) infinite;
+}
+@keyframes cy-glitch-m {
+  0%,
+  88%,
+  100% {
+    transform: translate(2px, 0);
+  }
+  90% {
+    transform: translate(6px, -2px);
+  }
+  93% {
+    transform: translate(-4px, 2px);
+  }
+}
+@keyframes cy-glitch-c {
+  0%,
+  88%,
+  100% {
+    transform: translate(-2px, 0);
+  }
+  90% {
+    transform: translate(-6px, 2px);
+  }
+  93% {
+    transform: translate(4px, -2px);
+  }
+}
+/* уголки-скобки HUD вокруг кончика курсора */
+.cy-brackets {
+  position: absolute;
+  left: -13px;
+  top: -13px;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  transform: scale(1.8) rotate(45deg);
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.3),
+    opacity 0.12s,
+    width 0.16s,
+    height 0.16s,
+    left 0.16s,
+    top 0.16s;
+}
+.cy-brackets i {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 0 solid var(--yellow);
+  filter: drop-shadow(0 0 3px #ffe600aa);
+}
+.cy-brackets i:nth-child(1) {
+  left: 0;
+  top: 0;
+  border-left-width: 2px;
+  border-top-width: 2px;
+}
+.cy-brackets i:nth-child(2) {
+  right: 0;
+  top: 0;
+  border-right-width: 2px;
+  border-top-width: 2px;
+}
+.cy-brackets i:nth-child(3) {
+  left: 0;
+  bottom: 0;
+  border-left-width: 2px;
+  border-bottom-width: 2px;
+}
+.cy-brackets i:nth-child(4) {
+  right: 0;
+  bottom: 0;
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+}
+.cy-reticle {
+  position: absolute;
+  left: -20px;
+  top: -20px;
+  opacity: 0;
+  transform: scale(1.6);
+  transition:
+    opacity 0.12s,
+    transform 0.16s;
+  filter: drop-shadow(0 0 4px #ff3b4e);
+}
+.cy-reticle path {
+  stroke: #ff3b4e;
+  stroke-width: 2;
+  fill: none;
+}
+.cy-reticle rect {
+  fill: #fff;
+}
+.cy-label {
+  position: absolute;
+  left: 18px;
+  top: 20px;
+  font-family: var(--font-px);
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--yellow);
+  /* тёмная обводка букв — подпись читается на любом фоне */
+  text-shadow:
+    1px 0 0 #000,
+    -1px 0 0 #000,
+    0 1px 0 #000,
+    0 -1px 0 #000,
+    0 0 6px #000;
+  white-space: nowrap;
+}
+.cy-label:empty {
+  display: none;
+}
+/* состояния */
+#cy-cursor.st-pointer .cy-arrow .o {
+  fill: var(--yellow);
+}
+#cy-cursor.st-pointer .cy-arrow .d {
+  fill: #ffe60040;
+}
+#cy-cursor.st-pointer .cy-label {
+  color: var(--yellow);
+}
+#cy-cursor.st-pointer .cy-arrow {
+  filter: drop-shadow(0 0 4px #ffe600aa);
+}
+#cy-cursor.st-pointer .cy-brackets {
+  opacity: 1;
+  transform: none;
+}
+#cy-cursor.st-grab .cy-brackets,
+#cy-cursor.st-grabbing .cy-brackets {
+  opacity: 1;
+  transform: none;
+  left: -18px;
+  top: -18px;
+  width: 36px;
+  height: 36px;
+}
+#cy-cursor.st-grab .cy-brackets i,
+#cy-cursor.st-grabbing .cy-brackets i {
+  border-color: var(--cyan);
+  filter: drop-shadow(0 0 3px var(--cyan));
+}
+#cy-cursor.st-grab .cy-label {
+  color: var(--cyan);
+}
+#cy-cursor.st-grabbing .cy-arrow {
+  transform: scale(0.8);
+  opacity: 0.6;
+}
+#cy-cursor.st-grabbing .cy-brackets {
+  left: -10px;
+  top: -10px;
+  width: 20px;
+  height: 20px;
+}
+#cy-cursor.st-grabbing .cy-brackets i {
+  border-color: var(--yellow);
+  filter: drop-shadow(0 0 4px var(--yellow));
+}
+#cy-cursor.st-grabbing .cy-label {
+  color: var(--yellow);
+}
+#cy-cursor.st-target .cy-arrow {
+  opacity: 0;
+}
+#cy-cursor.st-target .cy-reticle {
+  opacity: 1;
+  transform: none;
+}
+#cy-cursor.st-target .cy-reticle .arc {
+  transform-origin: 20px 20px;
+  animation: cy-spin 2.4s linear infinite;
+}
+#cy-cursor.st-target .cy-label {
+  color: #ff6b7a;
+  left: 24px;
+  top: 16px;
+}
+@keyframes cy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* нажатие: скобки «защёлкиваются», стрелка сжимается */
+#cy-cursor.press .cy-arrow {
+  transform: scale(0.86);
+}
+#cy-cursor.press .cy-brackets {
+  transform: scale(0.75);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cy-arrow .gm,
+  .cy-arrow .gc,
+  .cy-glitch *,
+  #cursor-glow i,
+  .g-halo::before {
+    animation: none !important;
+  }
+}
+
+/* ---------- переход между вкладками: «включение кинескопа» ---------- */
+.content.tab-crt {
+  position: relative;
+  animation: crt-on 0.42s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.content.tab-crt::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 10px;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, #00f0ff66 45%, #ffffffaa 50%, #ff2a8a55 55%, transparent);
+  filter: blur(1px);
+  opacity: 0;
+  animation: crt-sweep 0.5s ease-out;
+}
+@keyframes crt-on {
+  0% {
+    clip-path: inset(49.6% 0 49.6% 0);
+    filter: brightness(3) saturate(0);
+    transform: scaleX(0.94);
+  }
+  22% {
+    clip-path: inset(47% 0 47% 0);
+    filter: brightness(2.6) saturate(0.4);
+    transform: scaleX(1);
+  }
+  48% {
+    clip-path: inset(0 0 0 0);
+    filter: brightness(1.7) hue-rotate(-25deg);
+    transform: translateX(-4px);
+  }
+  58% {
+    transform: translateX(3px);
+    filter: brightness(1.3) hue-rotate(15deg);
+  }
+  68% {
+    transform: translateX(-1px);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    filter: none;
+    transform: none;
+  }
+}
+@keyframes crt-sweep {
+  0% {
+    top: 0;
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .content.tab-crt,
+  .content.tab-crt::before {
+    animation: none;
+  }
+}
+/* карту, которую можно тащить, курсор показывает как «GRAB», а не как обычную кнопку */
+.drag-handle.can-drag .card {
+  cursor: var(--cur-grab);
+  --ck: grab;
+}
+
+/* строки рынка: курсор «SEL» (с Ctrl — «+ADD», с Shift — «RANGE»), рамка — «SCAN ×N» */
+.market-table tbody tr[data-id] {
+  --ck: row;
+}
+.cy-scan {
+  position: absolute;
+  left: -15px;
+  top: -15px;
+  opacity: 0;
+  transform: scale(1.5);
+  transition:
+    opacity 0.1s,
+    transform 0.14s;
+  filter: drop-shadow(0 0 3px var(--cyan));
+}
+.cy-scan path {
+  stroke: var(--cyan);
+  stroke-width: 2;
+  fill: none;
+}
+.cy-scan rect {
+  fill: var(--yellow);
+}
+#cy-cursor.st-row .cy-arrow .o {
+  fill: var(--green);
+}
+#cy-cursor.st-row .cy-arrow .d {
+  fill: #39ff1440;
+}
+#cy-cursor.st-row .cy-label {
+  color: var(--green);
+}
+#cy-cursor.st-scan .cy-arrow {
+  opacity: 0;
+}
+#cy-cursor.st-scan .cy-scan {
+  opacity: 1;
+  transform: none;
+  animation: cy-scan-pulse 0.6s steps(2) infinite;
+}
+#cy-cursor.st-scan .cy-label {
+  color: var(--cyan);
+}
+@keyframes cy-scan-pulse {
+  50% {
+    transform: scale(0.88);
+  }
+}
+
+/* строки под рамкой во время выделения (подсвечиваются напрямую, без перерисовки рынка) */
+.market-table tr.boxing:not(.box-hit) td {
+  background: transparent;
+  box-shadow: none;
+}
+.market-table tr.box-hit td {
+  background: #00f0ff1f;
+  box-shadow:
+    inset 0 1px 0 #00f0ff88,
+    inset 0 -1px 0 #00f0ff88;
+}
+
+/* ---------- иконки характеристик ---------- */
+.stat-ico {
+  display: inline-flex;
+  vertical-align: -1px;
+  filter: drop-shadow(0 0 2px currentColor);
+}
+.stat-ico.energy {
+  color: var(--yellow);
+}
+.stat-ico.attack,
+.atk-c {
+  color: var(--orange);
+}
+.stat-ico.hp,
+.hp-c {
+  color: var(--green);
+}
+.stat-line {
+  gap: 12px;
+  font-size: 15px !important;
+}
+.stat-line span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.row-num {
+  width: 20px;
+  flex: none;
+  text-align: center;
+  font-family: var(--font-px);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ---------- варианты курсора ---------- */
+/* «Неон»: полая светящаяся стрелка */
+#cy-cursor[data-style='neon'] .cy-arrow {
+  filter: drop-shadow(0 0 3px var(--cyan)) drop-shadow(0 0 6px #00f0ff66);
+}
+#cy-cursor[data-style='neon'] .cy-arrow .nb {
+  fill: #00f0ff14;
+  stroke: var(--cyan);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+#cy-cursor[data-style='neon'] .cy-arrow .nc {
+  fill: none;
+  stroke: #e8feff;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+#cy-cursor[data-style='neon'] .cy-arrow .gm {
+  fill: none;
+  stroke: var(--magenta);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+#cy-cursor[data-style='neon'].st-pointer .cy-arrow .nb {
+  stroke: var(--yellow);
+  fill: #ffe6001f;
+}
+#cy-cursor[data-style='neon'].st-pointer .cy-arrow {
+  filter: drop-shadow(0 0 3px var(--yellow)) drop-shadow(0 0 6px #ffe60066);
+}
+#cy-cursor[data-style='neon'].st-row .cy-arrow .nb {
+  stroke: var(--green);
+  fill: #39ff141f;
+}
+
+/* ---------- удар клика: «глич сигнала» (ui/fx.ts) ---------- */
+.cy-glitch {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2147482999;
+  pointer-events: none;
+}
+/* срезы-«иглы»: толстые в середине и плавно сходят на нет к концам; сквозь них виден настоящий интерфейс,
+   но со сдвигом цвета, а по центру бежит яркая полоса */
+.cy-glitch .slice {
+  position: absolute;
+  clip-path: polygon(0% 50%, 18% 15%, 50% 0%, 82% 15%, 100% 50%, 82% 85%, 50% 100%, 18% 85%);
+  -webkit-backdrop-filter: hue-rotate(var(--h)) saturate(2.4) brightness(1.35) contrast(1.25);
+  backdrop-filter: hue-rotate(var(--h)) saturate(2.4) brightness(1.35) contrast(1.25);
+  background:
+    linear-gradient(90deg, transparent, #ffffff66 50%, transparent) center / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--edge) 45%, transparent) 50%, transparent);
+  opacity: 0.92;
+  animation: cy-slice 0.16s steps(1) forwards;
+}
+@keyframes cy-slice {
+  0% {
+    transform: translateX(var(--x1));
+  }
+  30% {
+    transform: translateX(var(--x2));
+  }
+  60% {
+    transform: translateX(var(--x3));
+    opacity: 0.7;
+  }
+  85% {
+    transform: translateX(calc(var(--x1) * -1));
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+/* RGB-расслоение: голубая и розовая рамки, разъехавшиеся в стороны */
+.cy-glitch .rgb {
+  position: absolute;
+  left: -24px;
+  top: -5px;
+  width: 48px;
+  height: 10px;
+  border: 1px solid;
+  clip-path: polygon(0% 50%, 12% 0%, 88% 0%, 100% 50%, 88% 100%, 12% 100%);
+  animation: cy-rgb 0.13s steps(2) forwards;
+  opacity: 0.7;
+}
+.cy-glitch .rgb.c {
+  border-color: var(--cyan);
+  --dx: -3px;
+}
+.cy-glitch .rgb.m {
+  border-color: var(--magenta);
+  --dx: 3px;
+}
+@keyframes cy-rgb {
+  0% {
+    transform: translateX(var(--dx)) scale(0.8);
+  }
+  50% {
+    transform: translateX(calc(var(--dx) * 2)) scale(1.25);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(calc(var(--dx) * 3)) scale(1.6);
+    opacity: 0;
+  }
+}
+/* «цифровая пыль» */
+.cy-glitch .dust {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  animation: cy-dust 0.15s steps(1) forwards;
+}
+@keyframes cy-dust {
+  25% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.6;
+    transform: translateX(3px);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+/* инверсия ровно в точке удара — на один кадр */
+.cy-glitch .inv {
+  position: absolute;
+  left: -7px;
+  top: -3px;
+  width: 14px;
+  height: 6px;
+  -webkit-backdrop-filter: invert(1);
+  backdrop-filter: invert(1);
+  opacity: 0.8;
+  animation: cy-inv 0.06s steps(1) forwards;
+}
+@keyframes cy-inv {
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------- загрузочный экран «ламповый телевизор» (ui/Boot.tsx) ---------- */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  background: #000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.boot-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* выпуклый кинескоп: затемнение по краям + развёртка */
+  box-shadow: inset 0 0 160px 60px #000;
+}
+.boot-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0 2px, #0000006b 2px 4px);
+}
+/* включение: светящаяся линия раскрывается в картинку */
+.boot.phase-on .boot-screen {
+  animation: tv-on 0.38s ease-out forwards;
+}
+@keyframes tv-on {
+  0% {
+    transform: scale(0.02, 0.004);
+    filter: brightness(6);
+  }
+  45% {
+    transform: scale(1, 0.006);
+    filter: brightness(5);
+  }
+  100% {
+    transform: scale(1, 1);
+    filter: brightness(1.4);
+  }
+}
+/* выключение: картинка схлопывается в линию, потом в точку */
+.boot.phase-off .boot-screen {
+  animation: tv-off 0.32s ease-in forwards;
+}
+.boot.phase-off {
+  animation: boot-fade 0.32s steps(1) forwards;
+}
+@keyframes tv-off {
+  0% {
+    transform: none;
+    filter: brightness(1);
+  }
+  55% {
+    transform: scale(1, 0.006);
+    filter: brightness(4);
+  }
+  100% {
+    transform: scale(0, 0.006);
+    filter: brightness(8);
+  }
+}
+@keyframes boot-fade {
+  99% {
+    background: #000;
+  }
+  100% {
+    background: transparent;
+  }
+}
+.boot-osd {
+  position: absolute;
+  font-family: var(--font-px);
+  color: #e8fff0;
+  text-shadow:
+    2px 0 0 #ff2a8a88,
+    -2px 0 0 #00f0ff88,
+    0 0 8px #fff;
+  z-index: 2;
+}
+.boot-osd.tr {
+  top: 7%;
+  right: 7%;
+  font-size: 26px;
+  color: #6dff8a;
+}
+.boot-osd.center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 22px;
+  padding: 10px 16px;
+  background: #000a;
+}
+.blink {
+  animation: blink 0.8s steps(1) infinite;
+}
+/* экран загрузки «BIOS» */
+.boot-log {
+  position: absolute;
+  inset: 0;
+  padding: 9vh 9vw;
+  color: #7dffb0;
+  text-shadow:
+    0 0 6px #39ff1499,
+    1px 0 0 #ff2a8a55;
+  animation: crt-jitter 2.2s steps(1) infinite;
+}
+.boot-log pre {
+  margin: 0;
+  font-family: var(--font-px);
+  font-size: clamp(10px, 1.25vw, 18px);
+  line-height: 2;
+  white-space: pre-wrap;
+}
+.boot-log .caret {
+  animation: blink 0.5s steps(1) infinite;
+}
+.boot-progress {
+  margin-top: 4vh;
+  width: min(560px, 80%);
+  height: 18px;
+  padding: 3px;
+  border: 2px solid #7dffb0;
+}
+.boot-progress i {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(90deg, #7dffb0 0 10px, transparent 10px 13px);
+  box-shadow: 0 0 8px #39ff1466;
+}
+.boot-hint {
+  margin-top: 2.5vh;
+  font-family: var(--font-px);
+  font-size: 11px;
+  opacity: 0.75;
+  animation: blink 1.4s steps(1) infinite;
+}
+@keyframes crt-jitter {
+  0%,
+  100% {
+    transform: none;
+  }
+  47% {
+    transform: translateX(2px);
+  }
+  48% {
+    transform: translateX(-3px) skewX(-1deg);
+  }
+  49% {
+    transform: none;
+  }
+}
+
+/* пиксельный робот на карте */
+.card .art .robot-sprite {
+  filter: drop-shadow(0 2px 0 #0008);
+}
+
+/* ---------- рынок: ровные колонки ---------- */
+.market-table {
+  table-layout: fixed;
+}
+.market-table td {
+  /* не обрезать: иначе подсказки (цена, сигнал) обрезаются ячейкой и видна только чёрная полоска */
+  overflow: visible;
+}
+.market-table .tip .tipbox {
+  z-index: 90;
+}
+.relbar.wide {
+  width: 100%;
+  max-width: 230px;
+  height: 18px;
+}
+.relbar .perceived {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--yellow);
+  box-shadow: 0 0 4px var(--yellow);
+}
+/* лучшее предложение: цена · брокер · Buy · ▾ — стрелка в одной колонке во всех строках */
+.offer-cell {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 52px 30px;
+  align-items: center;
+  gap: 6px;
+}
+.offer-cell .broker-short {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.offer-cell .no-stock {
+  grid-column: 1 / 4;
+}
+.offer-cell button {
+  margin: 0;
+}
+.offer-cell .expand-btn {
+  grid-column: 4;
+  width: 28px;
+  padding: 2px 0;
+}
+/* явные колонки — даже если имя брокера скрыто на узком экране, кнопки стоят на своих местах */
+.offer-cell > .tip {
+  grid-column: 1;
+}
+.offer-cell > .broker-short {
+  grid-column: 2;
+}
+.offer-cell > button:not(.expand-btn) {
+  grid-column: 3;
+}
+
+.boot-title {
+  font-family: var(--font-px);
+  font-size: clamp(28px, 4.2vw, 64px);
+  color: #ff2a8a;
+  letter-spacing: 0.08em;
+  text-shadow:
+    -3px 0 0 #00f0ff,
+    3px 0 0 #ff000088,
+    0 0 18px #ff2a8a;
+  margin-bottom: 1.2vh;
+  animation: crt-jitter 1.6s steps(1) infinite;
+}
+.boot-sub {
+  font-family: var(--font-px);
+  font-size: clamp(8px, 0.85vw, 12px);
+  color: #9de8ff;
+  margin-bottom: 4vh;
+  opacity: 0.85;
+}
+.boot-log .run-line {
+  color: #ffe600;
+  text-shadow: 0 0 6px #ffe60088;
+}
+.boot-pct {
+  margin-top: 1.4vh;
+  font-family: var(--font-px);
+  font-size: 13px;
+}
+/* таблица рынка помещается по ширине — без прокрутки, чтобы подсказки верхних строк не обрезались */
+.market-wrap {
+  overflow: visible;
+}
