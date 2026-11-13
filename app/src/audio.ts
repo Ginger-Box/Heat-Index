@@ -5,6 +5,14 @@
 
 type Sfx =
   | 'ui-click'
+  | 'hit-light'
+  | 'hit-heavy'
+  | 'b-deploy'
+  | 'turn-start'
+  | 'end-turn'
+  | 'draw'
+  | 'lock'
+  | 'shock-hit'
   | 'ui-scroll'
   | 'ui-tab'
   | 'ui-hover'
@@ -62,13 +70,22 @@ const BANK: Record<Sfx, { files: string[]; vol: number; spread?: number }> = {
   victory: { files: ['victory'], vol: 0.6 },
   defeat: { files: ['defeat'], vol: 0.6 },
   'fast-forward': { files: ['fast-forward'], vol: 0.4 },
+  // battle: impacts by damage (light / medium = 'hit' / heavy), deploy clank, turn gong, card draw, target lock
+  'hit-light': { files: ['hit-light-1', 'hit-light-2'], vol: 0.45, spread: 0.16 },
+  'hit-heavy': { files: ['hit-heavy-1', 'hit-heavy-2'], vol: 0.7, spread: 0.1 },
+  'b-deploy': { files: ['deploy-1', 'deploy-2'], vol: 0.55, spread: 0.12 },
+  'turn-start': { files: ['turn-start'], vol: 0.4, spread: 0.02 },
+  'end-turn': { files: ['end-turn'], vol: 0.3, spread: 0.06 },
+  draw: { files: ['draw-1', 'draw-2'], vol: 0.35, spread: 0.12 },
+  lock: { files: ['lock'], vol: 0.22, spread: 0.1 },
+  'shock-hit': { files: ['shock-hit'], vol: 0.45, spread: 0.12 },
   // карточные звуки (Kenney Casino Audio) с тихим «киберпанк»-слоем: стекло/глитч при подъёме, металл/стекло при посадке
   'card-pick': { files: ['card-pick-1', 'card-pick-2'], vol: 0.45 },
   'card-drop': { files: ['card-drop-1', 'card-drop-2'], vol: 0.55 },
 };
 
 const PREF_KEY = 'neon-pit-sound';
-const MIN_GAP_MS: Partial<Record<Sfx, number>> = { glitch: 180, 'ui-hover': 60, 'ui-error': 250 };
+const MIN_GAP_MS: Partial<Record<Sfx, number>> = { glitch: 180, 'ui-hover': 60, 'ui-error': 250, lock: 70 };
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -504,4 +521,123 @@ export function faxSound(): () => void {
       }
     }
   };
+}
+
+
+// ---------- battle sounds synthesized on the fly ----------
+
+/**
+ * whoosh — the attacker's swing; steam — venting heat; alarm — overheat; thump — a sub-bass hit under heavy
+ * blows (power 0..1 scales it); weld — the crackle of a repair; aim — a soft rising blip when an arrow is drawn.
+ */
+export function battleSynth(kind: 'whoosh' | 'steam' | 'alarm' | 'thump' | 'weld' | 'aim', power = 0.5) {
+  if (!ctx || !master || !enabled || volume === 0 || !live()) return;
+  const c = ctx;
+  const t = c.currentTime;
+  const out = c.createGain();
+  out.connect(sfxBus ?? master);
+  const noise = (sec: number) => {
+    const b = c.createBuffer(1, Math.floor(c.sampleRate * sec), c.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const n = c.createBufferSource();
+    n.buffer = b;
+    return n;
+  };
+  if (kind === 'whoosh') {
+    const n = noise(0.3);
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.4;
+    f.frequency.setValueAtTime(500, t);
+    f.frequency.exponentialRampToValueAtTime(2600, t + 0.16);
+    f.frequency.exponentialRampToValueAtTime(900, t + 0.28);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16 + power * 0.14, t + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
+  } else if (kind === 'steam') {
+    const n = noise(0.9);
+    const f = c.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.setValueAtTime(3000, t);
+    f.frequency.linearRampToValueAtTime(5200, t + 0.7);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
+  } else if (kind === 'alarm') {
+    // two-tone warning chirp + a burst of hiss
+    for (let i = 0; i < 3; i++) {
+      const o = c.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(i % 2 ? 620 : 880, t + i * 0.11);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 2400;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t + i * 0.11);
+      g.gain.linearRampToValueAtTime(0.06, t + i * 0.11 + 0.005);
+      g.gain.setValueAtTime(0.06, t + i * 0.11 + 0.08);
+      g.gain.linearRampToValueAtTime(0.0001, t + i * 0.11 + 0.1);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t + i * 0.11);
+      o.stop(t + i * 0.11 + 0.11);
+    }
+    const n = noise(0.6);
+    const f = c.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 2500;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    n.connect(f).connect(g).connect(out);
+    n.start(t);
+  } else if (kind === 'thump') {
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(70 + power * 30, t);
+    o.frequency.exponentialRampToValueAtTime(32, t + 0.25 + power * 0.35);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25 + power * 0.65, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3 + power * 0.45);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.8);
+  } else if (kind === 'weld') {
+    // arc-welder crackle: random short noise ticks through a resonant band
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 3800;
+    f.Q.value = 3;
+    f.connect(out);
+    for (let i = 0; i < 16; i++) {
+      const n = noise(0.012);
+      const g = c.createGain();
+      const at = t + Math.random() * 0.45;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.1 + Math.random() * 0.12, at + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.012);
+      n.connect(g).connect(f);
+      n.start(at);
+    }
+  } else {
+    const o = c.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(330, t);
+    o.frequency.exponentialRampToValueAtTime(660, t + 0.12);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.18);
+  }
 }

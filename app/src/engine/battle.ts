@@ -28,6 +28,7 @@ export interface Unit {
   offline: boolean; // overheated: will skip its owner's next turn
   chargeBonus: number; // Charge: bonus on the first attack in the deploy turn
   fresh: boolean; // placed this turn (Charge may attack only robots then, not the Core)
+  pos: number; // board slot 0..BOARD_SLOTS-1 (where the player put it; no rule depends on it)
 }
 
 export interface SideState {
@@ -74,7 +75,7 @@ export interface BattleState {
 }
 
 export type Action =
-  | { t: 'deploy'; uid: string; target?: Target }
+  | { t: 'deploy'; uid: string; target?: Target; slot?: number }
   | { t: 'attack'; from: string; to: string | 'core' }
   | { t: 'vent'; uid: string }
   | { t: 'end' };
@@ -299,10 +300,14 @@ export function applyAction(st: BattleState, a: Action, ev: BattleEvent[] | null
     let target = a.target;
     if (target && !targets.some((t) => sameTarget(t, target!))) return 'Invalid target';
     if (!target && targets.length) target = autoTarget(st, side, md.id, targets);
+    const taken = new Set(me.board.map((u) => u.pos));
+    if (a.slot !== undefined && (a.slot < 0 || a.slot >= BOARD_SLOTS || taken.has(a.slot))) return 'This slot is taken';
+    const pos = a.slot ?? [...Array(BOARD_SLOTS).keys()].find((i) => !taken.has(i))!;
     me.energy -= md.cost;
     me.hand.splice(hi, 1);
     const ab = md.ability;
     me.board.push({
+      pos,
       uid: a.uid,
       modelId: md.id,
       hp: md.hp,

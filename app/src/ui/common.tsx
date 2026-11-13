@@ -30,6 +30,10 @@ export function RobotCard(props: {
   footer?: ReactNode;
   badge?: ReactNode;
   className?: string;
+  /** compact board token: big sprite, name, attack/HP badges (the full card text stays in the hover tip) */
+  token?: boolean;
+  /** attack bonus shown on the token (Charge on its deploy turn) */
+  atkBonus?: number;
 }) {
   const md = model(props.modelId);
   const broken = props.durability !== undefined && props.durability <= 0;
@@ -52,7 +56,7 @@ export function RobotCard(props: {
   };
   return (
     <div
-      className={`card ${props.onClick ? 'clickable' : ''} ${props.selected ? 'selected' : ''} ${broken ? 'broken' : ''} ${tip.below ? 'tip-below' : ''} ${props.className ?? ''}`}
+      className={`card ${props.token ? 'token' : ''} ${props.onClick ? 'clickable' : ''} ${props.selected ? 'selected' : ''} ${broken ? 'broken' : ''} ${tip.below ? 'tip-below' : ''} ${props.className ?? ''}`}
       style={{ ['--c' as string]: COST_COLOR[md.cost], ['--tip-shift' as string]: `${tip.shift}px` }}
       onClick={props.onClick}
       onMouseEnter={placeTip}
@@ -93,6 +97,33 @@ export function RobotCard(props: {
           </div>
         )}
       </div>
+      {props.token ? (
+        <>
+          <div className="art">
+            <RobotSprite modelId={md.id} size={76} />
+          </div>
+          <div className="name">{md.name}</div>
+          <div className="tok-stats">
+            <span className={`tok atk ${props.atkBonus ? 'buffed' : ''}`}>
+              <AttackIcon /> {md.atk + (props.atkBonus ?? 0)}
+            </span>
+            <span className={`tok hp ${props.hp !== undefined && props.hp < md.hp ? 'hurt' : ''}`}>
+              <HpIcon /> {props.hp ?? md.hp}
+            </span>
+          </div>
+        </>
+      ) : (
+        <CardBody {...props} />
+      )}
+    </div>
+  );
+}
+
+function CardBody(props: { modelId: string; durability?: number; hp?: number; footer?: ReactNode; badge?: ReactNode }) {
+  const md = model(props.modelId);
+  const ab = md.ability;
+  return (
+    <>
       <div className="cost">{md.cost}</div>
       {props.badge && <div style={{ position: 'absolute', top: 4, right: 6, fontSize: 12 }}>{props.badge}</div>}
       <div className="art">
@@ -111,7 +142,7 @@ export function RobotCard(props: {
       </div>
       {props.durability !== undefined && <DurBar value={props.durability} max={maxDurability(md.id)} />}
       {props.footer}
-    </div>
+    </>
   );
 }
 
