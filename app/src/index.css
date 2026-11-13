@@ -4097,3 +4097,61 @@ button.pick {
   font-size: 16px;
   animation: end-body-in 0.4s 0.8s both;
 }
+
+/* живые спрайты роботов (ui/robotArt.tsx): два кадра эффектов сменяют друг друга, медики парят */
+.robot-sprite .rs-a {
+  animation: rs-a var(--rs-speed, 0.36s) steps(1) infinite;
+}
+.robot-sprite .rs-b {
+  animation: rs-b var(--rs-speed, 0.36s) steps(1) infinite;
+}
+.robot-sprite.rs-shock {
+  --rs-speed: 0.16s;
+}
+.robot-sprite.rs-maneuver,
+.robot-sprite.rs-blast {
+  --rs-speed: 0.22s;
+}
+.robot-sprite.rs-armor {
+  --rs-speed: 1.6s;
+}
+.robot-sprite.rs-shock .rs-fx {
+  filter: drop-shadow(0 0 1px #7fd8ff);
+}
+.robot-sprite.rs-repair .rs-body {
+  animation: rs-hover 1.4s steps(2) infinite;
+}
+@keyframes rs-a {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes rs-b {
+  0%,
+  49.9% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes rs-hover {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .robot-sprite .rs-fx,
+  .robot-sprite .rs-body {
+    animation: none !important;
+  }
+  .robot-sprite .rs-b {
+    opacity: 0;
+  }
+}

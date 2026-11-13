@@ -7,6 +7,14 @@
 - **What we may do with them:** use them in personal and commercial projects, modify them and redistribute them. Attribution is **not required**, but we credit Kenney anyway (see below).
 - The original license text ships next to the sounds: `public/sfx/LICENSE-kenney.txt`.
 
+## 8-bit sounds (added Nov 13)
+
+From **The Essential Retro Video Game Sound Effects Collection [512 sounds]** by **Juhani Junkala**
+(https://opengameart.org/content/512-sound-effects-8-bit-style), **CC0**. License note: `public/sfx/LICENSE-junkala.txt`.
+Used for: hits (`hit-*`, `hit-light-*`, `hit-heavy-*`), `block`, robot deaths (`destroy-*`), Core hits (`core-hit-*`),
+`blast`, `core-break`, `glitch-spread`, `shutdown`, `confetti-pop`, `sparkle`, `fanfare`, `ui-scroll`.
+Exact source files are listed in `public/sfx/SOURCES.txt`. The victory and defeat melodies are synthesized in code.
+
 ## License
 
 **CC0 1.0 Universal** (https://creativecommons.org/publicdomain/zero/1.0/) means the author has given up all rights to the work, as far as the law allows. The files are effectively public domain:

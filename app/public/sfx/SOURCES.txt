@@ -54,3 +54,15 @@ draw-1.mp3 <= card-slide-4.ogg (Kenney Casino)
 draw-2.mp3 <= card-slide-5.ogg (Kenney Casino)
 lock.mp3 <= select_004.ogg (Kenney Interface)
 shock-hit.mp3 <= laserSmall_002.ogg + impactGlass_light_002.ogg x0.4, Kenney Sci-fi/Impact, mixed
+--- Juhani Junkala, The Essential Retro Video Game Sound Effects Collection (CC0) ---
+destroy-1.mp3 <= Death Screams/Robot/sfx_deathscream_robot1 + Explosions/Shortest/sfx_exp_shortest_hard3 x0.6
+destroy-2.mp3 <= Death Screams/Robot/sfx_deathscream_robot4 + Explosions/Shortest/sfx_exp_shortest_hard1 x0.6
+hit-light-1.mp3 <= Simple Damage Sounds/sfx_damage_hit2 ; hit-light-2.mp3 <= sfx_damage_hit6
+hit-1..3.mp3 <= Weapons/Melee/sfx_wpn_punch1..3 x0.7 + sfx_damage_hit3/5/7
+hit-heavy-1/2.mp3 <= Explosions/Shortest/sfx_exp_shortest_hard2/9 + Weapons/Melee/sfx_wpn_punch4 x0.8
+core-hit-1/2.mp3 <= Explosions/Short/sfx_exp_short_hard2/4 ; blast.mp3 <= sfx_exp_short_hard12
+block.mp3 <= Impacts/sfx_sounds_impact5 ; ui-scroll.mp3 <= Menu Sounds/sfx_menu_move4
+core-break.mp3 <= Explosions/Medium Length/sfx_exp_medium3 ; glitch-spread.mp3 <= Weird Sounds/sfx_sound_vaporizing
+shutdown.mp3 <= Weird Sounds/sfx_sound_shutdown1 ; confetti-pop.mp3 <= Explosions/Shortest/sfx_exp_shortest_soft2
+sparkle.mp3 <= Coins/sfx_coin_cluster3 ; fanfare.mp3 <= Fanfares/sfx_sounds_fanfare1
+(earlier Kenney entries for hit-*, hit-light-*, hit-heavy-*, destroy-*, core-hit-*, blast, block, ui-scroll, victory, defeat are replaced)

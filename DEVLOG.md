@@ -115,6 +115,20 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   sub-bass thump; separate sounds for swings, light/medium/heavy hits, deploys, venting steam, overheat alarms,
   welding repairs, turn start and card draw.
 
+### Feedback round (Nov 13, evening)
+- Decks are now **10–15 robots** (energy limit 42) and the board has **5 slots**. Bigger decks mean bigger battle
+  purses, so the purse went 3% → 2% of both teams' value; a simulated week is calmer than before (NPC money ×3.4
+  instead of ×5), classes win 43–57%.
+- Hits scale to the real attack range (up to 5): 1–2 — sparks; 3–4 — a slash, ring and shake; 5 — hit-stop,
+  a heavy slash, double shockwave, white flash, RGB split of the table and a huge damage number.
+- New 8-bit sounds from Juhani Junkala's CC0 collection for hits, robot deaths, Core hits and the end of a battle;
+  victory and defeat melodies are synthesized chiptune, kept quiet.
+- Defeat: your Core cracks and a glitch spreads from it over the whole screen; victory: confetti cannons from both
+  sides. Then a full-screen VICTORY / DEFEAT with the rewards and wear.
+- Robot sprites redrawn in action poses with class looks (medics carry a red cross, Shock robots throw animated
+  lightning, flames, fuses, steam, shield glints); Analytics got bigger model buttons and a search; the piercing
+  whine at the start of the boot screen is gone.
+
 ## Next
 - Card art (prompts in `art-prompts.md`).
 - **NEAR integration**: NEP-245 contract for credits and robots on testnet, email login, trades and battle results
