@@ -28,7 +28,11 @@ export function useChain() {
 
 const PrivyEmail = lazy(() => import('./PrivyEmail'));
 
-const short = (id: string) => (id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-10)}` : id);
+/** Short form for the HUD: game accounts by their own name (ginger-3.heat-index-game.testnet → ginger-3). */
+const short = (id: string) => {
+  const own = id.endsWith(`.${CONTRACT_ID}`) ? id.slice(0, -CONTRACT_ID.length - 1) : id;
+  return own.length > 22 ? `${own.slice(0, 10)}…${own.slice(-10)}` : own;
+};
 
 /** Login buttons shared by the login screen and the HUD panel. */
 export function NearLogin({ name, onDone }: { name: string; onDone?: () => void }) {
@@ -125,7 +129,7 @@ export function NearCell() {
   return (
     <div className="hud-cell near" ref={box} title="Your NEAR account and on-chain activity">
       <span className={pending ? 'led-pending' : failed ? 'led-error' : session ? '' : 'led-off'}>NEAR</span>
-      <button className="near-btn" data-sfx="open" onClick={() => setOpen(!open)}>
+      <button className="near-btn" data-sfx="open" title={session?.accountId} onClick={() => setOpen(!open)}>
         {session ? short(session.accountId) : 'OFF-CHAIN'}
       </button>
       {open && (
