@@ -305,6 +305,15 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   `create_player_account` (3 NEAR gas allowance); secrets live outside the repo and go up with `--secrets-file`.
   Custodial by design — stated in the README.
 
+### Progress comes back from NEAR (Nov 14)
+- Playtest: signing in with the same email again started a fresh game — the NEAR account was the same
+  (`ginger-3…` got a second game key), but the game's progress lives in the browser, so "start over" or another
+  device lost it. Now a login restores the player from the chain whenever the local world isn't tied to that account
+  yet: every robot token (model, durability, veteran record), the credits and the league progress (`league_of`); a
+  battle deck is rebuilt from the restored robots. Checked against `bot-alpha`: 19 robots, 364 CR, 8 veterans and its
+  league progress came back.
+- Login screen copy: "Sign in / sign up with email", and a line that returning players get their progress back.
+
 ## Next
 - Card art.
 - README for judges, demo video.

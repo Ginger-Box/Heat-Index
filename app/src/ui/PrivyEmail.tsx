@@ -94,7 +94,7 @@ export default function PrivyEmail({ name, onDone, onError }: Props) {
         autoFocus
       />
       <button type="submit" className="primary" disabled={busy || code.length < 6}>
-        {busy ? 'Creating your NEAR account…' : 'Enter the arena'}
+        {busy ? 'Opening your NEAR account…' : 'Enter the arena'}
       </button>
       <button type="button" className="login-offline" disabled={busy} onClick={() => setStep('email')}>
         another email

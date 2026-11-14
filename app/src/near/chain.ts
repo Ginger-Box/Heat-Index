@@ -83,6 +83,8 @@ export interface ChainRobot {
   token_id: string;
   owner_id: string;
   metadata: { model_id: string; durability: number; owner_id: string };
+  /** veteran record (contract v0.4+) */
+  record?: { battles: number; wins: number; rank: number } | null;
 }
 export async function chainRobots(accountId: string): Promise<ChainRobot[]> {
   const out: ChainRobot[] = [];

@@ -393,9 +393,20 @@ function Login({ error, onEnter }: { error?: string | null; onEnter: (name: stri
         cheap and invest in AI brokers.
       </p>
       <div className="grid">
-        <input placeholder="Your name in the arena" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <input placeholder="Your name in the arena (new players)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         {/* on NEAR: your robots and credits are tokens you own, every trade and battle is a transaction */}
-        <NearLogin name={nm || 'pilot'} onDone={() => onEnter(nm || 'Pilot')} />
+        <NearLogin
+          name={nm || 'pilot'}
+          onDone={() => {
+            // a returning player who left the name empty: take it from their account (ginger-3.heat-index… → Ginger)
+            const acc = chainSession()?.accountId.split('.')[0].replace(/-\d+$/, '') ?? '';
+            onEnter(nm || (acc ? acc[0].toUpperCase() + acc.slice(1) : 'Pilot'));
+          }}
+        />
+        <small className="muted">
+          Played before? Sign in with the same email or wallet — your robots, credits and league progress come back
+          from NEAR.
+        </small>
         {error && <div className="error">{error}</div>}
         <button type="button" className="login-offline" data-sfx="none" onClick={() => onEnter(nm || 'Guest')}>
           Play as a guest — just to try it, nothing is saved on-chain

@@ -69,7 +69,7 @@ export function NearLogin({ name, onDone }: { name: string; onDone?: () => void 
           </Suspense>
         ) : (
           <button className="primary" type="button" disabled={!!busy} onClick={() => setPrivyOpen(true)}>
-            ✉ Continue with email
+            ✉ Sign in / sign up with email
           </button>
         )}
         <button type="button" disabled={!!busy} onClick={() => run('wallet')}>
@@ -87,7 +87,7 @@ export function NearLogin({ name, onDone }: { name: string; onDone?: () => void 
         title={emailOk ? 'NEAR Auth: email, Google or passkey — a NEAR account is created for you' : `Email login runs on ${NEAR_AUTH.origin}`}
         onClick={() => run('email')}
       >
-        {busy === 'email' ? 'Creating your account…' : '✉ Continue with email'}
+        {busy === 'email' ? 'Creating your account…' : '✉ Sign in / sign up with email'}
       </button>
       <button type="button" disabled={!!busy} onClick={() => run('wallet')}>
         {busy === 'wallet' ? 'Waiting for the wallet…' : '◈ Connect NEAR wallet'}

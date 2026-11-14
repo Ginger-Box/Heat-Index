@@ -2,19 +2,45 @@
 // them into contract calls signed with the browser's game key (near/chain.ts), and links the game's robots to
 // their NEP-245 token ids (OwnedRobot.chainId).
 
-import { PLAYER_ID, playerHooks } from '../engine/world';
+import { PLAYER_ID, playerHooks, restorePlayerFromChain } from '../engine/world';
 import { model } from '../engine/robots';
 import { act, getWorld } from '../store';
-import { chainCall, chainRobots, chainSession } from './chain';
+import { chainCall, chainCredits, chainRobots, chainSession, view } from './chain';
 
 const MAX_DUR = 16; // the contract's durability cap
 const clampDur = (d: number) => Math.max(0, Math.min(MAX_DUR, Math.round(d)));
 
-/** Give every chain robot token of the player a matching local robot (same model, not linked yet). */
+/**
+ * After a login: if this world isn't tied to the account yet (a new browser, or after "start over"), restore the
+ * player from the chain — robots with durability and battle records, credits, league progress. Otherwise give
+ * every chain robot token a matching local robot (same model, not linked yet).
+ */
 export async function linkRobots() {
   const s = chainSession();
   if (!s) return;
   const tokens = await chainRobots(s.accountId);
+  if (getWorld()?.chainAccount !== s.accountId) {
+    const [credits, league] = await Promise.all([
+      chainCredits(s.accountId),
+      view<{ div: number; beaten: string[]; crowns: number }>('league_of', { account_id: s.accountId }).catch(() => undefined),
+    ]);
+    // nothing on-chain yet (registration still in flight): keep the local starter deck
+    if (!tokens.length && !credits) return;
+    act((w) =>
+      restorePlayerFromChain(w, s.accountId, {
+        credits,
+        league,
+        robots: tokens.map((t) => ({
+          tokenId: t.token_id,
+          modelId: t.metadata.model_id,
+          durability: t.metadata.durability,
+          battles: t.record?.battles,
+          wins: t.record?.wins,
+        })),
+      }),
+    );
+    return;
+  }
   act((w) => {
     const linked = new Set(Object.values(w.robots).map((r) => r.chainId).filter(Boolean));
     for (const t of tokens) {

@@ -174,6 +174,8 @@ export interface World {
   purseDay?: { day: number; amount: number };
   /** the last battle's reward to the player, and whether a limit cut it */
   lastPlayerReward?: { reward: number; capped: boolean };
+  /** the NEAR account this world's player side was last restored from / mirrored to */
+  chainAccount?: string;
   /** the Factory is on strike (no restocking) until this game hour */
   strikeUntil?: number;
 }
@@ -571,6 +573,47 @@ function syncDecks(w: World, m: Manager) {
   if (!m.decks) return;
   m.decks[m.activeDeck ?? 0].uids = [...m.team];
   for (const d of m.decks) d.uids = d.uids.filter((u) => w.robots[u]?.owner === m.id);
+}
+
+/** The player's side as recorded on NEAR (robot tokens, credits, league) — see restorePlayerFromChain. */
+export interface ChainPlayer {
+  credits: number;
+  robots: { tokenId: string; modelId: string; durability: number; battles?: number; wins?: number }[];
+  league?: { div: number; beaten: string[]; crowns: number };
+}
+
+/**
+ * Logging in to a NEAR account on a new browser (or after "start over"): the player's progress comes back from the
+ * chain — every robot token with its durability and battle record, the credits and the league progress. The world
+ * around (NPC teams, brokers, prices) is this browser's own simulation. A world already tied to this account only
+ * links its robots to their tokens.
+ */
+export function restorePlayerFromChain(w: World, accountId: string, chain: ChainPlayer) {
+  const me = getManager(w, PLAYER_ID);
+  for (const r of robotsOf(w, PLAYER_ID)) if (!r.loaner) delete w.robots[r.uid];
+  for (const t of chain.robots) {
+    if (!MODELS.some((x) => x.id === t.modelId)) continue;
+    const r = mint(w, t.modelId, PLAYER_ID);
+    r.durability = Math.max(0, Math.min(t.durability, maxDurability(t.modelId)));
+    r.chainId = t.tokenId;
+    if (t.battles) r.vet = { b: t.battles, w: t.wins ?? 0 };
+  }
+  me.credits = chain.credits;
+  if (chain.league) {
+    const byName = (n: string) => w.managers.find((m) => m.name === n)?.id;
+    w.league = {
+      div: Math.max(0, Math.min(DIVISIONS.length - 1, chain.league.div)),
+      beaten: chain.league.beaten.map(byName).filter((x): x is string => !!x),
+      crowns: chain.league.crowns,
+    };
+  }
+  // a fresh battle deck from the restored robots (the strongest that fit the limit), the other teams empty
+  const team = buildTeam(robotsOf(w, PLAYER_ID), (r) => model(r.modelId).cost * 10 + durFrac(r));
+  me.team = team ? team.map((r) => r.uid) : [];
+  me.decks = undefined;
+  ensureDecks(me);
+  w.chainAccount = accountId;
+  log(w, 'player', `Restored from NEAR (${accountId}): ${chain.robots.length} robots, ${chain.credits} CR`);
 }
 
 /** Which deck a robot stands in (or -1). */
