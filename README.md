@@ -168,6 +168,15 @@ npm install
 npm run deploy     # builds the app into web/public and runs `cf deploy`
 ```
 
+Tests and checks (CI runs all of them on every push — `.github/workflows/ci.yml`):
+
+```bash
+cd contract && cargo test   # 22 contract tests: every price / reward / wear / abuse limit, merges
+cd app && npm test          # 15 engine tests: battle rules and determinism, prices inside the contract's
+                            # ranges, the game's constants = the contract's, a simulated week, league, veterans
+cd app && npm run verify    # reads NEAR testnet + the live site and prints ✓/✗ for each claim in this README
+```
+
 Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run economy`,
 `npx tsx scripts/classes.ts 150`, `npx tsx scripts/payoff.ts`.
 

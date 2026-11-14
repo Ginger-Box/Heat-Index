@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "balance": "tsx scripts/balance.ts",
     "economy": "tsx scripts/economy.ts",
-    "build:web": "vite build --base=/ --outDir ../web/public --emptyOutDir"
+    "build:web": "vite build --base=/ --outDir ../web/public --emptyOutDir",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "verify": "tsx scripts/verify.ts"
   },
   "dependencies": {
     "@fast-auth-near/browser-sdk": "^1.4.2",
