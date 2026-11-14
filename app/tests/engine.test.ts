@@ -272,3 +272,16 @@ test('a broker model answer is clamped to the broker\'s bounds; garbage is ignor
   advanceHours(w, 3); // the world keeps running with the policy applied
   assert.ok(robotsOf(w, 'kessler').every((r) => r.modelId !== 'bastion' || r.durability >= 0));
 });
+
+test('the shared world: 5-minute game hours, a real day per game day, no local player, prices move every hour', async () => {
+  const { createSharedWorld, hoursPerDay, clockOf, dayOf, playNpcMatch } = await import('../src/engine/world');
+  const w = createSharedWorld(77);
+  assert.equal(hoursPerDay(w), 288);
+  assert.ok(!w.managers.some((m) => m.id === PLAYER_ID));
+  assert.equal(w.managers.length, 12);
+  const h0 = w.history.length;
+  for (let i = 0; i < 288; i++) playNpcMatch(w); // a real day: one match per 5 minutes
+  assert.equal(dayOf(w), 2);
+  assert.ok(w.history.length >= h0 + 288 - 1, 'a price snapshot every game hour');
+  assert.equal(clockOf(w, 6), '00:30');
+});

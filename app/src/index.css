@@ -5091,7 +5091,8 @@ p.tour-swap {
   filter: drop-shadow(0 2px 0 #000a);
 }
 .bp-eye {
-  animation: bp-eye 4.2s steps(1) infinite;
+  animation: bp-eye var(--blink-d, 4.2s) steps(1) infinite;
+  animation-delay: var(--blink-delay, 0s);
 }
 @keyframes bp-eye {
   0%,
@@ -5317,6 +5318,11 @@ p.tour-swap {
 
 /* ---------- market news (Brokers) ---------- */
 .market-news {
+  /* a fixed box that scrolls (new news no longer pushes the broker cards down) */
+  height: 132px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
   margin-top: 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -5387,3 +5393,16 @@ p.tour-swap {
 .you-tag { color: var(--yellow); border-color: var(--yellow); }
 .broker-mind { font-size: 12px; margin: 6px 0 2px; color: var(--cyan); }
 .broker-mind.muted { color: var(--muted); }
+
+/* the shared-world tag: a blinking status LED on the left */
+.shared-tag::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: hud-led 1.3s steps(1) infinite;
+}

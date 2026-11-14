@@ -12,6 +12,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { baseDecode } from 'near-api-js';
 import {
+  hoursPerDay,
+  matchesPerHour,
   addHuman,
   applyMatch,
   buy,
@@ -40,16 +42,20 @@ import { vetRank } from '../../app/src/engine/veteran';
 
 interface Env {
   OWNER_SECRET: string;
-  /** NEAR AI Cloud API key — the brokers' minds (absent: rule-based brokers) */
+  /** NEAR AI Cloud API keys — the brokers' minds (absent: rule-based brokers); the second is a fallback */
   NEARAI_KEY?: string;
+  NEARAI_KEY_2?: string;
 }
 
-/** a verifiable (TEE) open model on NEAR AI Cloud */
-const BROKER_MODEL = 'Qwen/Qwen3.8-27B';
+/** the cheapest DeepSeek on NEAR AI Cloud, verifiable (runs in a TEE); called without reasoning */
+const BROKER_MODEL = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
+/** each broker thinks once a real hour (12 five-minute game hours) — cheap and still lively */
+const MIND_EVERY_HOURS = 12;
 
 const CONTRACT_ID = 'heat-index-game.testnet';
 const RPC_URL = 'https://test.rpc.fastnear.com';
-const MATCH_EVERY_MS = 10 * 60_000; // one NPC match / 10 min → 12 per game hour → a game day = a real day
+/** real milliseconds per NPC match: a game day is a real day (shared world: 288 five-minute hours, 1 match each) */
+const msPerMatch = (w: World) => 86_400_000 / (hoursPerDay(w) * matchesPerHour(w));
 const TICK_MS = 60_000;
 const CHUNK = 1_000_000; // storage values are split into ~1 MB pieces
 const TOKEN_TTL_MS = 12 * 3600_000;
@@ -99,9 +105,12 @@ export class SharedWorld extends DurableObject<Env> {
       this.w = JSON.parse(Array.from({ length: meta.chunks }, (_, i) => parts.get(`w${i}`) ?? '').join('')) as World;
       this.startMs = meta.startMs;
       this.version = meta.version;
-    } else {
+    }
+    // a world from before the 5-minute clock (or none yet): start a fresh shared world
+    if (!this.w?.hoursPerDay) {
       this.w = createSharedWorld(Date.now() % 2 ** 31);
       this.startMs = Date.now();
+      this.version = (meta?.version ?? 0) + 1;
       this.dirty = true;
       await this.save();
     }
@@ -124,7 +133,7 @@ export class SharedWorld extends DurableObject<Env> {
   /** the clock: catch up on the NPC matches that are due (real time) */
   async alarm() {
     const w = await this.world();
-    const due = Math.floor((Date.now() - this.startMs) / MATCH_EVERY_MS);
+    const due = Math.floor((Date.now() - this.startMs) / msPerMatch(w));
     for (let n = 0; w.tick < due && n < 30; n++) {
       playNpcMatch(w);
       this.dirty = true;
@@ -157,20 +166,38 @@ export class SharedWorld extends DurableObject<Env> {
 
   /** once a game hour, each open broker asks its model for a policy (clamped to its bounds: engine/brokerAi.ts) */
   private async brokerMinds(w: World) {
-    const key = this.env.NEARAI_KEY;
-    if (!key) return;
-    const due = w.brokers.filter((b) => !b.closed && (b.ai?.at ?? -1) < w.hour && this.tried.get(b.id) !== w.hour);
+    const keys = [this.env.NEARAI_KEY, this.env.NEARAI_KEY_2].filter(Boolean) as string[];
+    if (!keys.length) return;
+    const due = w.brokers.filter(
+      (b) => !b.closed && (b.ai?.at ?? -Infinity) <= w.hour - MIND_EVERY_HOURS && (this.tried.get(b.id) ?? -Infinity) <= w.hour - MIND_EVERY_HOURS,
+    );
     await Promise.all(
       due.map(async (b) => {
         this.tried.set(b.id, w.hour);
         try {
-          const res = await fetch('https://cloud-api.near.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: BROKER_MODEL, messages: brokerPrompt(w, b), temperature: 0.7, max_tokens: 400 }),
-            signal: AbortSignal.timeout(30_000),
+          const body = JSON.stringify({
+            model: BROKER_MODEL,
+            messages: brokerPrompt(w, b),
+            temperature: 0.7,
+            max_tokens: 250,
+            // no reasoning: a short JSON answer is all we need (and it's the cheapest call)
+            chat_template_kwargs: { thinking: false, enable_thinking: false },
           });
-          const out = (await res.json()) as { id?: string; choices?: { message?: { content?: string } }[] };
+          let out: { id?: string; choices?: { message?: { content?: string } }[] } | null = null;
+          for (const key of keys) {
+            // the second key is a fallback (rate limit, empty balance, an outage)
+            const res = await fetch('https://cloud-api.near.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+              body,
+              signal: AbortSignal.timeout(30_000),
+            });
+            if (res.ok) {
+              out = await res.json();
+              break;
+            }
+          }
+          if (!out) return;
           const text = (out.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
           const p = parsePolicy(b, text);
           if (p) {
@@ -188,7 +215,7 @@ export class SharedWorld extends DurableObject<Env> {
   async think(): Promise<Response> {
     const w = await this.world();
     this.tried.clear();
-    for (const b of w.brokers) if (b.ai) b.ai.at = -1;
+    for (const b of w.brokers) if (b.ai) b.ai.at = -Infinity;
     await this.brokerMinds(w);
     await this.save();
     return json({ brokers: w.brokers.map((b) => ({ id: b.id, ai: b.ai ?? null, style: b.style })) });
@@ -203,6 +230,8 @@ export class SharedWorld extends DurableObject<Env> {
   private async auth(req: Request) {
     const { accountId, publicKey, ts, signature, name } = (await req.json()) as Record<string, string>;
     if (!/^[a-z0-9_.-]{2,64}$/.test(accountId ?? '')) return json({ error: 'Bad account' }, 400);
+    // the testnet demo bots (bot-*.heat-index-game.testnet) are scripts, not players
+    if (/^bot-[a-z]+\.heat-index-game\.testnet$/.test(accountId)) return json({ error: 'Demo bots do not join the shared world' }, 403);
     if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return json({ error: 'The login request expired' }, 400);
     const pub = baseDecode(String(publicKey).replace(/^ed25519:/, ''));
     const sig = Uint8Array.from(atob(String(signature)), (c) => c.charCodeAt(0));
@@ -262,6 +291,8 @@ export class SharedWorld extends DurableObject<Env> {
     const me = await this.player(req);
     if (!me) return json({ error: 'Please log in again' }, 401);
     const w = await this.world();
+    // the world was restarted since this login: the client logs in again and rejoins from the chain
+    if (!w.managers.some((m) => m.id === me)) return json({ error: 'Please log in again' }, 401);
     if (!this.cache || this.cache.version !== this.version) this.cache = { version: this.version, text: JSON.stringify(w) };
     const since = Number(new URL(req.url).searchParams.get('since') ?? -1);
     if (since === this.version) return new Response(null, { status: 204 });

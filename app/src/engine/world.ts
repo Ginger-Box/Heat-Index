@@ -207,11 +207,25 @@ export interface World {
   lastPlayerReward?: { reward: number; capped: boolean };
   /** the NEAR account this world's player side was last restored from / mirrored to */
   chainAccount?: string;
+  /** game hours per day / NPC matches per game hour (absent: 12 / 12 — a local world) */
+  hoursPerDay?: number;
+  matchesPerHour?: number;
   /** the Factory is on strike (no restocking) until this game hour */
   strikeUntil?: number;
 }
 
-export const dayOf = (w: World) => Math.floor(w.hour / HOURS_PER_DAY) + 1;
+/** Game hours in a day: 12 in a local world (08:00–20:00); the shared world has 288 five-minute "hours", so its
+ *  prices, brokers and charts move every 5 real minutes while a game day is still a real day. */
+export const hoursPerDay = (w: World) => w.hoursPerDay ?? HOURS_PER_DAY;
+export const matchesPerHour = (w: World) => w.matchesPerHour ?? MATCHES_PER_HOUR;
+/** "HH:MM" of a game hour (local: 08:00–19:00; shared: the real time of day) */
+export function clockOf(w: World, hour: number): string {
+  const hpd = hoursPerDay(w);
+  if (hpd === HOURS_PER_DAY) return `${String(8 + (hour % hpd)).padStart(2, '0')}:00`;
+  const min = Math.round(((hour % hpd) * 1440) / hpd);
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+export const dayOf = (w: World) => Math.floor(w.hour / hoursPerDay(w)) + 1;
 export const dayInSeason = (w: World) => ((dayOf(w) - 1) % DAYS_PER_SEASON) + 1;
 
 // ---------- helpers ----------
@@ -1137,7 +1151,10 @@ function leagueSponsor(w: World, m: Manager, classes: RobotClass[], rel: Record<
 
 function brokerHour(w: World, rel: Record<string, number>) {
   for (const b of w.brokers) {
-    for (const x of MODELS) b.perceived[x.id] = updatePerceived(b.perceived[x.id], rel[x.id], b.style);
+    // with shorter game hours (shared world) each update moves less, so a broker reacts at the same speed per day
+    const scale = HOURS_PER_DAY / hoursPerDay(w);
+    const style = scale === 1 ? b.style : { ...b.style, react: 1 - Math.pow(1 - b.style.react, scale) };
+    for (const x of MODELS) b.perceived[x.id] = updatePerceived(b.perceived[x.id], rel[x.id], style);
     if (b.closed) continue;
     // The scrap dealer repairs broken robots and puts them up for sale
     if (b.style.scrapper) {
@@ -1157,7 +1174,8 @@ function brokerHour(w: World, rel: Record<string, number>) {
       // turned into cheap stock made it the cheapest seller of everything and it got rich off everyone.
       let fixed = 0;
       for (const r of broken) {
-        if (fixed >= JUNK_REPAIRS_PER_HOUR) break;
+        // the same pace per day in a world with shorter game hours
+        if (fixed >= JUNK_REPAIRS_PER_HOUR || w.hour % Math.max(1, Math.round(hoursPerDay(w) / HOURS_PER_DAY)) !== 0) break;
         if (brokerStock(w, b, r.modelId).length >= b.style.targetStock + 1) continue;
         const cost = Math.round(repairCost(brokerFair(w, b, r.modelId), r) * JUNK_REPAIR_COST);
         fixed++;
@@ -1239,7 +1257,7 @@ function snapshot(w: World, rel: Record<string, number>) {
   // the whole history is kept (Analytics shows the last 7 days, or any season): hourly points for the last
   // 14 days, older days compacted to their last hour — about 1 KB a day, so years fit in the save
   const cutoff = dayOf(w) - 14;
-  if (w.history.length && w.history[0].day < cutoff && w.history.length > 14 * HOURS_PER_DAY) {
+  if (w.history.length && w.history[0].day < cutoff && w.history.length > 14 * hoursPerDay(w)) {
     w.history = w.history.filter((h, i, all) => h.day >= cutoff || all[i + 1]?.day !== h.day);
   }
   for (const x of MODELS) {
@@ -1337,7 +1355,7 @@ function marketEvent(w: World, r: Rng) {
       break;
     }
     case 'strike':
-      w.strikeUntil = w.hour + HOURS_PER_DAY * 2;
+      w.strikeUntil = w.hour + hoursPerDay(w) * 2;
       log(w, 'broker', `✊ Factory strike: no new robots for 2 days. Brokers with full stock will cash in.`);
       break;
     case 'raid': {
@@ -1398,7 +1416,7 @@ function endHour(w: World) {
   brokerHour(w, rel);
   w.hour++;
   snapshot(w, rel);
-  if (w.hour % HOURS_PER_DAY === 0) {
+  if (w.hour % hoursPerDay(w) === 0) {
     brokerUpkeep(w);
     withRng(w, (r) => marketEvent(w, r));
     brokerDayEnd(w);
@@ -1413,7 +1431,7 @@ function endHour(w: World) {
     }
     w.dayStartPrice = Object.fromEntries(MODELS.map((x) => [x.id, Math.round(refPrice(w, x.id))]));
     w.reportedToday = [];
-    if ((w.hour / HOURS_PER_DAY) % DAYS_PER_SEASON === 0) seasonEnd(w);
+    if ((w.hour / hoursPerDay(w)) % DAYS_PER_SEASON === 0) seasonEnd(w);
   }
 }
 
@@ -1458,12 +1476,12 @@ export function playNpcMatch(w: World) {
     npcManage(w, b, r);
   });
   w.tick++;
-  if (w.tick % MATCHES_PER_HOUR === 0) endHour(w);
+  if (w.tick % matchesPerHour(w) === 0) endHour(w);
 }
 
 /** Run N game hours. */
 export function advanceHours(w: World, hours: number) {
-  for (let i = 0; i < hours * MATCHES_PER_HOUR; i++) playNpcMatch(w);
+  for (let i = 0; i < hours * matchesPerHour(w); i++) playNpcMatch(w);
 }
 
 // ---------- creating the world ----------
@@ -1608,6 +1626,9 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
  */
 export function createSharedWorld(seed: number): World {
   const w = createWorld(seed, 'server');
+  // 5-minute game hours, one NPC match each: the market moves every 5 minutes, a game day is a real day
+  w.hoursPerDay = 288;
+  w.matchesPerHour = 1;
   for (const r of robotsOf(w, PLAYER_ID)) delete w.robots[r.uid];
   w.managers = w.managers.filter((m) => m.id !== PLAYER_ID);
   w.league = undefined;

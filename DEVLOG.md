@@ -368,6 +368,18 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   (no API key in the browser). The API key is a Worker secret built from a local file at deploy time.
 - Analytics: the last 7 days by default, any season or all of it; the whole history is kept.
 
+### A livelier shared world (Nov 14)
+- Playtest: in the shared world "time doesn't move" — prices and charts changed only once a game hour (2 real hours).
+  Now its game hours are 5 minutes (288 a day, one NPC match each): prices, brokers and Analytics move every
+  5 minutes, a game day is still a real day and a season 7 real days; brokers' reaction speed and the Junkman's
+  refurbishing are scaled so the economy runs at the same pace per day. The clock shows the real time of day.
+- Brokers' model: `deepseek-ai/DeepSeek-V4.1-Flash-1017` (the cheapest DeepSeek on NEAR AI Cloud, verifiable/TEE),
+  no reasoning, max 250 tokens, once a real hour per broker; a second API key is a fallback.
+- The shared world restarted on the new clock; demo bot accounts can't join as players. A client whose session
+  points to a restarted world logs in again by itself (rejoins from the chain).
+- UI: Market news is a fixed scrolling box; broker faces blink on their own random rhythm; the SHARED WORLD tag has
+  a blinking LED; in the shared world Reset becomes "Log out" and says it only affects you.
+
 ## Next
 - Card art.
 - README for judges, demo video.

@@ -83,7 +83,7 @@ const BANNER: Record<string, string> = {
 
 /** The latest market events and broker news (bankruptcies, investments, audits, raids…). */
 function MarketNews({ w }: { w: World }) {
-  const news = w.events.filter((e) => e.kind === 'broker').slice(-5).reverse();
+  const news = w.events.filter((e) => e.kind === 'broker').slice(-40).reverse();
   if (!news.length) return null;
   return (
     <div className="market-news">

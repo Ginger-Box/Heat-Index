@@ -52,6 +52,7 @@ let mode: 'local' | 'shared' = 'local';
 export const isShared = () => mode === 'shared';
 const WORLD_API = `${typeof location !== 'undefined' && location.origin === PUBLIC_ORIGIN ? '' : PUBLIC_ORIGIN}/api/world`;
 let shared: { token: string; version: number; poll: ReturnType<typeof setInterval> | null; pending: number; startMs: number } | null = null;
+let sharedName = '';
 let serverNote: { text: string; at: number } | null = null;
 export const sharedInfo = () => (shared ? { startMs: shared.startMs, version: shared.version } : null);
 export const lastServerNote = () => (serverNote && Date.now() - serverNote.at < 6000 ? serverNote.text : null);
@@ -76,6 +77,8 @@ export async function startShared(name: string) {
   });
   const out = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
   if (!res.ok || !out.token) throw new Error(out.error ?? 'Could not join the shared world');
+  if (shared?.poll) clearInterval(shared.poll);
+  sharedName = name;
   shared = { token: out.token, version: -1, poll: null, pending: 0, startMs: 0 };
   await pull(true);
   mode = 'shared';
@@ -93,6 +96,11 @@ async function pull(force: boolean) {
   if (!shared || (!force && shared.pending > 0)) return;
   const res = await fetch(`${WORLD_API}/state?since=${force ? -1 : shared.version}`, { headers: { Authorization: `Bearer ${shared.token}` } });
   if (res.status === 204) return;
+  if (res.status === 401) {
+    // the session expired or the shared world was restarted: log in again (rejoins from the chain)
+    await startShared(sharedName).catch(() => {});
+    return;
+  }
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `World server: ${res.status}`);
   const out = (await res.json()) as { version: number; startMs: number; world: World };
   if (!shared || (!force && shared.pending > 0)) return;

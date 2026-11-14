@@ -1,9 +1,9 @@
 // Faces and voices of the three brokers (LLM-run on NEAR AI in the shared world, rule-based for guests): a hand-drawn pixel portrait, a title, a one-line bio, and a live remark
 // that reacts to the market (their profit, their cash, the robots they misprice, the player's stake).
 
-import { memo, type ReactElement } from 'react';
+import { memo, type ReactElement, useState } from 'react';
 import { MODELS, model } from '../engine/robots';
-import { HOUSE, PLAYER_ID, actualRelevance, brokerProfitToday, robotsOf, type Broker, type World } from '../engine/world';
+import { HOUSE, PLAYER_ID, actualRelevance, brokerProfitToday, robotsOf, type Broker, type World, hoursPerDay } from '../engine/world';
 
 interface Persona {
   person: string;
@@ -96,6 +96,8 @@ export const PERSONAS: Record<string, Persona> = {
 /** Pixel portrait; eye / visor pixels glow and blink (index.css · broker portraits). */
 export const BrokerPortrait = memo(function BrokerPortrait({ id, size = 84 }: { id: string; size?: number }) {
   const p = PERSONAS[id];
+  // each face blinks on its own random rhythm (not all three at once)
+  const [blink] = useState(() => ({ d: 3.2 + Math.random() * 4, delay: -Math.random() * 7 }));
   if (!p) return null;
   const eyes = new Set(['v', 'W', 'g', 'G', 'o']);
   const rects: ReactElement[] = [];
@@ -107,7 +109,10 @@ export const BrokerPortrait = memo(function BrokerPortrait({ id, size = 84 }: { 
     }
   });
   return (
-    <div className="broker-portrait" style={{ ['--bc' as string]: p.color }}>
+    <div
+      className="broker-portrait"
+      style={{ ['--bc' as string]: p.color, ['--blink-d' as string]: `${blink.d.toFixed(2)}s`, ['--blink-delay' as string]: `${blink.delay.toFixed(2)}s` }}
+    >
       <svg viewBox="0 0 20 16" width={size} height={(size * 16) / 20} shapeRendering="crispEdges">
         {rects}
       </svg>
@@ -120,7 +125,7 @@ const pick = <T,>(xs: T[], seed: number) => xs[Math.abs(seed) % xs.length];
 /** The broker's live remark: what it thinks of the market right now, in its own voice. */
 export function brokerQuote(w: World, b: Broker): string {
   // the broker's own words when its LLM mind spoke this game hour or the last (shared world)
-  if (b.ai?.remark && w.hour - b.ai.at <= 1) return b.ai.remark;
+  if (b.ai?.remark && w.hour - b.ai.at <= Math.max(1, hoursPerDay(w) / 24)) return b.ai.remark;
   const seed = w.hour * 7 + b.id.length * 13;
   const rel = actualRelevance(w);
   // the robot this broker misprices the most (it sees relevance late)

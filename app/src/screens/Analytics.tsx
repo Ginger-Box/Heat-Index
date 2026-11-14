@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CLASSES, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
-import { DAYS_PER_SEASON, type World } from '../engine/world';
+import { DAYS_PER_SEASON, clockOf, type World } from '../engine/world';
 import { LINE_COLORS, LineChart } from '../ui/common';
 
 // a fixed colour per class, so a class keeps its colour whatever is shown
@@ -108,13 +108,13 @@ export function Analytics({ w }: { w: World }) {
         )}
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
-        Each point is one game hour (older than two weeks: one per day). {hint} Hover a line or a name below to highlight it, click the chart to pin.
+        Each point is one game hour — 5 minutes in the shared world (older than two weeks: one per day). {hint} Hover a line or a name below to highlight it, click the chart to pin.
         {mode === 'models' ? ' Pick models below (up to 8).' : ''}
       </p>
       <LineChart
         series={mode === 'classes' ? classSeries : modelSeries}
         labels={hist.map(
-          (h) => `S${seasonOf(h.day)} · day ${((h.day - 1) % DAYS_PER_SEASON) + 1} · ${String(8 + (h.hour % 12)).padStart(2, '0')}:00`,
+          (h) => `S${seasonOf(h.day)} · day ${((h.day - 1) % DAYS_PER_SEASON) + 1} · ${clockOf(w, h.hour)}`,
         )}
         highlight={hl}
       />

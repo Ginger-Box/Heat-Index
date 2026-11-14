@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   DAYS_PER_SEASON,
-  HOURS_PER_DAY,
+  clockOf,
   PLAYER_ID,
   dayInSeason,
   getManager,
@@ -167,7 +167,6 @@ export default function App() {
       />
     );
   const me = getManager(w, PLAYER_ID);
-  const hourOfDay = w.hour % HOURS_PER_DAY;
 
   return (
     <>
@@ -217,7 +216,7 @@ export default function App() {
           <div className="hud-cell time" title="Season · day of the season · time">
             <span>SEASON {w.season}</span>
             <b>
-              <Glitch text={`DAY ${dayInSeason(w)}/${DAYS_PER_SEASON} · ${String(8 + hourOfDay).padStart(2, '0')}:00`} />
+              <Glitch text={`DAY ${dayInSeason(w)}/${DAYS_PER_SEASON} · ${clockOf(w, w.hour)}`} />
             </b>
           </div>
         </div>
@@ -226,7 +225,7 @@ export default function App() {
             className="tag shared-tag"
             title={`One world for every player on NEAR. Season ${w.season}: ${Math.max(0, Math.ceil(((sharedInfo()?.startMs ?? Date.now()) + w.season * 7 * 86_400_000 - Date.now()) / 86_400_000))} real days left.`}
           >
-            ● SHARED WORLD
+            SHARED WORLD
           </span>
         )}
         {lastServerNote() && <span className="tag server-note">{lastServerNote()}</span>}
@@ -361,8 +360,12 @@ function SettingsMenu({
           </div>}
           <div className="set-row">
             <div>
-              <b>Start over</b>
-              <div className="muted">Deletes all progress.</div>
+              <b>{isShared() ? 'Log out' : 'Start over'}</b>
+              <div className="muted">
+                {isShared()
+                  ? 'Leaves the shared world on this computer. Only you are affected: your robots and credits stay on NEAR, the world and other players carry on — sign in again to come back.'
+                  : "Deletes this browser's guest world only — nothing else, nothing on-chain."}
+              </div>
             </div>
             {/* in-app confirmation: window.confirm() is blocked in some embedded browsers, so Reset did nothing */}
             <button
@@ -374,10 +377,11 @@ function SettingsMenu({
                   return;
                 }
                 setSureReset(false);
+                if (isShared()) signOutChain();
                 resetGame();
               }}
             >
-              {sureReset ? 'Sure? Click again' : 'Reset'}
+              {sureReset ? 'Sure? Click again' : isShared() ? 'Log out' : 'Reset'}
             </button>
           </div>
         </div>
