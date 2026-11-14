@@ -1,0 +1,12 @@
+{
+  "name": "heat-index-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "npm --prefix ../app run build:web && cf deploy"
+  },
+  "devDependencies": {
+    "cf": "^1.0.0-beta.32",
+    "wrangler": "^4.162.0"
+  }
+}

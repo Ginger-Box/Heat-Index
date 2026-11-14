@@ -7,7 +7,8 @@ Robots are cards that **wear out**: every battle costs durability, repairs cost 
 A robot's market price follows its **relevance** (how often it wins and how many teams field it), so the market
 *is* the meta. AI brokers trade with a **reaction lag** — spot what's rising before they do and you profit.
 
-> **Play:** https://ginger-box.github.io/Heat-Index/ (wallet login) · locally on `http://localhost:3000` (email login).
+> **Play:** https://heat-index-web.ginger-box.workers.dev (NEAR wallet or guest) · locally on `http://localhost:3000`
+> (email login too — the shared testnet NEAR Auth app only accepts localhost).
 > Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet) on NEAR testnet.
 
 ## For judges: 2 minutes
@@ -138,8 +139,16 @@ Contract (Rust, near-sdk 5):
 
 ```bash
 cd contract
-cargo test                              # 9 unit tests: full loop + every price / reward / wear limit
+cargo test                              # 20 unit tests: full loop + every price / reward / wear / abuse limit
 cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
+```
+
+Public site (Cloudflare Workers static assets, `web/`; needs the `cf` CLI signed in):
+
+```bash
+cd web
+npm install
+npm run deploy     # builds the app into web/public and runs `cf deploy`
 ```
 
 Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run economy`,
