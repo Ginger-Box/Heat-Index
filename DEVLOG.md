@@ -520,6 +520,14 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   as a world wallet on its own and Kessler records its TEE-verified decisions from there; the old account stays
   on-chain, retired. `scripts/world-wallets.ts` no longer touches the server's key.
 
+### Bot teams sign their own moves (Nov 14)
+- Contract: `npc_buy` / `npc_sell` / `npc_repair` / `npc_record_battle` (replayed) / `npc_buy_listing` / `npc_drop`,
+  callable only by a bot team's own account (`ww:` kind npc). 39 tests.
+- `scripts/npc-keys.ts`: each npc-* account topped up to 0.45 NEAR (it pays its own gas) and given a key limited to
+  `npc_*`; the world server signs bot moves with the team's key (`chainCall(…, as)`). The server's own key no longer
+  has any move method: signed_move (players' relayed moves), record_verified_battle_for (online battles),
+  commit_world, adopt_world_wallet, sync_world_credits. `npm run verify` checks every team's key.
+
 ## Next
 - Card art.
 - README for judges, demo video.

@@ -932,6 +932,54 @@ impl Contract {
         );
     }
 
+    // ---------------- the bot teams sign their own moves ----------------
+    //
+    // Each Pit League team's account calls these itself (its key is limited to them), so in the explorer the team is
+    // the signer of its own purchases, sales, repairs and battles. The same rules apply as for players; a battle is
+    // replayed by the contract like any other.
+
+    fn npc_self(&self) -> AccountId {
+        let me = env::predecessor_account_id();
+        let ww: serde_json::Value = env::storage_read(format!("ww:{me}").as_bytes())
+            .and_then(|v| serde_json::from_slice(&v).ok())
+            .unwrap_or_else(|| env::panic_str("Only a bot team's own account"));
+        require!(ww["kind"] == "npc", "Only a bot team's own account");
+        me
+    }
+
+    pub fn npc_buy(&mut self, model_id: String, price: U128, durability: u32, broker: String) -> String {
+        let me = self.npc_self();
+        self.do_buy_robot(me, model_id, price, durability, broker)
+    }
+
+    pub fn npc_sell(&mut self, token_id: String, price: U128, broker: String) {
+        let me = self.npc_self();
+        self.do_sell_robot(me, token_id, price, broker)
+    }
+
+    pub fn npc_repair(&mut self, token_id: String, cost: U128, durability: u32) {
+        let me = self.npc_self();
+        self.do_repair_robot(me, token_id, cost, durability)
+    }
+
+    pub fn npc_record_battle(&mut self, side: u8, opponent: String, reward: U128, log: String) {
+        let me = self.npc_self();
+        require!(!opponent.starts_with("online:"), "Bot teams play league battles");
+        self.do_verified_battle(me, side, opponent, reward, log)
+    }
+
+    pub fn npc_buy_listing(&mut self, token_id: String) {
+        let me = self.npc_self();
+        self.do_buy_listing(me, token_id, u128::MAX)
+    }
+
+    /// A robot that left the team in the world (sold before its purchase reached the chain, or a sale the limits
+    /// refused) — the team burns its own token.
+    pub fn npc_drop(&mut self, token_id: String) {
+        let me = self.npc_self();
+        self.burn_robot(&me, &token_id, "left the world");
+    }
+
     // ---------------- the world's hourly commitments ----------------
 
     /// The game server only: commit hour `epoch` of the shared world — the SHA-256 of the published snapshot
@@ -1854,6 +1902,23 @@ mod tests {
         // only the server commits
         ctx("mallory.testnet");
         assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.commit_world(2, h0.clone(), j.clone(), h1.clone()))).is_err());
+    }
+
+    #[test]
+    fn bot_teams_sign_their_own_moves() {
+        let (mut c, _) = setup("alice.testnet");
+        ctx("game.testnet");
+        c.adopt_world_wallet("npc-dogs.game.testnet".parse().unwrap(), "npc".into(), "Rusty Dogs".into(), U128(500), vec![]);
+        ctx("npc-dogs.game.testnet");
+        let t = c.npc_buy("volt".into(), U128(110), 10, "kessler".into());
+        assert_eq!(c.mt_balance_of("npc-dogs.game.testnet".parse().unwrap(), t.clone()).0, 1);
+        c.npc_repair(t.clone(), U128(10), 10);
+        // a player (or anyone) can't use the bot methods
+        ctx("alice.testnet");
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.npc_buy("volt".into(), U128(110), 10, "kessler".into()))).is_err());
+        ctx("npc-dogs.game.testnet");
+        c.npc_drop(t.clone());
+        assert_eq!(c.mt_balance_of("npc-dogs.game.testnet".parse().unwrap(), t).0, 0);
     }
 
     #[test]

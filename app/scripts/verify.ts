@@ -138,6 +138,23 @@ await check('every broker and bot team is a NEAR account holding its credits and
   return `${WORLD_WALLETS.length} accounts (3 brokers, 12 teams), ${robots} team robots as tokens`;
 });
 
+await check('each bot team signs its own moves, with a key that can only make that team\'s moves', async () => {
+  const { WORLD_WALLETS } = await import('../src/engine/wallets');
+  const npcs = WORLD_WALLETS.filter((w) => w.kind === 'npc');
+  for (const x of npcs) {
+    const r = (await rpc.query({ request_type: 'view_access_key_list', finality: 'final', account_id: x.account })) as unknown as { keys: AccessKey[] };
+    const fn = r.keys.filter((k) => k.access_key.permission !== 'FullAccess');
+    ok(
+      fn.some((k) => {
+        const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
+        return p.receiver_id === C && p.method_names.length > 0 && p.method_names.every((m) => m.startsWith('npc_'));
+      }),
+      `${x.account} has no npc_* key`,
+    );
+  }
+  return `${npcs.length} teams, each with a key limited to npc_buy / npc_sell / npc_repair / npc_record_battle / npc_buy_listing / npc_drop`;
+});
+
 await check("each broker records its AI decision itself, and the contract checks NEAR AI's TEE signature", async () => {
   const { WORLD_WALLETS } = await import('../src/engine/wallets');
   const signers = await view<string[]>('tee_signers');

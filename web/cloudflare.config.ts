@@ -26,6 +26,8 @@ export default defineConfig({
       NEARAI_KEY_2: bindings.secret(),
       // each broker's key limited to record_broker_decision: the broker signs its own TEE-verified AI decisions
       BROKER_KEYS: bindings.secret(),
+      // each bot team's key limited to npc_*: the team signs its own moves
+      NPC_KEYS: bindings.secret(),
     },
     exports: { SharedWorld: exports.durableObject({ storage: "sqlite" }) },
     observability: { enabled: true },

@@ -65,6 +65,8 @@ interface Env {
   NEARAI_KEY_2?: string;
   /** JSON {broker account: key limited to record_broker_decision} — each broker signs its own AI decisions */
   BROKER_KEYS?: string;
+  /** JSON {bot team account: key limited to npc_*} — each team signs its own moves */
+  NPC_KEYS?: string;
 }
 
 /** a player's move as their browser signed it (contract: signed_move) */
@@ -750,18 +752,17 @@ export class SharedWorld extends DurableObject<Env> {
 
   private async recordWalletTask(w: World, task: WalletTask) {
     if (task.t === 'buy') {
-      const out = await this.chainCall('buy_robot_for', {
-        player: task.account,
-        model_id: task.modelId,
-        price: String(task.price),
-        durability: Math.max(1, task.durability),
-        broker: task.broker,
-      });
+      const out = await this.chainCall(
+        'npc_buy',
+        { model_id: task.modelId, price: String(task.price), durability: Math.max(1, Math.min(maxDurability(task.modelId), task.durability)), broker: task.broker },
+        undefined,
+        task.account,
+      );
       const r = w.robots[task.uid];
       if (r) this.apply({ t: 'chainId', uid: task.uid, id: String(out.value) });
       // sold again before its purchase reached the chain: the token goes now
       if (r && r.owner !== w.managers.find((m) => npcAccount(m.name) === task.account)?.id) {
-        await this.chainCall('drop_world_robot', { account: task.account, token_id: String(out.value) }).catch(() => {});
+        await this.chainCall('npc_drop', { token_id: String(out.value) }, undefined, task.account).catch(() => {});
         this.apply({ t: 'chainId', uid: task.uid });
       }
       return;
@@ -770,23 +771,23 @@ export class SharedWorld extends DurableObject<Env> {
       const tokenId = task.chainId ?? w.robots[task.uid]?.chainId;
       if (!tokenId) return;
       try {
-        await this.chainCall('sell_robot_for', { player: task.account, token_id: tokenId, price: String(task.price), broker: task.broker });
+        await this.chainCall('npc_sell', { token_id: tokenId, price: String(task.price), broker: task.broker }, undefined, task.account);
       } catch (e) {
         // a sale the contract's limits refuse (daily profit cap…): the robot still left the team — burn its token
-        await this.chainCall('drop_world_robot', { account: task.account, token_id: tokenId });
+        await this.chainCall('npc_drop', { token_id: tokenId }, undefined, task.account);
         this.walletError = `sell ${task.account}: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)} (token burned)`;
       }
       return;
     }
     if (task.t === 'buyListing') {
       const tokenId = task.chainId ?? w.robots[task.uid]?.chainId;
-      if (tokenId) await this.chainCall('buy_listing_for', { buyer: task.account, token_id: tokenId });
+      if (tokenId) await this.chainCall('npc_buy_listing', { token_id: tokenId }, undefined, task.account);
       return;
     }
     if (task.t === 'repair') {
       const tokenId = w.robots[task.uid]?.chainId;
       if (!tokenId) return;
-      await this.chainCall('repair_robot_for', { player: task.account, token_id: tokenId, cost: String(task.cost), durability: task.durability });
+      await this.chainCall('npc_repair', { token_id: tokenId, cost: String(task.cost), durability: task.durability }, undefined, task.account);
       return;
     }
     // a battle: the robots on-chain that fought, their wear, the reward (inside the contract's cap)
@@ -798,12 +799,13 @@ export class SharedWorld extends DurableObject<Env> {
       .filter((r) => r.chainId && r.durability > 0 && w.managers.find((m) => m.id === r.owner && npcAccount(m.name) === task.account))
       .reduce((t, r) => t + robotModel(r.modelId).basePrice, 0);
     const reward = Math.max(0, Math.min(task.reward, 400, Math.floor((value * 25) / 100)));
-    // the contract replays the bots' battle too and decides the result and the wear on its own (no other path)
+    // the team records its own battle; the contract replays it and decides the result and the wear on its own
     void wear;
     await this.chainCall(
-      'record_verified_battle_for',
-      { player: task.account, side: task.side, opponent: task.opponent.slice(0, 64), reward: String(reward), log: task.log },
-      300_000_000_000_000n,
+      'npc_record_battle',
+      { side: task.side, opponent: task.opponent.slice(0, 64), reward: String(reward), log: task.log },
+      100_000_000_000_000n,
+      task.account,
     );
   }
 
@@ -840,10 +842,20 @@ export class SharedWorld extends DurableObject<Env> {
   private chainQueue: Promise<unknown> = Promise.resolve();
 
   /** one transaction at a time (one key, ordered nonces) */
-  private chainCall(method: string, args: Record<string, unknown>, gas = 60_000_000_000_000n): Promise<{ hash: string; value: unknown }> {
+  /** a contract call, signed by the world server — or, with `as`, by a bot team's own account (its key can only make
+   *  that team's moves: npc_*) */
+  private chainCall(method: string, args: Record<string, unknown>, gas = 60_000_000_000_000n, as?: string): Promise<{ hash: string; value: unknown }> {
     const run = async () => {
-      if (!this.env.SERVER_KEY) throw new Error('the server has no NEAR key');
-      const acc = new Account(CONTRACT_ID, new JsonRpcProvider({ url: RPC_URL }), this.env.SERVER_KEY as `ed25519:${string}`);
+      let signer = CONTRACT_ID;
+      let key = this.env.SERVER_KEY;
+      if (as) {
+        const keys = this.env.NPC_KEYS ? (JSON.parse(this.env.NPC_KEYS) as Record<string, string>) : {};
+        if (!keys[as]) throw new Error(`no key for ${as}`);
+        signer = as;
+        key = keys[as];
+      }
+      if (!key) throw new Error('the server has no NEAR key');
+      const acc = new Account(signer, new JsonRpcProvider({ url: RPC_URL }), key as `ed25519:${string}`);
       const r = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas });
       const st = r.status as { SuccessValue?: string; Failure?: unknown };
       if (st && typeof st === 'object' && 'Failure' in st) throw new Error(JSON.stringify(st.Failure).slice(0, 200));
