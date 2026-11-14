@@ -3,7 +3,7 @@
 // each broker also gets a key limited to `record_broker_decision` for the world server (it signs its own AI decisions).
 // Prints the secrets to add to the Worker (written into the deploy-secrets file, never into the repo).
 // Run: npx tsx scripts/world-wallets.ts
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Account, JsonRpcProvider, KeyPair } from 'near-api-js';
@@ -12,7 +12,7 @@ import { WORLD_WALLETS } from '../src/engine/wallets';
 const CONTRACT = 'heat-index-game.testnet';
 const RPC = 'https://test.rpc.fastnear.com';
 const CREDS = join(homedir(), '.near-credentials', 'testnet');
-const SECRETS = join(homedir(), '.near-credentials', 'heat-index-web', 'deploy-secrets.json');
+const SECRETS = join(homedir(), '.near-credentials', 'heat-index-web', 'secrets.json'); // the source web/scripts/secrets.mjs builds the deploy file from
 const provider = new JsonRpcProvider({ url: RPC });
 const parentKey = JSON.parse(readFileSync(join(CREDS, `${CONTRACT}.json`), 'utf8')).private_key;
 const parent = new Account(CONTRACT, provider, parentKey);
