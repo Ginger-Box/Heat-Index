@@ -1,4 +1,4 @@
-// Faces and voices of the three AI brokers: a hand-drawn pixel portrait, a title, a one-line bio, and a live remark
+// Faces and voices of the three algorithmic brokers: a hand-drawn pixel portrait, a title, a one-line bio, and a live remark
 // that reacts to the market (their profit, their cash, the robots they misprice, the player's stake).
 
 import { memo, type ReactElement } from 'react';

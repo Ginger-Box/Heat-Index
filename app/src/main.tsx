@@ -26,8 +26,25 @@ initFx()
 // NEAR: mirror the player's trades and battles on-chain when they are logged in (src/near)
 installBridge()
 
+// Phones and small tablets: the arena (drag-to-attack, 5 slots, the market table) needs a computer screen
+const isPhone =
+  window.matchMedia('(max-width: 820px)').matches ||
+  (window.matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820)
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {isPhone ? (
+      <div className="panel login phone-stub">
+        <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 30, marginBottom: 10 }}>
+          HEAT INDEX
+        </div>
+        <p>
+          The arena needs a bigger screen. <b>Open this site on a computer</b> to play.
+        </p>
+        <p className="muted">{location.host}</p>
+      </div>
+    ) : (
+      <App />
+    )}
   </StrictMode>,
 )

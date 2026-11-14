@@ -394,7 +394,7 @@ function Login({ error, onEnter }: { error?: string | null; onEnter: (name: stri
       </div>
       <p className="muted">
         An underground robot arena. Build a team and fight for the title — or play the market: buy robots while they are
-        cheap and invest in AI brokers.
+        cheap and invest in algorithmic brokers.
       </p>
       <div className="grid">
         <input placeholder="Your name in the arena (new players)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />

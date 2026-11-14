@@ -5372,3 +5372,7 @@ p.tour-swap {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* phones: a stub asking to open the site on a computer (main.tsx) */
+.phone-stub { max-width: 92vw; margin: 18vh auto 0; text-align: center; zoom: 1; }
+.phone-stub p { font-size: 16px; line-height: 1.5; }
