@@ -19,7 +19,7 @@ export const PERSONAS: Record<string, Persona> = {
   kessler: {
     person: 'Director Vance Kessler',
     title: 'Kessler Corp · megacorp',
-    bio: 'Has never lost a quarter. Never trusts a trend.',
+    bio: 'Has never lost a quarter. Never trusts a trend. Never touches cheap junk.',
     color: '#00f0ff',
     art: [
       '......kkkkkkkk......',
@@ -44,7 +44,7 @@ export const PERSONAS: Record<string, Persona> = {
   soroka: {
     person: 'Magpie',
     title: 'Black market · dealer',
-    bio: 'Smells hype a day early. Sells it to you an hour later.',
+    bio: 'Smells hype a day early. Sells you anything — an hour later.',
     color: '#ff2a8a',
     art: [
       '.......kkkkkk.......',
@@ -69,7 +69,7 @@ export const PERSONAS: Record<string, Persona> = {
   scrap: {
     person: 'Old Rust',
     title: 'Junkman · scrap dealer',
-    bio: 'Buys what is broken. Fixes it. Sells it back to you.',
+    bio: 'Buys whatever is broken. Fixes the cheap stuff, strips the rest.',
     color: '#ff8a00',
     art: [
       '....kkkkkkkkkkkk....',

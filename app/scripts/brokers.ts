@@ -9,7 +9,7 @@ const top: Record<string, number> = {};
 let anyClosed = 0;
 const bank: Record<string, number> = {};
 for (let s = 0; s < WORLDS; s++) {
-  const w = createWorld(1000 + s * 7919, 'x');
+  const w = createWorld(Number(process.env.SEED ?? 1000) + s * 7919, 'x');
   const start = Object.fromEntries(w.brokers.map((b) => [b.id, brokerEquity(w, b)]));
   w.ledger = [];
   advanceHours(w, HOURS_PER_DAY * DAYS);

@@ -233,6 +233,23 @@ export function actualRelevance(w: World, counts = pickCounts(w)): Record<string
 }
 
 /** Working (not broken) robots of a model in a broker's stock. */
+/**
+ * Each broker trades its own segment: Kessler Corp — mid and expensive robots (energy 3–6), Magpie — everything,
+ * the Junkman — cheap robots (energy 1–3) plus scrap of any model.
+ */
+export const BROKER_TAGLINE: Record<string, string> = {
+  kessler: 'Conservative megacorp. Mid and expensive robots only (energy 3–6). Pricey, steady, never broke.',
+  soroka: 'Black market. Every model, cheap and quick to catch the hype — and always one raid from ruin.',
+  scrap: 'Scrap dealer. Cheap robots only (energy 1–3) — and buys broken robots of any model for parts.',
+};
+export const BROKER_RANGE: Record<string, [number, number]> = { kessler: [3, 6], scrap: [1, 3] };
+export const carries = (b: Broker, modelId: string) => {
+  const c = model(modelId).cost;
+  return c >= (b.style.minCost ?? 1) && c <= (b.style.maxCost ?? 6);
+};
+export const rangeLabel = (b: Broker) =>
+  b.style.minCost || b.style.maxCost ? `energy ${b.style.minCost ?? 1}–${b.style.maxCost ?? 6} robots` : 'every robot';
+
 export const brokerStock = (w: World, b: Broker, modelId: string) =>
   robotsOf(w, b.id).filter((r) => r.modelId === modelId && r.durability > 0);
 
@@ -270,8 +287,8 @@ export function quote(w: World, b: Broker, modelId: string, rel = actualRelevanc
 
 /** Average fair price across open brokers — for charts and asset values. */
 export function refPrice(w: World, modelId: string): number {
-  const open = w.brokers.filter((b) => !b.closed);
-  const list = open.length ? open : w.brokers;
+  const open = w.brokers.filter((b) => !b.closed && carries(b, modelId));
+  const list = open.length ? open : w.brokers.filter((b) => carries(b, modelId));
   return list.reduce((s, b) => s + brokerFair(w, b, modelId), 0) / list.length;
 }
 
@@ -291,7 +308,7 @@ export function bestBid(w: World, r: OwnedRobot): { broker: Broker; price: numbe
       if (robotsOf(w, b.id).filter((x) => x.durability <= 0).length >= SCRAP_YARD_CAP) continue;
       price = scrapPrice(fair);
     } else {
-      if (overstocked(w, b, r.modelId)) continue;
+      if (!carries(b, r.modelId) || overstocked(w, b, r.modelId)) continue;
       price = bidPrice(fair, b.style, r) * (b.style.scrapper ? SCRAPPER_WORKING_BID : 1);
     }
     price = Math.round(price);
@@ -376,6 +393,7 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     if (b.closed) return `${b.name} is closed`;
     const fair = brokerFair(w, b, r.modelId);
     if (r.durability <= 0 && !b.style.scrapper) return `${b.name} doesn't take broken robots`;
+    if (r.durability > 0 && !carries(b, r.modelId)) return `${b.name} only trades ${rangeLabel(b)}`;
     if (r.durability > 0 && overstocked(w, b, r.modelId)) return `${b.name} already has too many of these`;
     const price = r.durability <= 0 ? scrapPrice(fair) : bidPrice(fair, b.style, r);
     if (price > b.credits) return `${b.name} can't afford it`;
@@ -612,6 +630,8 @@ const SCRAP_YARD_CAP = 12;
 const RESERVE = 0.3;
 /** the scrap dealer refurbishes at most this many robots an hour, paying this share of a normal repair */
 const JUNK_REPAIRS_PER_HOUR = 1;
+/** the Factory pays for parts of scrap the Junkman doesn't refurbish, × the scrap price it paid */
+const JUNK_PARTS = 1.15;
 const JUNK_REPAIR_COST = 1.6;
 const REOPEN_AT = 250;
 
@@ -981,6 +1001,15 @@ function brokerHour(w: World, rel: Record<string, number>) {
     if (b.closed) continue;
     // The scrap dealer repairs broken robots and puts them up for sale
     if (b.style.scrapper) {
+      // scrap of models it doesn't trade is stripped for parts (melted) — it only refurbishes cheap robots
+      for (const r of robotsOf(w, b.id)) {
+        if (r.durability > 0 || carries(b, r.modelId)) continue;
+        // parts go to the Factory: a little more than the scrap price it paid
+        const parts = Math.round(scrapPrice(brokerFair(w, b, r.modelId)) * JUNK_PARTS);
+        b.credits += parts;
+        ledger(w, { kind: 'scrap', from: 'factory', to: b.id, uid: r.uid, amount: parts, note: 'parts' });
+        delete w.robots[r.uid];
+      }
       const broken = robotsOf(w, b.id).filter((r) => r.durability <= 0);
       // Extra scrap is melted down — the robot leaves the world
       for (const r of broken.splice(0, Math.max(0, broken.length - SCRAP_YARD_CAP))) delete w.robots[r.uid];
@@ -1002,6 +1031,7 @@ function brokerHour(w: World, rel: Record<string, number>) {
     // and 2 a day (energy 4) per broker — they run short, and the price jumps on the shortage.
     for (const x of MODELS) {
       if ((w.strikeUntil ?? 0) > w.hour) break; // Factory strike: nothing to restock
+      if (!carries(b, x.id)) continue;
       const stock = brokerStock(w, b, x.id).length;
       if (stock >= b.style.targetStock) continue;
       const cap = x.cost >= 5 ? 1 : x.cost === 4 ? 2 : Infinity;
@@ -1012,7 +1042,7 @@ function brokerHour(w: World, rel: Record<string, number>) {
       // the shortage raises the price, and once restocking pays again the broker buys it.
       if (askPrice(brokerFair(w, b, x.id), b.style) < x.basePrice) continue;
       // the money goes to the Factory — a sink (the black market gets a smuggler's discount)
-      const factoryPrice = Math.round(x.basePrice * (b.id === 'soroka' ? 0.9 : 1));
+      const factoryPrice = Math.round(x.basePrice * (b.id === 'soroka' ? 0.96 : 1));
       b.credits -= factoryPrice;
       b.restockedToday = { ...(b.restockedToday ?? {}), [x.id]: (b.restockedToday?.[x.id] ?? 0) + 1 };
       const r = mint(w, x.id, b.id);
@@ -1110,7 +1140,7 @@ function seasonEnd(w: World) {
 // ---------- broker risk: upkeep and market events ----------
 
 /** Daily upkeep (rent, staff, bribes): a broker that doesn't trade enough bleeds money and can go bankrupt. */
-export const BROKER_UPKEEP: Record<string, number> = { kessler: 70, soroka: 50, scrap: 55 };
+export const BROKER_UPKEEP: Record<string, number> = { kessler: 70, soroka: 50, scrap: 45 };
 /** Chance per day of a market event. */
 const EVENT_CHANCE = 0.5;
 
@@ -1327,26 +1357,31 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
     lastDividend: 0,
   });
   w.brokers.push(
-    mkBroker('kessler', 'Kessler Corp', 'Conservative megacorp. Pricey, but always in stock.', 3000, {
+    mkBroker('kessler', 'Kessler Corp', BROKER_TAGLINE.kessler, 3000, {
       spread: 0.15,
       targetStock: 3,
+      minCost: 3,
+      maxCost: 6,
       react: 0.15,
       scrapper: false,
     }),
-    mkBroker('soroka', 'Magpie', 'Black market. Cheap, quick to catch the hype, short on stock.', 1200, {
+    mkBroker('soroka', 'Magpie', BROKER_TAGLINE.soroka, 1200, {
       spread: 0.08,
       targetStock: 2,
       react: 0.6,
       scrapper: false,
     }),
-    mkBroker('scrap', 'Junkman', 'Scrap dealer. Buys broken robots, fixes and resells them.', 1300, {
+    mkBroker('scrap', 'Junkman', BROKER_TAGLINE.scrap, 1300, {
       spread: 0.1,
       targetStock: 1,
+      minCost: 1,
+      maxCost: 3,
       react: 0.35,
       scrapper: true,
     }),
   );
-  for (const b of w.brokers) for (const x of MODELS) for (let i = 0; i < b.style.targetStock; i++) mint(w, x.id, b.id);
+  for (const b of w.brokers)
+    for (const x of MODELS) if (carries(b, x.id)) for (let i = 0; i < b.style.targetStock; i++) mint(w, x.id, b.id);
 
   withRng(w, (rng) => {
     NPC_SETUP.forEach(({ name, strategy, div, focus, focus2 }, i) => {

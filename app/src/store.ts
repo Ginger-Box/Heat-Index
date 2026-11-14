@@ -2,7 +2,7 @@
 // The player's trades and battles are mirrored on NEAR by src/near/bridge.ts.
 import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
-import { createWorld, ensureDecks, migrateLeague, type World } from './engine/world';
+import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, type World } from './engine/world';
 
 const KEY = 'neon-pit-world-v5'; // v5: decks of 10–15 robots, 5 board slots (v4: new economy)
 const NAME_KEY = 'neon-pit-player';
@@ -31,6 +31,10 @@ function migrate(w: World): World {
   for (const b of w.brokers) {
     if (b.id === 'kessler') b.style.targetStock = 3;
     if (b.id === 'soroka') b.style.spread = 0.08;
+    // broker segments (added Nov 14): Kessler energy 3–6, the Junkman 1–3, Magpie everything
+    const range = BROKER_RANGE[b.id];
+    if (range) [b.style.minCost, b.style.maxCost] = range;
+    if (BROKER_TAGLINE[b.id]) b.tagline = BROKER_TAGLINE[b.id];
   }
   return w;
 }

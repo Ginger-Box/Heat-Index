@@ -35,6 +35,9 @@ export interface BrokerStyle {
   targetStock: number; // how many robots of each model the broker wants to keep
   react: number; // 0..1 — how fast the broker notices a change in relevance
   scrapper: boolean; // buys broken robots
+  /** the energy-cost range of models this broker trades (absent = all) */
+  minCost?: number;
+  maxCost?: number;
 }
 
 // ---------- relevance ----------

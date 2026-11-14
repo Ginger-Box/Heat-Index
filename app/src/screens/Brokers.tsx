@@ -10,6 +10,8 @@ import {
   getManager,
   invest,
   robotsOf,
+  rangeLabel,
+  BROKER_UPKEEP,
   sharePrice,
   totalShares,
   type Broker,
@@ -232,10 +234,21 @@ export function Brokers({ w }: { w: World }) {
                 <Tip text="How much the broker adds on top of the fair price when it sells to you.">
                   <span className="tag">Markup {Math.round(b.style.spread * 100)}%</span>
                 </Tip>
-                <Tip text="Free cash. Below 60 CR the broker goes bankrupt.">
+                <Tip text={`Free cash. Daily upkeep ${BROKER_UPKEEP[b.id] ?? 50} CR — a broker that can't pay it goes bankrupt.`}>
                   <span className="tag">
                     💰 <Cr v={b.credits} />
                   </span>
+                </Tip>
+                <Tip
+                  text={
+                    b.style.scrapper
+                      ? 'Trades cheap robots (energy 1–3) and buys broken robots of any model for scrap.'
+                      : b.style.minCost || b.style.maxCost
+                        ? `Trades only ${rangeLabel(b)}: mid and expensive models.`
+                        : 'Trades every model — the widest stock, and the biggest risk.'
+                  }
+                >
+                  <span className="tag">⚙ {b.style.minCost || b.style.maxCost ? `E${b.style.minCost ?? 1}–${b.style.maxCost ?? 6}` : 'all'}</span>
                 </Tip>
                 <Tip text={`Robots for sale.${b.style.scrapper ? ' Also buys broken robots for scrap.' : ''}`}>
                   <span className="tag">

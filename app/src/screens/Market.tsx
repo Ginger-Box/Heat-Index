@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { createPortal } from 'react-dom';
 import { winRate } from '../engine/pricing';
 import { CLASSES, CLASS_HELP, CLASS_ICON, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
-import { PLAYER_ID, actualRelevance, buy, getManager, quote, refPrice, robotsOf, type World } from '../engine/world';
+import { PLAYER_ID, actualRelevance, buy, carries, getManager, quote, rangeLabel, refPrice, robotsOf, type World } from '../engine/world';
 import { crunch, sfx } from '../audio';
 import { act, worldVersion } from '../store';
 import { setCursorMode } from '../ui/fx';
@@ -501,6 +501,10 @@ export function Market({ w }: { w: World }) {
                                 <b>{b.name}</b>{' '}
                                 {b.closed ? (
                                   <span className="down">closed</span>
+                                ) : !carries(b, r.m.id) && q.stock === 0 ? (
+                                  <span className="muted" title={`${b.name} only trades ${rangeLabel(b)}`}>
+                                    doesn't trade
+                                  </span>
                                 ) : q.stock === 0 ? (
                                   <span className="muted">out of stock</span>
                                 ) : (

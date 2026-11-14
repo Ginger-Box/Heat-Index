@@ -260,6 +260,15 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   (Magpie 2, Junkman 2, all reopened by investors); Kessler never failed. So: Kessler is the safe, slow stake, Magpie
   the gamble, the Junkman in between — and who wins a season depends on its meta and its news.
 
+### Broker segments (Nov 14)
+- Each broker now trades its own segment: **Kessler Corp** — mid and expensive robots (energy 3–6), **Magpie** — every
+  model, **the Junkman** — cheap robots (energy 1–3) plus scrap of any model; scrap it doesn't refurbish is stripped
+  for parts (the Factory pays a little over the scrap price). Market rows say "doesn't trade" for a broker outside
+  its segment; the Brokers screen shows the segment and the daily upkeep. Old saves are migrated.
+- Rebalanced on 36 worlds × 14 days (three seed sets, so it isn't tuned to one world): best broker — Kessler 11,
+  Junkman 15, Magpie 10; bankruptcies only for Magpie (6 of 36 worlds) — the black market that trades everything is
+  the one that gambles. Magpie's smuggler discount at the Factory is now 4% (was 10%), the Junkman's upkeep 45 CR.
+
 ## Next
 - Card art.
 - README for judges, demo video.
