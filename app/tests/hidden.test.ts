@@ -61,3 +61,30 @@ test('a broker whose AI is unavailable falls back to its rules, and returns to t
   assert.equal(b.mood, undefined);
   assert.equal(b.style.spread, 0.12);
 });
+
+test("the player's own moves applied to the redacted view give the server's view (the client predicts them)", () => {
+  let checks = 0;
+  for (let g = 0; g < 20; g++) {
+    const w = createWorld(g + 1, 'You', 2);
+    const [a, b] = w.managers.filter((m) => m.team.length >= 4);
+    const st = createBattle(teamOf(w, a), teamOf(w, b), 2000 + g);
+    for (let t = 0; t < 60 && st.winner === undefined; t++) {
+      const side = st.active;
+      for (const act of planTurn(st, side, { careful: 0.5, sloppy: 0.1 })) {
+        if (side === 0 && act.t !== 'end') {
+          const local = redactBattle(st);
+          const errLocal = applyAction(local, act, []);
+          const errServer = applyAction(st, act, []);
+          assert.equal(errLocal, errServer);
+          const server = redactBattle(st);
+          local.history = server.history = [];
+          assert.deepEqual(redactBattle(local), server);
+          checks++;
+        } else applyAction(st, act, []);
+        if (st.winner !== undefined) break;
+      }
+      if (st.active === side && st.winner === undefined) applyAction(st, { t: 'end' } as Action, []);
+    }
+  }
+  assert.ok(checks > 100, `only ${checks} moves checked`);
+});

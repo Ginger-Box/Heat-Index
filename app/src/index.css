@@ -5452,3 +5452,26 @@ p.tour-swap {
 .profile-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 40px; }
 .profile-head h2 { margin: 0 10px 0 0; }
 .profile-head .tag { margin-left: 0; font-size: 11px; padding: 1px 6px; }
+
+/* leaving the end screen: a CRT channel switch — the picture squeezes into a bright line and blinks out */
+.end-overlay.leaving { animation: end-out 0.52s cubic-bezier(0.7, 0, 0.84, 0) forwards; pointer-events: none; }
+.end-overlay.leaving .end-inner { animation: end-squeeze 0.52s cubic-bezier(0.7, 0, 0.84, 0) forwards; }
+@keyframes end-squeeze {
+  0% { transform: scale(1, 1); filter: brightness(1); }
+  55% { transform: scale(1, 0.02); filter: brightness(3); }
+  100% { transform: scale(0, 0.02); filter: brightness(4); }
+}
+@keyframes end-out {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* the tabs coming back after a battle */
+.screen-enter { animation: screen-enter 0.45s steps(9) both; }
+@keyframes screen-enter {
+  0% { opacity: 0; transform: translateY(10px); filter: brightness(2) saturate(0); clip-path: inset(48% 0 48% 0); }
+  60% { opacity: 1; filter: brightness(1.4); clip-path: inset(0 0 0 0); }
+  100% { opacity: 1; transform: none; filter: none; clip-path: inset(0 0 0 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .end-overlay.leaving, .end-overlay.leaving .end-inner, .screen-enter { animation-duration: 0.01s; }
+}

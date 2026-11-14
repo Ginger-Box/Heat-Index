@@ -5,7 +5,7 @@
 // (or click the robot, then the target). Repair/Shock robots ask for a target with a green/violet arrow.
 // Effects (sparks, shockwaves, shake, aiming arrow) are in ui/battleFx.ts, sounds in audio.ts.
 
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { battleSynth, jingle, sfx } from '../audio';
 import { planTurn } from '../engine/ai';
@@ -202,6 +202,8 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   // (the opponent's hand and deck never reach it — engine/hidden.ts)
   const serverOnline = online && isShared();
   const serverResult = useRef<{ reward: number; tx: { label: string; hash?: string } | null; txError?: string } | null>(null);
+  /** the move the server is still confirming (the finish waits for it: the reward and the NEAR receipt) */
+  const serverPending = useRef<Promise<unknown> | null>(null);
   const nextOpponent = (exclude?: string) => (online ? pickPvpOpponent(w, exclude) : pickOpponentForPlayer(w, exclude));
   const me = getManager(w, PLAYER_ID);
   const [oppId, setOppId] = useState(() => nextOpponent().id);
@@ -475,7 +477,7 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   }
   if (!fight) {
     return (
-      <div className="grid">
+      <div className={`grid${result && !result.fresh ? ' screen-enter' : ''}`}>
         {result && !result.fresh && <ResultPanel w={w} {...result} ranked={online} onClose={() => setResult(null)} />}
         {result?.fresh && (
           <EndOverlay
@@ -799,7 +801,8 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
     const f = fightRef.current!;
     let promo: Promo | undefined;
     if (serverOnline) {
-      // the server already counted the battle and recorded it on NEAR: fetch the updated world
+      // the server counted the battle and records it on NEAR: wait for its answer, then fetch the updated world
+      if (serverPending.current) await serverPending.current;
       const r = serverResult.current;
       serverResult.current = null;
       await pvpFinished(r?.tx ?? null, r?.txError);
@@ -1054,18 +1057,48 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   /** Online (logged in): send the move to the server, then animate every step it returns (after END TURN: the
    *  opponent's whole turn). Returns the last state. */
   const serverMove = async (a: Action): Promise<BattleState> => {
+    const start = fightRef.current!;
+    const req = pvpAct(a);
+    serverPending.current = req
+      .then((r) => {
+        serverResult.current = r.result;
+      })
+      .catch(() => {});
+    // our own move doesn't depend on hidden cards or chance: animate it at once while the server confirms it
+    // (an attack that wins the battle would otherwise wait for the server's NEAR transaction)
+    let predicted = false;
+    if (a.t !== 'end') {
+      try {
+        const after = await runAction(a);
+        predicted = after !== start.st;
+        if (after.winner !== undefined) return after;
+      } catch {
+        predicted = false;
+      }
+    }
     let res: Awaited<ReturnType<typeof pvpAct>>;
     try {
-      res = await pvpAct(a);
+      res = await req;
     } catch (e) {
+      if (predicted && alive.current) {
+        fightRef.current = start;
+        setFight(start);
+      }
       setMsg(e instanceof Error ? e.message : String(e));
       sfx('ui-error');
       return fightRef.current!.st;
     }
     serverResult.current = res.result;
+    if (predicted && res.steps.length) {
+      // the server's own view of our move replaces the local one (same table, but its word is final)
+      const f = { ...fightRef.current!, st: { ...res.steps[0].view, history: fightRef.current!.st.history } };
+      fightRef.current = f;
+      setFight(f);
+    }
     let cur = fightRef.current!.st;
     for (const [i, step] of res.steps.entries()) {
       if (!alive.current) return cur;
+      if (i === 0 && predicted) continue; // already shown
       if (i > 0) {
         // the opponent's moves, as the server played them
         if (i === 1) {
@@ -1616,20 +1649,28 @@ function ResultPanel({
 function EndOverlay({ winner, onClose, children }: { winner: number | null | undefined; onClose: () => void; children: ReactNode }) {
   const kind = winner === 0 ? 'win' : winner === 1 ? 'lose' : 'draw';
   const title = winner === 0 ? 'VICTORY' : winner === 1 ? 'DEFEAT' : 'DRAW';
+  // CONTINUE: the screen collapses like an old CRT switching channel, then the tabs come back
+  const [leaving, setLeaving] = useState(false);
+  const close = useCallback(() => {
+    if (leaving) return;
+    setLeaving(true);
+    sfx('ui-close');
+    setTimeout(onClose, 520);
+  }, [leaving, onClose]);
   useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && close();
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
+  }, [close]);
   return createPortal(
     // on <body>, above the end-of-battle canvases (#root is its own layer); the inner box carries the UI zoom
-    <div className={`end-overlay ${kind}`}>
+    <div className={`end-overlay ${kind}${leaving ? ' leaving' : ''}`}>
       <div className="end-inner">
         <div className="end-title" data-text={title}>
           {title}
         </div>
         <div className="end-body">{children}</div>
-        <button className="primary end-continue" onClick={onClose}>
+        <button className="primary end-continue" onClick={close}>
           CONTINUE
         </button>
       </div>
