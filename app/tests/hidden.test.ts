@@ -34,3 +34,22 @@ test("redacted battle views never reveal the opponent's hand or deck", () => {
   }
   assert.ok(checks > 300, `only ${checks} views checked`);
 });
+
+test('a broker whose AI is unavailable falls back to its rules, and returns to the AI when it answers', async () => {
+  const { applyPolicy, fallBackToRules, RULE_STYLE } = await import('../src/engine/brokerAi');
+  const { createSharedWorld } = await import('../src/engine/world');
+  const w = createSharedWorld(3);
+  const b = w.brokers.find((x) => x.id === 'kessler')!;
+  applyPolicy(w, b, { spread: 0.2, react: 0.3, targetStock: 4, focus: [], dump: [], remark: '' }, { model: 'm' });
+  assert.equal(b.style.spread, 0.2);
+  fallBackToRules(w, b);
+  assert.equal(b.ai, undefined);
+  assert.equal(b.mindOff, w.hour);
+  assert.deepEqual({ spread: b.style.spread, react: b.style.react, targetStock: b.style.targetStock }, RULE_STYLE.kessler);
+  const events = w.events.length;
+  fallBackToRules(w, b); // already on the rules: no repeated news
+  assert.equal(w.events.length, events);
+  applyPolicy(w, b, { spread: 0.12, react: 0.1, targetStock: 2, focus: [], dump: [], remark: '' }, { model: 'm' });
+  assert.equal(b.mindOff, undefined);
+  assert.equal(b.style.spread, 0.12);
+});

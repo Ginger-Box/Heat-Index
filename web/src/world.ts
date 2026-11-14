@@ -42,7 +42,7 @@ import { battleLogOf, logText, replayBattle, sha256Hex, type BattleLog } from '.
 import { applyAction, createBattle, type Action, type BattleEvent, type BattleState } from '../../app/src/engine/battle';
 import { planTurn } from '../../app/src/engine/ai';
 import { redactBattle, redactEvents } from '../../app/src/engine/hidden';
-import { applyPolicy, brokerPrompt, parsePolicy } from '../../app/src/engine/brokerAi';
+import { applyPolicy, brokerPrompt, fallBackToRules, parsePolicy } from '../../app/src/engine/brokerAi';
 import { teamError } from '../../app/src/engine/team';
 import { vetRank } from '../../app/src/engine/veteran';
 
@@ -235,17 +235,32 @@ export class SharedWorld extends DurableObject<Env> {
             }
             this.mindError = `${res.status} ${(await res.text()).slice(0, 160)}`;
           }
-          if (!out) return;
+          if (!out) {
+            // no key works (no credits, revoked, an outage): the broker trades by its rules until the AI answers
+            fallBackToRules(w, b);
+            this.dirty = true;
+            return;
+          }
           const text = (out.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
           const p = parsePolicy(b, text);
-          if (!p) this.mindError = `unparsable answer: ${text.slice(0, 160)}`;
+          if (!p) {
+            this.mindError = `unparsable answer: ${text.slice(0, 160)}`;
+            if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) {
+              fallBackToRules(w, b);
+              this.dirty = true;
+            }
+          }
           if (p) {
             applyPolicy(w, b, p, { model: BROKER_MODEL, chatId: out.id });
             this.dirty = true;
           }
         } catch (e) {
-          // the model is unavailable — the broker keeps its last policy
+          // the model is unreachable (timeout, network): a fresh policy is kept, a stale one gives way to the rules
           this.mindError = e instanceof Error ? e.message : String(e);
+          if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) {
+            fallBackToRules(w, b);
+            this.dirty = true;
+          }
         }
       }),
     );

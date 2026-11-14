@@ -266,6 +266,10 @@ export function Brokers({ w }: { w: World }) {
                   {b.ai.focus.length ? ` · stocking up: ${b.ai.focus.map((id) => model(id).name).join(', ')}` : ''}
                   {b.ai.dump.length ? ` · dumping: ${b.ai.dump.map((id) => model(id).name).join(', ')}` : ''}
                 </div>
+              ) : b.mindOff !== undefined ? (
+                <div className="broker-mind muted" title="The broker's LLM on NEAR AI Cloud can't be reached right now (an outage or no credits). It trades by its built-in rules and goes back to the AI by itself once it answers.">
+                  ⚙ rules — the AI is unavailable, it comes back automatically
+                </div>
               ) : (
                 <div className="broker-mind muted" title="In the shared world (log in) each broker is run by an LLM on NEAR AI Cloud within fixed bounds; in a guest world it follows its rules.">
                   ⚙ rules (guest world) — log in for the AI-run shared market

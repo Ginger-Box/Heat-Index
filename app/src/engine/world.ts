@@ -124,6 +124,8 @@ export interface Broker {
   paidTotal?: Record<string, number>;
   /** how many robots of each model were bought from the Factory today (expensive ones are capped) */
   restockedToday?: Record<string, number>;
+  /** the LLM was unreachable (no key works, no credits): since this game hour the broker runs on its rules */
+  mindOff?: number;
   /** the broker's latest decision by its LLM mind (shared world, engine/brokerAi.ts) */
   ai?: {
     at: number;

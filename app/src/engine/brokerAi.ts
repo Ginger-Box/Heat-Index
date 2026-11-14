@@ -9,7 +9,7 @@
 // server (web/src/world.ts).
 
 import { MODELS, model } from './robots';
-import { actualRelevance, brokerStock, carries, quote, robotsOf, type Broker, type World } from './world';
+import { actualRelevance, brokerStock, carries, hoursPerDay, quote, robotsOf, type Broker, type World } from './world';
 
 export interface BrokerPolicy {
   spread: number;
@@ -96,7 +96,24 @@ export function parsePolicy(b: Broker, text: string): BrokerPolicy | null {
 }
 
 /** Apply a policy to the broker (the world's restocking reads focus/dump: engine/world.ts → brokerHour). */
+/** The brokers' own rules (their parameters before any LLM): what they fall back to when the AI is unavailable. */
+export const RULE_STYLE: Record<string, { spread: number; react: number; targetStock: number }> = {
+  kessler: { spread: 0.15, react: 0.15, targetStock: 3 },
+  soroka: { spread: 0.08, react: 0.6, targetStock: 2 },
+  scrap: { spread: 0.1, react: 0.35, targetStock: 1 },
+};
+
+/** The LLM can't be reached (keys out of credits, an outage): the broker goes back to its rules until it answers again. */
+export function fallBackToRules(w: World, b: Broker) {
+  if (!b.ai && b.mindOff !== undefined) return;
+  Object.assign(b.style, RULE_STYLE[b.id] ?? {});
+  b.ai = undefined;
+  b.mindOff = w.hour;
+  w.events.push({ tick: w.tick, day: Math.floor(w.hour / hoursPerDay(w)) + 1, kind: 'broker', text: `⚙ ${b.name}'s AI is unavailable — it trades by its rules for now.` });
+}
+
 export function applyPolicy(w: World, b: Broker, p: BrokerPolicy, meta: { model: string; chatId?: string }) {
+  b.mindOff = undefined;
   b.style.spread = p.spread;
   b.style.react = p.react;
   b.style.targetStock = p.targetStock;
@@ -105,7 +122,7 @@ export function applyPolicy(w: World, b: Broker, p: BrokerPolicy, meta: { model:
   if (p.focus.length || p.dump.length)
     w.events.push({
       tick: w.tick,
-      day: Math.floor(w.hour / 12) + 1,
+      day: Math.floor(w.hour / hoursPerDay(w)) + 1,
       kind: 'broker',
       text: `🧠 ${b.name}${p.focus.length ? ` stocks up on ${names(p.focus)}` : ''}${p.focus.length && p.dump.length ? ';' : ''}${p.dump.length ? ` dumps ${names(p.dump)}` : ''}.`,
     });
