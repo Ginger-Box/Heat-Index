@@ -778,6 +778,124 @@ impl Contract {
         );
     }
 
+    // ---------------- the player market: robots listed by their owners, at their own price ----------------
+    //
+    // A player (or a bot team) lists a robot at a price they choose: the token goes into escrow (owned by this
+    // contract) until someone buys it or it is withdrawn. The buyer's credits go to the seller, minus a 5% market fee
+    // that is burned. The price can't exceed what a broker could pay for that robot at its wear (× veteran bonus) nor
+    // GAIN_MAX_PCT of what the seller paid, and the seller's profit counts toward the daily cap — so the market can't
+    // be used to move credits between accounts.
+
+    fn list_limit(&self, token_id: &str, r: &Robot) -> u128 {
+        let max_d = max_durability(&r.model_id) as u128;
+        let d = (r.durability as u128).min(max_d);
+        let vet = VET_PRICE_PCT[self.records.get(token_id).map(|x| x.rank as usize).unwrap_or(0)];
+        let wear_cap = base_price(&r.model_id) * SELL_MAX_PCT * vet * (15 * max_d + 85 * d) / (100 * 100 * 100 * max_d) + 1;
+        let paid = self.paid.get(token_id).copied().unwrap_or_else(|| base_price(&r.model_id));
+        wear_cap.min(paid * GAIN_MAX_PCT * vet / (100 * 100) + 1)
+    }
+
+    fn listings_index(&self) -> Vec<String> {
+        env::storage_read(b"listings").and_then(|v| serde_json::from_slice(&v).ok()).unwrap_or_default()
+    }
+    fn set_listings_index(&self, ids: &[String]) {
+        env::storage_write(b"listings", json!(ids).to_string().as_bytes());
+    }
+
+    /// The game server only: `player` lists a robot for `price` credits (the token is escrowed).
+    pub fn list_robot_for(&mut self, player: AccountId, token_id: String, price: U128) {
+        self.server_only();
+        let mut r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
+        require!(r.owner_id == player, "Not your robot");
+        require!(r.durability > 0, "A broken robot can't be listed");
+        require!(price.0 >= 1 && price.0 <= self.list_limit(&token_id, &r), "Price is above what this robot can be listed for");
+        let me = env::current_account_id();
+        self.sub(&token_id, &player, 1);
+        self.add(&token_id, &me, 1);
+        r.owner_id = me.clone();
+        self.robots.insert(token_id.clone(), r);
+        self.untrack(&player, &token_id);
+        env::storage_write(format!("listing:{token_id}").as_bytes(), json!({ "seller": player, "price": price, "at_ms": env::block_timestamp_ms() }).to_string().as_bytes());
+        let mut idx = self.listings_index();
+        idx.push(token_id.clone());
+        self.set_listings_index(&idx);
+        event("heat_index", "1.0.0", "listed", json!([{ "account_id": player, "token_id": token_id, "price": price }]));
+    }
+
+    fn take_listing(&mut self, token_id: &str) -> (AccountId, u128) {
+        let l: serde_json::Value = env::storage_read(format!("listing:{token_id}").as_bytes())
+            .and_then(|v| serde_json::from_slice(&v).ok())
+            .unwrap_or_else(|| env::panic_str("Not listed"));
+        env::storage_remove(format!("listing:{token_id}").as_bytes());
+        let idx: Vec<String> = self.listings_index().into_iter().filter(|x| x != token_id).collect();
+        self.set_listings_index(&idx);
+        let seller: AccountId = l["seller"].as_str().unwrap().parse().unwrap();
+        let price: u128 = l["price"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0);
+        (seller, price)
+    }
+
+    fn release(&mut self, token_id: &str, to: &AccountId) {
+        let me = env::current_account_id();
+        let mut r = self.robots.get(token_id).cloned().unwrap();
+        self.sub(token_id, &me, 1);
+        self.add(token_id, to, 1);
+        r.owner_id = to.clone();
+        self.robots.insert(token_id.to_string(), r);
+        self.track(to, token_id);
+    }
+
+    /// The game server only: the seller withdraws a listing (the robot comes back).
+    pub fn unlist_robot_for(&mut self, player: AccountId, token_id: String) {
+        self.server_only();
+        let (seller, _) = self.take_listing(&token_id);
+        require!(seller == player, "Not your listing");
+        self.release(&token_id, &seller);
+        event("heat_index", "1.0.0", "unlisted", json!([{ "account_id": player, "token_id": token_id }]));
+    }
+
+    /// The game server only: `buyer` buys a listed robot at its price — credits to the seller (5% fee burned).
+    pub fn buy_listing_for(&mut self, buyer: AccountId, token_id: String) {
+        self.server_only();
+        require!(self.players.get(&buyer).is_some(), "Register first");
+        let (seller, price) = self.take_listing(&token_id);
+        require!(seller != buyer, "That's your own listing");
+        // the seller's profit counts toward the daily cap (no funnelling credits through the market)
+        let paid = self.paid.get(&token_id).copied().unwrap_or_else(|| base_price(&self.robots.get(&token_id).unwrap().model_id));
+        let fee = price * 5 / 100;
+        let gain = (price - fee).saturating_sub(paid);
+        if gain > 0 {
+            let day = env::block_timestamp_ms() / DAY_MS;
+            let mut g = self.gains.get(&seller).cloned().unwrap_or_default();
+            if g.day != day {
+                g = DayCount { day, amount: 0 };
+            }
+            require!(g.amount + gain <= DAILY_GAIN_MAX, "The seller's daily trading profit limit is reached");
+            g.amount += gain;
+            self.gains.insert(seller.clone(), g);
+        }
+        self.burn_credits(&buyer, price, "market purchase");
+        self.mint_credits(&seller, price - fee, "market sale");
+        self.release(&token_id, &buyer);
+        self.paid.insert(token_id.clone(), price);
+        self.trade(&buyer, "market_buy", &token_id, price, seller.as_str());
+        self.trade(&seller, "market_sell", &token_id, price - fee, buyer.as_str());
+    }
+
+    /// Open listings (token id, seller, price).
+    pub fn listings(&self) -> Vec<serde_json::Value> {
+        self.listings_index()
+            .iter()
+            .filter_map(|t| {
+                env::storage_read(format!("listing:{t}").as_bytes())
+                    .and_then(|v| serde_json::from_slice::<serde_json::Value>(&v).ok())
+                    .map(|mut l| {
+                        l["token_id"] = json!(t);
+                        l
+                    })
+            })
+            .collect()
+    }
+
     // ---------------- the world's own wallets: brokers and NPC teams ----------------
     //
     // The 3 brokers and the 12 Pit League teams are NEAR accounts (`<name>.heat-index-game.testnet`). A team's
@@ -1245,6 +1363,31 @@ mod tests {
         ctx_at("game.testnet", 60_000);
         c.record_battle_for(alice.clone(), "online:Bob".into(), 1, U128(10), seed, vec![Wear { token_id: ids[0].clone(), durability: 5 }], hash.clone());
         assert!(c.open_battle_of(alice).is_none());
+    }
+
+    #[test]
+    fn the_player_market_escrows_and_pays_the_seller() {
+        let (mut c, ids) = setup("bob.testnet");
+        ctx("alice.testnet");
+        c.register();
+        ctx("game.testnet");
+        let bob: AccountId = "bob.testnet".parse().unwrap();
+        let alice: AccountId = "alice.testnet".parse().unwrap();
+        // a Spark (base 30): the cap is ~2.4× base at full wear and 2.5× what was paid
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.list_robot_for(bob.clone(), ids[0].clone(), U128(500))));
+        assert!(r.is_err());
+        c.list_robot_for(bob.clone(), ids[0].clone(), U128(60));
+        assert_eq!(c.mt_balance_of(bob.clone(), ids[0].clone()).0, 0);
+        assert_eq!(c.listings().len(), 1);
+        c.buy_listing_for(alice.clone(), ids[0].clone());
+        assert_eq!(c.mt_balance_of(alice.clone(), ids[0].clone()).0, 1);
+        assert_eq!(c.mt_balance_of(alice, CREDITS.into()).0, 940);
+        assert_eq!(c.mt_balance_of(bob.clone(), CREDITS.into()).0, 1057); // 60 − 5% fee
+        assert!(c.listings().is_empty());
+        // listing and withdrawing gives the robot back
+        c.list_robot_for(bob.clone(), ids[1].clone(), U128(10));
+        c.unlist_robot_for(bob.clone(), ids[1].clone());
+        assert_eq!(c.mt_balance_of(bob, ids[1].clone()).0, 1);
     }
 
     #[test]

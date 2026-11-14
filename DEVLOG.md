@@ -472,6 +472,16 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   one transaction. Email login then answers that the account is self-custodied (sign in with a wallet).
 - Server key rotated again (+ `record_verified_battle_for`), the previous one deleted.
 
+### Player market, no unverified battles (Nov 14)
+- Contract: `list_robot_for` / `unlist_robot_for` / `buy_listing_for` / `listings` — escrowed listings at the owner's
+  price, buyer → seller credits with a 5% burned fee; price ≤ the broker wear cap and 2.5× the seller's purchase
+  basis, the seller's profit in the daily cap. 34 tests. Engine: `listRobot` / `unlistRobot` / `buyListing`,
+  `npcShopMarket` (a bot team buys a listing that beats the brokers by 15%+), mirrored on the bots' accounts.
+  UI: Market → *Player market*, Hangar → *List*.
+- The server records battles only with `record_verified_battle_for` (fallback removed); the server key was rotated
+  without `record_battle_for`, and `npm run verify` checks no key has it. New claim: the on-chain TEE signer is the
+  one in NEAR AI's public attestation report.
+
 ## Next
 - Card art.
 - README for judges, demo video.

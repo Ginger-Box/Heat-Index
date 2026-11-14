@@ -51,6 +51,8 @@ export const worldHooks: {
   npcSell?: (managerId: string, uid: string, chainId: string | undefined, price: number, brokerId: string) => void;
   npcRepair?: (managerId: string, uid: string, cost: number, durability: number) => void;
   npcMatch?: (st: BattleState, aId: string, bId: string) => void;
+  /** a bot team bought a player's listing */
+  npcBuyListing?: (managerId: string, uid: string, chainId: string | undefined) => void;
 } = {};
 const shareOp = (managerId: string, name: string, args: unknown[]) => {
   if (managerId === PLAYER_ID) playerHooks.op?.(name, args);
@@ -183,7 +185,8 @@ export type LedgerKind =
   | 'dividend'
   | 'mint'
   | 'match'
-  | 'reward';
+  | 'reward'
+  | 'market';
 export interface LedgerEntry {
   tick: number;
   kind: LedgerKind;
@@ -230,6 +233,8 @@ export interface World {
   /** game hours per day / NPC matches per game hour (absent: 12 / 12 — a local world) */
   hoursPerDay?: number;
   matchesPerHour?: number;
+  /** the player market: robots listed by their owners at their own price (escrowed: owner = MARKET) */
+  listings?: Listing[];
   /** shared world: the world wallets (engine/wallets.ts) already adopted on-chain, by account */
   walletsAdopted?: Record<string, boolean>;
   /** ELO and W/D/L count only ranked (online) battles — set once the old, mixed records were reset */
@@ -1570,6 +1575,7 @@ export function playNpcMatch(w: World) {
     applyMatch(w, a.id, b.id, st);
     worldHooks.npcMatch?.(st, a.id, b.id);
   }
+  withRng(w, (r) => npcShopMarket(w, r));
   withRng(w, (r) => {
     npcManage(w, a, r);
     npcManage(w, b, r);
@@ -1736,3 +1742,107 @@ export function createSharedWorld(seed: number): World {
   return w;
 }
 
+
+// ---------- the player market: robots listed by their owners, at their own price ----------
+// A listed robot is escrowed (owner = MARKET) until it is bought or withdrawn. The buyer pays the seller; a 5% fee
+// is burned. The price can't exceed what a broker could pay for it at its wear (× veteran bonus) nor 2.5× what the
+// seller paid — the same limits the NEAR contract checks (list_robot_for / buy_listing_for).
+
+export interface Listing {
+  uid: string;
+  seller: string;
+  price: number;
+  /** game hour it was listed */
+  at: number;
+}
+export const MARKET = 'market';
+export const MARKET_FEE = 0.05;
+const VET_PRICE_PCT = [100, 115, 135, 160];
+
+/** The most a robot can be listed for (the contract's list_limit, in the same integer arithmetic). */
+export function listLimit(r: OwnedRobot): number {
+  const md = model(r.modelId);
+  const max = maxDurability(r.modelId);
+  const d = Math.min(Math.max(0, r.durability), max);
+  const vet = VET_PRICE_PCT[vetRank(r)];
+  const wearCap = Math.floor((md.basePrice * 240 * vet * (15 * max + 85 * d)) / (100 * 100 * 100 * max)) + 1;
+  const paid = r.paid ?? md.basePrice;
+  return Math.min(wearCap, Math.floor((paid * 250 * vet) / (100 * 100)) + 1);
+}
+
+export function listRobot(w: World, managerId: string, uid: string, price: number): string | null {
+  const m = getManager(w, managerId);
+  const r = w.robots[uid];
+  if (!r || r.owner !== m.id) return 'This is not your robot';
+  if (r.loaner) return 'An Arena loaner robot cannot be listed';
+  if (r.durability <= 0) return 'A broken robot cannot be listed';
+  price = Math.round(price);
+  const limit = listLimit(r);
+  if (!(price >= 1 && price <= limit)) return `List it for 1–${limit} CR`;
+  r.owner = MARKET;
+  m.team = m.team.filter((x) => x !== uid);
+  syncDecks(w, m);
+  (w.listings ??= []).push({ uid, seller: m.id, price, at: w.hour });
+  ledger(w, { kind: 'market', from: m.id, to: MARKET, uid, amount: 0, note: `listed for ${price}` });
+  if (m.id === PLAYER_ID) log(w, 'player', `You listed ${model(r.modelId).name} on the player market for ${price} CR`);
+  shareOp(managerId, 'list', [uid, price]);
+  return null;
+}
+
+export function unlistRobot(w: World, managerId: string, uid: string): string | null {
+  const l = w.listings?.find((x) => x.uid === uid);
+  if (!l || l.seller !== managerId) return 'Not your listing';
+  w.listings = w.listings!.filter((x) => x !== l);
+  w.robots[uid].owner = managerId;
+  ledger(w, { kind: 'market', from: MARKET, to: managerId, uid, amount: 0, note: 'withdrawn' });
+  shareOp(managerId, 'unlist', [uid]);
+  return null;
+}
+
+export function buyListing(w: World, buyerId: string, uid: string): string | null {
+  const l = w.listings?.find((x) => x.uid === uid);
+  if (!l) return 'This listing is gone';
+  if (l.seller === buyerId) return "That's your own listing";
+  const buyer = getManager(w, buyerId);
+  const seller = getManager(w, l.seller);
+  if (buyer.credits < l.price) return `Not enough credits: need ${l.price} CR`;
+  const r = w.robots[uid];
+  const fee = Math.floor((l.price * 5) / 100);
+  // the seller's profit counts toward their daily cap (the contract checks the same)
+  if (isHuman(seller)) {
+    const gain = Math.max(0, l.price - fee - (r.paid ?? model(r.modelId).basePrice));
+    const day = Math.floor(Date.now() / 86_400_000);
+    const prev = seller.gainDay ?? (seller.id === PLAYER_ID ? w.gainDay : undefined);
+    const g = prev?.day === day ? prev : { day, amount: 0 };
+    if (g.amount + gain > DAILY_GAIN_MAX) return "The seller's daily trading profit limit is reached";
+    seller.gainDay = { day, amount: g.amount + gain };
+  }
+  buyer.credits -= l.price;
+  seller.credits += l.price - fee;
+  w.listings = w.listings!.filter((x) => x !== l);
+  r.owner = buyer.id;
+  r.paid = l.price;
+  ledger(w, { kind: 'market', from: buyer.id, to: seller.id, uid, amount: l.price, note: `fee ${fee}` });
+  log(w, 'player', `${buyer.id === PLAYER_ID ? 'You' : buyer.name} bought ${model(r.modelId).name} from ${seller.id === PLAYER_ID ? 'you' : seller.name} on the player market for ${l.price} CR`);
+  if (!isHuman(buyer)) worldHooks.npcBuyListing?.(buyer.id, uid, r.chainId);
+  shareOp(buyerId, 'buyListing', [uid]);
+  return null;
+}
+
+/** Bot teams shop the player market too: a listing well below the brokers' price finds a buyer. */
+export function npcShopMarket(w: World, rng: Rng) {
+  const open = (w.listings ?? []).filter((l) => isHuman(getManager(w, l.seller)));
+  if (!open.length || rng.next() > 0.35) return;
+  const l = rng.pick(open);
+  const r = w.robots[l.uid];
+  const asks = w.brokers.filter((b) => !b.closed).map((b) => quote(w, b, r.modelId).ask);
+  if (!asks.length) return;
+  const cheapest = Math.min(...asks);
+  // a fair deal for a bot: at most 85% of the cheapest broker's price for that model (worn ones count less)
+  const worth = cheapest * (0.4 + 0.6 * Math.min(1, r.durability / maxDurability(r.modelId)));
+  if (l.price > worth * 0.85) return;
+  const buyers = w.managers.filter((m) => !isHuman(m) && m.credits >= l.price + 100);
+  if (!buyers.length) return;
+  const b = rng.pick(buyers);
+  buyListing(w, b.id, l.uid);
+}

@@ -88,3 +88,23 @@ test("the player's own moves applied to the redacted view give the server's view
   }
   assert.ok(checks > 100, `only ${checks} moves checked`);
 });
+
+test('the player market: list within the limit, escrow, buy pays the seller minus the fee, withdraw', async () => {
+  const { MARKET, buyListing, getManager, listLimit, listRobot, robotsOf, unlistRobot, PLAYER_ID } = await import('../src/engine/world');
+  const w = createWorld(5, 'You', 2);
+  const me = getManager(w, PLAYER_ID);
+  const [r, r2] = robotsOf(w, PLAYER_ID).filter((x) => !x.loaner && x.durability > 0);
+  assert.ok(listRobot(w, PLAYER_ID, r.uid, listLimit(r) + 1));
+  assert.equal(listRobot(w, PLAYER_ID, r.uid, listLimit(r)), null);
+  assert.equal(w.robots[r.uid].owner, MARKET);
+  const bot = w.managers.find((m) => m.id !== PLAYER_ID)!;
+  bot.credits += 1000;
+  const before = me.credits;
+  const price = listLimit(w.robots[r.uid]);
+  assert.equal(buyListing(w, bot.id, r.uid), null);
+  assert.equal(w.robots[r.uid].owner, bot.id);
+  assert.equal(me.credits, before + price - Math.floor((price * 5) / 100));
+  assert.equal(listRobot(w, PLAYER_ID, r2.uid, 1), null);
+  assert.equal(unlistRobot(w, PLAYER_ID, r2.uid), null);
+  assert.equal(w.robots[r2.uid].owner, PLAYER_ID);
+});

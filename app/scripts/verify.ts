@@ -85,10 +85,11 @@ await check('the contract account has one full-access key; its other keys can on
   ok(full.length === 1, `${full.length} full-access keys`);
   for (const k of fn) {
     const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
-    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for', 'record_verified_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot'];
+    // no key may record a battle the contract didn't replay (record_battle_for is the old, server-reported path)
+    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_verified_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot', 'list_robot_for', 'unlist_robot_for', 'buy_listing_for'];
     ok(p.receiver_id === C && p.method_names.every((m) => allowed.includes(m)), `a function-call key can do more: ${p.method_names}`);
   }
-  return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: *_for moves and the world wallets)`;
+  return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: moves, contract-replayed battles, the market and the world wallets — no unverified battles)`;
 });
 
 await check('every transaction linked in the README succeeded', async () => {
@@ -147,6 +148,16 @@ await check("each broker records its AI decision itself, and the contract checks
     out.push(`${x.name} (${d!.chat_id.slice(0, 16)}…)`);
   }
   return `signed by ${signers.map((s) => `0x${s.slice(0, 8)}…`).join(', ')}: ${out.join(', ')}`;
+});
+
+await check("the contract's TEE signer is the one NEAR AI's public attestation report names for the brokers' model", async () => {
+  const signers = await view<string[]>('tee_signers');
+  const rep = (await fetch('https://cloud-api.near.ai/v1/attestation/report?model=deepseek-ai%2FDeepSeek-V4.1-Flash-1017&signing_algo=ecdsa').then((r) => r.json())) as {
+    model_attestations?: { signing_address?: string }[];
+  };
+  const attested = new Set((rep.model_attestations ?? []).map((a) => (a.signing_address ?? '').toLowerCase().replace(/^0x/, '')));
+  ok(signers.length > 0 && signers.every((x) => attested.has(x)), `on-chain ${signers.join(',')} vs attested ${[...attested].join(',')}`);
+  return `0x${signers[0].slice(0, 10)}… is in the model's attestation report (Intel TDX quote + NVIDIA GPU evidence, public)`;
 });
 
 console.log(failed ? `\n${failed} claim(s) failed` : '\nall claims hold');

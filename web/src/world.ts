@@ -37,6 +37,9 @@ import {
   setDeck,
   setTeam,
   worldHooks,
+  listRobot,
+  unlistRobot,
+  buyListing,
   type World,
 } from '../../app/src/engine/world';
 import { WORLD_WALLETS, brokerAccount, npcAccount } from '../../app/src/engine/wallets';
@@ -68,6 +71,7 @@ type WalletTask =
   | { t: 'buy'; account: string; uid: string; modelId: string; durability: number; price: number; broker: string }
   | { t: 'sell'; account: string; uid: string; chainId?: string; price: number; broker: string }
   | { t: 'repair'; account: string; uid: string; cost: number; durability: number }
+  | { t: 'buyListing'; account: string; uid: string; chainId?: string }
   | { t: 'battle'; account: string; side: number; log: string; opponent: string; result: number; reward: number; seed: number; replay: string; wear: { uid: string; durability: number }[] };
 
 interface PvpSession {
@@ -470,6 +474,16 @@ export class SharedWorld extends DurableObject<Env> {
       case 'setTeam':
         err = setTeam(w, me, a[0]);
         break;
+      case 'list':
+        // only a robot that is a token on NEAR can be listed (the contract escrows the token)
+        err = w.robots[String(a[0])]?.chainId ? listRobot(w, me, String(a[0]), Number(a[1])) : "This robot isn't on NEAR yet";
+        break;
+      case 'unlist':
+        err = unlistRobot(w, me, String(a[0]));
+        break;
+      case 'buyListing':
+        err = w.robots[String(a[0])]?.chainId ? buyListing(w, me, String(a[0])) : 'This listing is not on NEAR';
+        break;
       case 'match':
         // online (ranked) battles run on the server (pvpStart / pvpAct) — the browser never sees the hidden cards
         err = a[2] === 'ranked' ? 'Online battles run on the server' : this.match(w, me, String(a[0]), a[1] as BattleLog, 'league');
@@ -613,6 +627,10 @@ export class SharedWorld extends DurableObject<Env> {
       const account = acct(mid);
       if (ready(account)) this.walletTasks.push({ t: 'sell', account, uid, chainId, price, broker: brokerAccount(brokerId) ?? brokerId });
     };
+    worldHooks.npcBuyListing = (mid, uid, chainId) => {
+      const account = acct(mid);
+      if (ready(account)) this.walletTasks.push({ t: 'buyListing', account, uid, chainId });
+    };
     worldHooks.npcRepair = (mid, uid, cost, durability) => {
       const account = acct(mid);
       if (ready(account)) this.walletTasks.push({ t: 'repair', account, uid, cost, durability });
@@ -739,6 +757,11 @@ export class SharedWorld extends DurableObject<Env> {
       }
       return;
     }
+    if (task.t === 'buyListing') {
+      const tokenId = task.chainId ?? w.robots[task.uid]?.chainId;
+      if (tokenId) await this.chainCall('buy_listing_for', { buyer: task.account, token_id: tokenId });
+      return;
+    }
     if (task.t === 'repair') {
       const tokenId = w.robots[task.uid]?.chainId;
       if (!tokenId) return;
@@ -754,27 +777,13 @@ export class SharedWorld extends DurableObject<Env> {
       .filter((r) => r.chainId && r.durability > 0 && w.managers.find((m) => m.id === r.owner && npcAccount(m.name) === task.account))
       .reduce((t, r) => t + robotModel(r.modelId).basePrice, 0);
     const reward = Math.max(0, Math.min(task.reward, 400, Math.floor((value * 25) / 100)));
-    // the contract replays the bots' battle too and decides the result and the wear on its own
-    try {
-      await this.chainCall(
-        'record_verified_battle_for',
-        { player: task.account, side: task.side, opponent: task.opponent.slice(0, 64), reward: String(reward), log: task.log },
-        300_000_000_000_000n,
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!/Exceeded the prepaid gas|doesn't replay|Bad battle log/.test(msg)) throw e;
-      this.walletError = `bot battle fell back: ${msg.slice(0, 120)}`;
-      await this.chainCall('record_battle_for', {
-        player: task.account,
-        opponent: task.opponent.slice(0, 64),
-        result: task.result,
-        reward: String(reward),
-        seed: task.seed,
-        wear,
-        replay: task.replay,
-      });
-    }
+    // the contract replays the bots' battle too and decides the result and the wear on its own (no other path)
+    void wear;
+    await this.chainCall(
+      'record_verified_battle_for',
+      { player: task.account, side: task.side, opponent: task.opponent.slice(0, 64), reward: String(reward), log: task.log },
+      300_000_000_000_000n,
+    );
   }
 
   /** a broker records its AI decision on its own NEAR account; the contract checks the NEAR AI TEE signature */
@@ -843,6 +852,21 @@ export class SharedWorld extends DurableObject<Env> {
       r.chainId = String(out.value);
       return { label: `Buy ${robotName(r.modelId)} · ${e.amount} CR`, hash: out.hash };
     }
+    if (name === 'list' || name === 'unlist' || name === 'buyListing') {
+      const r = w.robots[String(a[0])];
+      if (!r?.chainId) return null;
+      const label = robotName(r.modelId);
+      if (name === 'list') {
+        const out = await this.chainCall('list_robot_for', { player: me, token_id: r.chainId, price: String(Math.round(Number(a[1]))) });
+        return { label: `List ${label} · ${Math.round(Number(a[1]))} CR`, hash: out.hash };
+      }
+      if (name === 'unlist') {
+        const out = await this.chainCall('unlist_robot_for', { player: me, token_id: r.chainId });
+        return { label: `Withdraw ${label}`, hash: out.hash };
+      }
+      const out = await this.chainCall('buy_listing_for', { buyer: me, token_id: r.chainId });
+      return { label: `Buy ${label} from a player · ${r.paid} CR`, hash: out.hash };
+    }
     if (name === 'sell') {
       const before = mine0.get(String(a[0]));
       const e = newLedger.find((x) => (x.kind === 'sell' || x.kind === 'scrap') && x.to === me);
@@ -877,17 +901,11 @@ export class SharedWorld extends DurableObject<Env> {
       const result = res === null ? 2 : res === 0 ? 1 : 0;
       // online battles are marked so the contract never counts them toward the league
       const opponent = a[2] === 'ranked' ? `online:${opp?.name ?? String(a[0])}`.slice(0, 64) : (opp?.name ?? String(a[0]));
-      // the contract replays the log itself and decides the result and the wear (record_verified_battle_for);
-      // the older, server-reported path is only a fallback if the on-chain replay can't run
-      let out: { hash: string; value: unknown };
-      try {
-        out = await this.chainCall('record_verified_battle_for', { player: me, side: 0, opponent, reward: String(reward), log: text }, 300_000_000_000_000n);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!/Exceeded the prepaid gas|doesn't replay|Bad battle log/.test(msg)) throw e;
-        this.walletError = `verified record fell back: ${msg.slice(0, 120)}`;
-        out = await this.chainCall('record_battle_for', { player: me, opponent, result, reward: String(reward), seed: log.input.seed >>> 0, wear, replay });
-      }
+      // the contract replays the log itself and decides the result and the wear — the only way a battle is recorded
+      // (the server's key can't call the old, server-reported record_battle_for any more)
+      const out = await this.chainCall('record_verified_battle_for', { player: me, side: 0, opponent, reward: String(reward), log: text }, 300_000_000_000_000n);
+      void wear;
+      void replay;
       return {
         label: `${a[2] === 'ranked' ? 'Online battle' : 'Battle'} vs ${opp?.name}: ${['loss', 'win', 'draw'][result]} · +${reward} CR`,
         hash: out.hash,

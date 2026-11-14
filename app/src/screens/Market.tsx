@@ -2,7 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { createPortal } from 'react-dom';
 import { winRate } from '../engine/pricing';
 import { CLASSES, CLASS_HELP, CLASS_ICON, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
-import { PLAYER_ID, actualRelevance, buy, carries, getManager, quote, rangeLabel, refPrice, robotsOf, type World } from '../engine/world';
+import { MARKET_FEE, PLAYER_ID, actualRelevance, buy, buyListing, carries, getManager, quote, rangeLabel, refPrice, robotsOf, unlistRobot, type World } from '../engine/world';
+import { model as modelOf } from '../engine/robots';
 import { crunch, sfx } from '../audio';
 import { act, worldVersion } from '../store';
 import { setCursorMode } from '../ui/fx';
@@ -239,6 +240,7 @@ export function Market({ w }: { w: World }) {
 
   return (
     <div className="grid">
+      <PlayerMarket w={w} />
       {/* --- class overview --- */}
       <div className="panel">
         <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -646,4 +648,80 @@ function computeClassStats(w: World, rows: Row[]) {
     return { c, index, change: ((index - startIndex) / startIndex) * 100, rel: avg((r) => r.rel), wr: avg((r) => r.wr), series };
   });
 
+}
+
+/** The player market: robots listed by players at their own price (escrowed on NEAR until sold or withdrawn). */
+function PlayerMarket({ w }: { w: World }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const list = [...(w.listings ?? [])].sort((a, b) => b.at - a.at);
+  const cheapestAsk = (modelId: string) => {
+    const asks = w.brokers.filter((b) => !b.closed && carries(b, modelId)).map((b) => quote(w, b, modelId).ask);
+    return asks.length ? Math.min(...asks) : null;
+  };
+  return (
+    <div className="panel">
+      <h2>Player market</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Robots players listed at their own price — escrowed on NEAR until sold. The seller gets the price minus a {Math.round(MARKET_FEE * 100)}% fee
+        (burned). Bot teams shop here too when a listing beats the brokers. List your own from the Hangar.
+      </p>
+      {list.length === 0 ? (
+        <p className="muted">No listings yet — be the first: Hangar → a robot → List.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Robot</th>
+              <th>Durability</th>
+              <th>Seller</th>
+              <th>Price</th>
+              <th>Brokers</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((l) => {
+              const r = w.robots[l.uid];
+              if (!r) return null;
+              const seller = w.managers.find((m) => m.id === l.seller);
+              const mine = l.seller === PLAYER_ID;
+              const ask = cheapestAsk(r.modelId);
+              return (
+                <tr key={l.uid}>
+                  <td>
+                    <ClassTag modelId={r.modelId} /> {modelOf(r.modelId).name}
+                  </td>
+                  <td>{r.durability}</td>
+                  <td>{mine ? 'you' : (seller?.name ?? l.seller)}</td>
+                  <td>
+                    <Cr v={l.price} />
+                  </td>
+                  <td className="muted">{ask !== null ? <Cr v={ask} /> : '—'}</td>
+                  <td>
+                    {mine ? (
+                      <button className="small" onClick={() => setMsg(act((w) => unlistRobot(w, PLAYER_ID, l.uid)))}>
+                        Withdraw
+                      </button>
+                    ) : (
+                      <button
+                        className="small primary"
+                        onClick={() => {
+                          const err = act((w) => buyListing(w, PLAYER_ID, l.uid));
+                          if (!err) sfx('ui-buy');
+                          setMsg(err);
+                        }}
+                      >
+                        Buy
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {msg && <div className="muted">{msg}</div>}
+    </div>
+  );
 }

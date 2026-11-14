@@ -16,6 +16,8 @@ import {
   ensureDecks,
   renameDeck,
   setDeck,
+  listLimit,
+  listRobot,
   type OwnedRobot,
   type World,
 } from '../engine/world';
@@ -274,6 +276,17 @@ export function Hangar({ w }: { w: World }) {
                 </div>
                 <div className="row" style={{ gap: 4, justifyContent: 'center' }}>
                   {repairBtn(r)}
+                  {!r.loaner && r.durability > 0 && (
+                    <ListButton
+                      max={listLimit(r)}
+                      suggest={bid?.price}
+                      onList={(price) => {
+                        const err = act((w) => listRobot(w, PLAYER_ID, r.uid, price));
+                        if (!err) sfx('ui-sell');
+                        setMsg(err);
+                      }}
+                    />
+                  )}
                   {bid ? (
                     <button
                       className="small"
@@ -300,5 +313,31 @@ export function Hangar({ w }: { w: World }) {
       </div>
       {drag.ghost}
     </div>
+  );
+}
+
+/** List a robot on the player market at your own price (up to what a broker could pay at its wear). */
+function ListButton({ max, suggest, onList }: { max: number; suggest?: number; onList: (price: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [price, setPrice] = useState(String(Math.min(max, Math.round((suggest ?? max) * 1.15))));
+  if (!open)
+    return (
+      <button className="small" title="List it on the player market at your own price" onClick={() => setOpen(true)}>
+        List
+      </button>
+    );
+  return (
+    <span className="list-form">
+      <input type="number" min={1} max={max} value={price} onChange={(e) => setPrice(e.target.value)} title={`1–${max} CR`} />
+      <button
+        className="small primary"
+        onClick={() => {
+          setOpen(false);
+          onList(Number(price));
+        }}
+      >
+        OK
+      </button>
+    </span>
   );
 }
