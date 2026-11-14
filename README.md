@@ -60,12 +60,13 @@ stops, players keep their tokens and history, but the NPC economy stops with it.
 in-game wallets, not NEAR accounts. The contract doesn't replay battles itself (that needs the engine in
 Rust): the server replays every battle before recording it, and the public log makes any record checkable, so a
 forged result is *detectable* and can't be sent from a browser — but the trust in the server is real. The public
-site's email login is custodial (see below). Battles are against the bots; no PvP yet.
+site's email login is custodial (see below). PvP is asynchronous: an online opponent's deck is played by the
+server's AI, not by the other player live.
 
 ## On NEAR
 
-The game's economy runs in the browser (12 NPC teams, 3 AI brokers, hourly prices), and **the player's side of it is
-on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is a **NEP-245 multi-token** ledger.
+The game's world runs on the game server for logged-in players (in the browser for guests): 12 NPC teams, 3 AI
+brokers, prices every game hour. **The player's side of it is on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is a **NEP-245 multi-token** ledger.
 
 - **Credits** are the multi token `cr`; **every robot** is its own token `robot:<model>:<serial>` (supply 1) with
   its model and durability on-chain. Standard views: `mt_balance_of`, `mt_batch_balance_of`, `mt_supply`,
@@ -118,11 +119,13 @@ action log's SHA-256 is required with each result and the log is public, so anyo
   hour is 5 minutes (prices, brokers and charts move, an NPC match is played), a game day is a real day, **a season
   is 7 real days**, no pause, no fast-forward. The
   3 brokers, prices, investments (each broker card lists its investors) and the leaderboards are the same for
-  everyone; the **12 bot teams** of the Pit League are marked `BOT`, players `PLAYER`. Joining, the server reads
+  everyone; the **12 bot teams** of the Pit League are marked `BOT`, players `PLAYER`, the developer's own account
+  `DEV` (it plays out of competition and takes no season prize place). Click any team in the Ratings for its profile:
+  record, places, net worth broken down, recent battles and the robots it owns — never its battle deck. Joining, the server reads
   the player's robots, credits and league progress **from the chain**, not from the browser; every move the player
   makes is replayed on the shared world with their account as the manager, and **a battle only counts if its action
-  log replays** to the reported result; the server then records the move on NEAR. Battles are against the bots for
-  now.
+  log replays** to the reported result; the server then records the move on NEAR. League battles are against the bot
+  teams; Online battles are against other players' decks and run entirely on the server (below).
 
 ## Two ways to play
 
@@ -137,7 +140,8 @@ action log's SHA-256 is required with each result and the log is public, so anyo
   The bots keep fighting each other in the background, so the ladder is never empty. Push your
   robots hard and pay for repairs, or play carefully and save money.
 - **Magnate** — trade robots on the Market, read the BUY / SELL signal (actual relevance vs what brokers price in),
-  and invest in AI brokers for a share of their profit.
+  and invest in AI brokers for a share of their profit. Net worth (credits + robots at buyback price + broker stakes)
+  ranks the Magnates; the top 3 at the season's end get 300 / 200 / 100 CR.
 
 ## The economy loop
 
@@ -164,7 +168,9 @@ battles ──► wins / picks ──► relevance ──► price
   each broker's strategy but can't break the economy; the Brokers screen shows the current decision and the model,
   and [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public) publishes each broker's
   latest policy with its NEAR AI chat id. Guests' local worlds keep the rule-based brokers (no API key in the
-  browser). Without a NEAR AI key the server falls back to the rules too.
+  browser). If NEAR AI can't be reached (no working key, no credits, an outage), a broker falls back to its rules —
+  and the market hears why: a family emergency, burnout, a sleepless week, each bending its markup and reaction
+  a little within its bounds — then it goes back to the AI by itself once the model answers again.
 - **The Pit League** — the player's progression. Four divisions of three teams: *Scrap* (one class, decks ≤ 24
   energy, a sloppy AI) → *Chrome* (one class, ≤ 30) → *Neon* (two-class combos, ≤ 36) → *Apex* (top combos at the
   full 42, a sharp AI; the boss is Armor guards kept alive by Repair medics). Beat every team of your division once
@@ -217,9 +223,10 @@ lint, type check, engine tests, the production build, `npm run verify`):
 ```bash
 cd contract && cargo test   # 29 contract tests: every price / reward / wear / abuse limit, server-only moves
                             # (incl. both exploits from the review), merges, transfers, login links
-cd app && npm test          # 18 engine tests: battle rules, determinism and replays, prices inside the contract's
+cd app && npm test          # 21 engine tests: battle rules, determinism and replays, prices inside the contract's
                             # ranges, the game's constants = the contract's, a simulated week, league, veterans,
-                            # the shared world's clock, LLM broker answers clamped to their bounds
+                            # the shared world's clock, LLM broker answers clamped to their bounds, the brokers'
+                            # fallback when the AI is down, no hidden card in any online battle view
 cd app && npx eslint .      # lint (0 errors)
 cd app && npm run verify    # reads NEAR testnet + the live site and prints ✓/✗ for each claim in this README
 cd app && npm run verify-battle <tx>   # replays a recorded battle from its public log and checks the record
@@ -233,7 +240,7 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 | Path | What |
 |---|---|
 | `app/src/engine/` | rules in pure TypeScript: combat, AI, robots, pricing, world simulation |
-| `app/src/screens/` | Arena, Hangar, Market, Brokers, Analytics, Ratings |
+| `app/src/screens/` | Arena (Pit League + Online), Hangar, Market, Brokers, Analytics, Ratings, team profiles |
 | `app/src/ui/` | cards, drag & drop, effects, boot screen, procedural pixel robots |
 | `app/scripts/` | balance and economy simulations |
 | `app/src/near/` | NEAR session, login (NEAR Auth, Privy, wallets), restore from chain |
