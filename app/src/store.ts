@@ -4,7 +4,7 @@ import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
 import { KeyPair } from 'near-api-js';
 import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, playerHooks, type World } from './engine/world';
-import { chainSession } from './near/chain';
+import { addServerTx, chainSession } from './near/chain';
 import { PUBLIC_ORIGIN } from './near/config';
 
 const KEY = 'neon-pit-world-v5'; // v5: decks of 10–15 robots, 5 board slots (v4: new economy)
@@ -121,8 +121,10 @@ function sendOp(name: string, args: unknown[]) {
     body: JSON.stringify({ name, args }),
   })
     .then((r) => r.json())
-    .then((out: { error?: string | null }) => {
+    .then((out: { error?: string | null; tx?: { label: string; hash?: string } | null }) => {
       if (out.error) serverNote = { text: `Shared world: ${out.error}`, at: Date.now() };
+      // the server recorded the move on NEAR (it is the only writer of trades and battles)
+      if (out.tx) addServerTx(out.tx.label, out.tx.hash);
     })
     .catch(() => (serverNote = { text: 'Shared world: the move did not reach the server', at: Date.now() }))
     .finally(() => {

@@ -10,7 +10,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { baseDecode } from 'near-api-js';
+import { Account, JsonRpcProvider, baseDecode } from 'near-api-js';
 import {
   hoursPerDay,
   matchesPerHour,
@@ -35,13 +35,18 @@ import {
   setTeam,
   type World,
 } from '../../app/src/engine/world';
-import { replayBattle, type BattleLog } from '../../app/src/engine/replay';
+import { logText, replayBattle, sha256Hex, type BattleLog } from '../../app/src/engine/replay';
 import { applyPolicy, brokerPrompt, parsePolicy } from '../../app/src/engine/brokerAi';
 import { teamError } from '../../app/src/engine/team';
 import { vetRank } from '../../app/src/engine/veteran';
 
 interface Env {
   OWNER_SECRET: string;
+  /** a function-call key of the contract account limited to buy/sell/repair/record_battle `_for` — the server
+   *  records every trade and battle on-chain after checking it */
+  SERVER_KEY?: string;
+  /** battle action logs (public, by SHA-256) */
+  BATTLES: KVNamespace;
   /** NEAR AI Cloud API keys — the brokers' minds (absent: rule-based brokers); the second is a fallback */
   NEARAI_KEY?: string;
   NEARAI_KEY_2?: string;
@@ -316,6 +321,10 @@ export class SharedWorld extends DurableObject<Env> {
     return json({
       version: this.version,
       managers: w.managers.map((m) => ({ id: m.id, name: m.name, human: isHuman(m), elo: m.elo, wins: m.wins, losses: m.losses, credits: m.credits })),
+      // the brokers' minds, publicly: the latest policy each LLM chose, the model, and the NEAR AI chat id
+      brokerModel: BROKER_MODEL,
+      brokers: w.brokers.map((b) => ({ id: b.id, name: b.name, closed: b.closed, credits: Math.round(b.credits), style: b.style, ai: b.ai ?? null })),
+      clock: { hour: w.hour, day: Math.floor(w.hour / hoursPerDay(w)) + 1, season: w.season },
     });
   }
 
@@ -327,6 +336,10 @@ export class SharedWorld extends DurableObject<Env> {
     if (!w.managers.some((m) => m.id === me)) return json({ error: 'Not in the world yet' }, 400);
     const a = args as any[];
     let err: string | null;
+    // the move is applied, then recorded on NEAR; if the chain refuses it, the world goes back to before the move
+    const before = JSON.stringify(w);
+    const ledgerFrom = w.ledger.length;
+    const mine0 = new Map(robotsOf(w, me).map((r) => [r.uid, { ...r }]));
     switch (name) {
       case 'buy':
         err = buy(w, me, a[0], a[1]);
@@ -367,11 +380,102 @@ export class SharedWorld extends DurableObject<Env> {
       default:
         return json({ error: `Unknown move ${name}` }, 400);
     }
+    let tx: { label: string; hash?: string } | null = null;
     if (!err) {
+      try {
+        tx = await this.mirror(w, me, name, a, ledgerFrom, mine0);
+      } catch (e) {
+        this.w = JSON.parse(before) as World;
+        return json({ error: `NEAR refused the move: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`, version: this.version });
+      }
       this.dirty = true;
       await this.save();
     }
-    return json({ error: err, version: this.version });
+    return json({ error: err, version: this.version, tx });
+  }
+
+  // ---------- recording moves on NEAR (the server is the only writer: contract *_for methods) ----------
+
+  private chainQueue: Promise<unknown> = Promise.resolve();
+
+  /** one transaction at a time (one key, ordered nonces) */
+  private chainCall(method: string, args: Record<string, unknown>): Promise<{ hash: string; value: unknown }> {
+    const run = async () => {
+      if (!this.env.SERVER_KEY) throw new Error('the server has no NEAR key');
+      const acc = new Account(CONTRACT_ID, new JsonRpcProvider({ url: RPC_URL }), this.env.SERVER_KEY as `ed25519:${string}`);
+      const r = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas: 60_000_000_000_000n });
+      const st = r.status as { SuccessValue?: string; Failure?: unknown };
+      if (st && typeof st === 'object' && 'Failure' in st) throw new Error(JSON.stringify(st.Failure).slice(0, 200));
+      const raw = st?.SuccessValue ? atob(st.SuccessValue) : '';
+      return { hash: r.transaction.hash as string, value: raw ? JSON.parse(raw) : null };
+    };
+    const p = this.chainQueue.then(run, run);
+    this.chainQueue = p.catch(() => {});
+    return p;
+  }
+
+  /** what a move changed for this player → the matching contract call */
+  private async mirror(w: World, me: string, name: string, a: any[], ledgerFrom: number, mine0: Map<string, any>) {
+    const newLedger = w.ledger.slice(ledgerFrom);
+    const robotName = (id: string) => id[0].toUpperCase() + id.slice(1);
+    if (name === 'buy') {
+      const e = newLedger.find((x) => x.kind === 'buy' && x.from === me);
+      const r = e?.uid ? w.robots[e.uid] : undefined;
+      if (!e || !r) return null;
+      const out = await this.chainCall('buy_robot_for', {
+        player: me,
+        model_id: r.modelId,
+        price: String(e.amount),
+        durability: Math.max(1, Math.min(16, r.durability)),
+        broker: e.to,
+      });
+      r.chainId = String(out.value);
+      return { label: `Buy ${robotName(r.modelId)} · ${e.amount} CR`, hash: out.hash };
+    }
+    if (name === 'sell') {
+      const before = mine0.get(String(a[0]));
+      const e = newLedger.find((x) => (x.kind === 'sell' || x.kind === 'scrap') && x.to === me);
+      if (!before?.chainId || !e) return null;
+      const out = await this.chainCall('sell_robot_for', { player: me, token_id: before.chainId, price: String(e.amount), broker: e.from });
+      return { label: `Sell ${robotName(before.modelId)} · ${e.amount} CR`, hash: out.hash };
+    }
+    if (name === 'repair') {
+      const before = mine0.get(String(a[0]));
+      const r = w.robots[String(a[0])];
+      const e = newLedger.find((x) => x.kind === 'repair' && x.from === me);
+      if (!before?.chainId || !r || !e) return null;
+      const out = await this.chainCall('repair_robot_for', {
+        player: me,
+        token_id: before.chainId,
+        cost: String(e.amount),
+        durability: Math.min(16, r.durability),
+      });
+      return { label: `Repair ${robotName(r.modelId)} · ${e.amount} CR`, hash: out.hash };
+    }
+    if (name === 'match') {
+      const log = a[1] as BattleLog;
+      const text = logText(log);
+      const replay = await sha256Hex(text);
+      await this.env.BATTLES.put(replay, text); // the public log behind the on-chain hash
+      const reward = newLedger.filter((x) => x.kind === 'reward' && x.to === me && !x.note).reduce((s, x) => s + x.amount, 0);
+      const wear = log.input.a
+        .filter((r) => mine0.get(r.uid)?.chainId)
+        .map((r) => ({ token_id: mine0.get(r.uid).chainId, durability: Math.min(16, w.robots[r.uid]?.durability ?? 0) }));
+      const opp = w.managers.find((m) => m.id === String(a[0]));
+      const res = replayBattle(log).st.winner;
+      const result = res === null ? 2 : res === 0 ? 1 : 0;
+      const out = await this.chainCall('record_battle_for', {
+        player: me,
+        opponent: opp?.name ?? String(a[0]),
+        result,
+        reward: String(reward),
+        seed: log.input.seed >>> 0,
+        wear,
+        replay,
+      });
+      return { label: `Battle vs ${opp?.name}: ${['loss', 'win', 'draw'][result]} · +${reward} CR`, hash: out.hash };
+    }
+    return null;
   }
 
   /** a battle counts only if its log replays: the player's deck is theirs, every move is legal, the result is real */

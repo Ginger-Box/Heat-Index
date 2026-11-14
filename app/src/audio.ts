@@ -503,7 +503,7 @@ export function faxSound(): () => void {
   tone('sine', 2100, t0 + 1.08, 0.18, 0.4);
   // 3) V.21-style FSK warble: random hops between 1650 and 1850 Hz at ~300 baud
   const fsk = tone('square', 1750, t0 + 1.3, 0.42, 0.14);
-  for (let i = 0, ts = t0 + 1.3; ts < t0 + 1.72; i++, ts += 1 / 300) {
+  for (let ts = t0 + 1.3; ts < t0 + 1.72; ts += 1 / 300) {
     fsk.frequency.setValueAtTime(Math.random() < 0.5 ? 1650 : 1850, ts);
   }
   // 4) training: band-limited noise with a fast tremolo, the "kshhh" of a fax

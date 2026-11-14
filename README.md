@@ -5,7 +5,8 @@ Built for the NEAR hackathon track **"Games With Real Economies"**.
 
 Robots are cards that **wear out**: every battle costs durability, repairs cost credits — every hit has a price.
 A robot's market price follows its **relevance** (how often it wins and how many teams field it), so the market
-*is* the meta. AI brokers — run by an LLM on **NEAR AI Cloud** — trade with a **reaction lag** — spot what's rising before they do and you profit.
+*is* the meta. Brokers trade with a **reaction lag** — spot what's rising before they do and you profit. In the
+shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bounds.
 
 > **Play:** https://heat-index-web.ginger-box.workers.dev — email (one-time code), NEAR wallet, or guest ·
 > locally on `http://localhost:3000` (email through NEAR Auth).
@@ -20,12 +21,15 @@ A robot's market price follows its **relevance** (how often it wins and how many
    heat pips, screen cracks on heavy hits.
 3. **Market** tab → hover a price: the tooltip explains it (relevance × stock × the broker's markup). The **BUY /
    SELL** signal is actual relevance vs what brokers price in — they notice the meta with a delay.
-4. **Brokers** tab → three AI brokers (in the shared world each is run by an LLM on NEAR AI Cloud within fixed bounds) with their own cash, stock, reaction speed and a live remark; invest in one and
-   get a cut of its daily profit.
-5. ⚙ (top right) → **Fast-forward a week** → 7 game days in ~35 s: prices, relevance and broker fortunes move;
-   **Analytics** shows the history by robot and by class.
-6. Logged in on NEAR? The **NEAR** cell in the top bar lists every move you make as a testnet transaction with an
-   explorer link. Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet).
+4. **Brokers** tab → three brokers with their own cash, stock, segment, reaction speed and a live remark; invest in
+   one and get a cut of its daily profit. **Logged in**, you see the shared world, where each broker is run by
+   `deepseek-ai/DeepSeek-V4.1-Flash-1017` on NEAR AI Cloud (its card shows the current decision). **As a guest**, the
+   brokers follow their rules. The LLMs' latest decisions are public without logging in:
+   [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public).
+5. Guest: ⚙ (top right) → **Fast-forward a week** → 7 game days in ~35 s; **Analytics** shows the history by robot
+   and by class. (The shared world runs in real time: no fast-forward.)
+6. Logged in on NEAR? The **NEAR** cell in the top bar lists each move the game server recorded for you on testnet,
+   with an explorer link. Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet).
 
 ### What is on-chain and what is simulated
 
@@ -35,23 +39,28 @@ A robot's market price follows its **relevance** (how often it wins and how many
 | Registration: 12 starter robots + 1000 CR | **on-chain** | [register tx](https://testnet.nearblocks.io/txns/9LkHUBch9gbU1rBH9TQAz8WzgFVaFnuo8fdkPHmGpgnk) |
 | Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
+| **Only the game server records moves**: trades and battles go through `buy_robot_for` / `sell_robot_for` / `repair_robot_for` / `record_battle_for`, callable only by the contract account (the world server's key is limited to these methods). A battle needs its replay hash, a win needs the robots that fought. A player's browser key can only `register` | **on-chain** (contract v0.8, 29 unit tests incl. both exploits from the review) | [record_battle_for tx](https://testnet.nearblocks.io/txns/DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt) → `npm run verify-battle DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt` ✓ |
 | Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
-| Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
+| Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle_for`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
 | **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result; `npm run verify-battle <tx>` replays it with the engine and checks every move's legality, the result and each robot's wear against the record | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
-| Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (`record_battle` → `league_of`, `league` events) | `league_of` of any `bot-*` account |
+| Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (`record_battle_for` → `league_of`, `league` events) | `league_of` of any `bot-*` account |
 | Anti-abuse: a robot sells for at most 2.5 × what its owner paid (× veteran bonus); trading profit ≤ 1500 CR a day; battle rewards + league prizes ≤ 3000 CR a day (`purse_today`); 6 rank-wins a day per robot; credits can't be transferred, robots only to registered players; only the game's relayer can create accounts | **on-chain** (`paid_for`, `purse_today`) | a Spark bought for 9 CR [can't be resold for 60](https://testnet.nearblocks.io/txns/3vwmqfQE2pyDapvWL8XHtDq5TmFfiBkWsFWnBec7HVxy) — *"Price is too far above what you paid"*; [22 CR goes through](https://testnet.nearblocks.io/txns/HWYqks4NJdp24wXDnDg7Jrneprh2S6wn7k47kAsfrbKD) |
-| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 20 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 29 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
 | Email login → a NEAR account owned by the player's NEAR Auth (MPC) key | **on-chain** (account factory in the contract) | `account_for_owner_key` |
-| The 3 brokers' cash and stock, the 12 NPC teams, hourly prices, relevance, the battles themselves | **simulated in the browser** (deterministic engine in `app/src/engine/`) | — |
+| The 3 brokers' cash and stock, the 12 NPC teams, prices, relevance, battle simulation | **the shared world's server** for logged-in players (a Cloudflare Durable Object running the engine, `web/src/world.ts`); **the browser** for guests | [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public) |
 
 Live history: besides real players, four clearly named demo bots (`bot-alpha`, `bot-bravo`, `bot-delta`,
 `bot-echo` `.heat-index-game.testnet`) play the real engine against the NPC teams and trade at the simulated market's
-prices through the same contract methods (`app/scripts/onchain-bots.ts`) — `stats()` shows 35+ battles and 35+
-trades.
+prices through the same `*_for` contract methods, signed by the game's account (`app/scripts/onchain-bots.ts`) —
+`stats()` shows 45+ battles and 50+ trades. Bots can't join the shared world as players.
 
-Honest limits: brokers and NPC teams have **in-game** wallets, not NEAR accounts; battle outcomes are computed in the
-client and only bounded by the contract (the seed is recorded so a verifier can replay them — not built yet); email
-login runs on `localhost:3000` because the shared testnet NEAR Auth app only allows that origin.
+**Honest limits — this is a hybrid economy.** The players' assets and every move they make are on NEAR; the
+*world* around them (NPC teams, brokers, prices) is simulated by the game's engine on one server. If that server
+stops, players keep their tokens and history, but the NPC economy stops with it. Brokers and NPC teams have
+in-game wallets, not NEAR accounts (roadmap). The contract doesn't replay battles itself (that needs the engine in
+Rust): the server replays every battle before recording it, and the public log makes any record checkable, so a
+forged result is *detectable* and can't be sent from a browser — but the trust in the server is real. The public
+site's email login is custodial (see below). Battles are against the bots; no PvP yet.
 
 ## On NEAR
 
@@ -67,14 +76,13 @@ on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is 
   game details, so the player's economy can be replayed from the chain.
 - **Login with email (NEAR Auth)**: email / Google / passkey through NEAR Auth → the MPC network derives the player's
   own key → the contract creates `<name>.heat-index-game.testnet` owned by that key and registers the player
-  (12 starter robots + 1000 CR). The account also gets a limited key from the browser (game methods only), so the
-  game signs moves **without popups**. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
+  (12 starter robots + 1000 CR). The browser gets a key limited to `register`; every move after that is recorded
+  by the game server after it checks it, so there are **no popups** and no way to forge a move from the browser. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
   account creation is sent by the dev server (`vite.config.ts`, key read from the local near CLI credentials,
   never shipped to the browser) — so email login works when you run the game locally.
 - **Email login on the public site (Privy) — a workaround, see the note below.** Privy sends a 6-digit code; a
   Cloudflare Worker next to the site ([`web/src/index.ts`](web/src/index.ts)) verifies the Privy token with Privy's
-  public keys and calls the same factory to create `<name>.heat-index-game.testnet`, with the browser's limited game
-  key. A returning player (another device, a cleared browser) gets a new game key on the same account. The Worker
+  public keys and calls the same factory to create `<name>.heat-index-game.testnet`. A returning player (another device, a cleared browser) gets a new game key on the same account. The Worker
   signs account creation with a **function-call key of the contract account that can only call
   `create_player_account`** (3 NEAR gas allowance) — not the full-access key.
 
@@ -87,33 +95,34 @@ on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is 
 > acceptable for a testnet game and is how most email-login games work; with NEAR Auth credentials the public site
 > would switch back to the player owning their key.
 
-- **Login with a wallet (NEAR Connect)**: Meteor, Intear, MyNearWallet… — one approval adds the limited game key and
-  registers the player. Works on the public site.
+- **Login with a wallet (NEAR Connect)**: Meteor, Intear, MyNearWallet… — one approval adds a key limited to
+  `register` and registers the player. Works on the public site.
 - The HUD's NEAR cell shows the account, on-chain credits, robots on-chain and the latest transactions with explorer
   links.
 
-**Trust model:** battles and market prices are computed in the client, so the contract checks every reported value
-against the game's own rules, kept on-chain: each model's base price and durability come from a table in the
+**Trust model.** The browser can't write moves: the shared world's server prices every trade from its own brokers'
+quotes and replays every battle from its action log, then records it with `*_for` methods only the contract account
+can call. On top of that, the contract checks every value against the game's own rules, kept on-chain: each model's base price and durability come from a table in the
 contract; a purchase must lie in the market's possible range for that model (30–280% of base), a sale can't exceed
 what a broker could pay at that wear, a repair can't be cheaper than the game's minimum for the restored durability,
 a battle reward is capped (≤ 25% of the player's robots' base value, ≤ 400 CR) and limited to one battle per 30 s,
 durability only goes down in battle, and nobody can spend credits they don't have. **Battles are replayable**: the
-action log's SHA-256 is on-chain with each result and the log is public, so anyone can re-run the battle
-(`npm run verify-battle <tx>`) and see whether the reported win and wear are real. The contract doesn't run the
-replay itself (yet) — it would need the battle engine in Rust — so a forged result is *detectable*, not
-*impossible*; the daily caps bound what it could earn.
+action log's SHA-256 is required with each result and the log is public, so anyone can re-run the battle
+(`npm run verify-battle <tx>`) and see whether the recorded win and wear are real.
 
 ## Two worlds
 
 - **Guest** — your own world in this browser: pause it, fast-forward a week, start over. Nothing on-chain.
 - **Logged in (email or NEAR wallet) — the shared world.** One world for every player, run by the game's server
-  (a Cloudflare Durable Object running the same engine, [`web/src/world.ts`](web/src/world.ts)): real time — an NPC
-  match every 10 minutes, a game day is a real day, **a season is 7 real days**, no pause, no fast-forward. The
+  (a Cloudflare Durable Object running the same engine, [`web/src/world.ts`](web/src/world.ts)): real time — a game
+  hour is 5 minutes (prices, brokers and charts move, an NPC match is played), a game day is a real day, **a season
+  is 7 real days**, no pause, no fast-forward. The
   3 brokers, prices, investments (each broker card lists its investors) and the leaderboards are the same for
   everyone; the **12 bot teams** of the Pit League are marked `BOT`, players `PLAYER`. Joining, the server reads
   the player's robots, credits and league progress **from the chain**, not from the browser; every move the player
   makes is replayed on the shared world with their account as the manager, and **a battle only counts if its action
-  log replays** to the reported result. Battles are against the bots for now.
+  log replays** to the reported result; the server then records the move on NEAR. Battles are against the bots for
+  now.
 
 ## Two ways to play
 
@@ -135,16 +144,19 @@ battles ──► wins / picks ──► relevance ──► price
   played to the end; worn robots resell for scrap.
 - **Battle purse** = a share of both decks' value (2.5% between NPCs, 6% in the player's battles; the winner takes
   75%), so stakes grow with what you bring.
-- **3 AI brokers** with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
+- **3 brokers** with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
   a scrap dealer), each with a face and a voice. **12 NPC teams** with their own strategies (hype / contrarian /
   thrifty), playing in **the Pit League** (below).
-- **The brokers' minds — NEAR AI Cloud.** In the shared world, once a game hour each broker sends a brief of its
+- **The brokers' minds — NEAR AI Cloud.** In the shared world, once a real hour each broker sends a brief of its
   market (cash, upkeep, its segment, actual relevance vs what it prices in, stock, the latest news) to
-  `Qwen/Qwen3.8-27B` on NEAR AI Cloud — a *verifiable* model running in a TEE — and gets back a policy: markup,
+  `deepseek-ai/DeepSeek-V4.1-Flash-1017` on NEAR AI Cloud — a *verifiable* model served in a TEE, called without
+  reasoning — and gets back a policy: markup,
   reaction speed, stock level, models to stock up on or dump, and a line to customers in character. The game clamps
   every number to the broker's own bounds ([`engine/brokerAi.ts`](app/src/engine/brokerAi.ts)), so the model steers
-  each broker's strategy but can't break the economy; the Brokers screen shows the current decision and the model.
-  Guests' local worlds keep the rule-based brokers (no API key in the browser).
+  each broker's strategy but can't break the economy; the Brokers screen shows the current decision and the model,
+  and [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public) publishes each broker's
+  latest policy with its NEAR AI chat id. Guests' local worlds keep the rule-based brokers (no API key in the
+  browser). Without a NEAR AI key the server falls back to the rules too.
 - **The Pit League** — the player's progression. Four divisions of three teams: *Scrap* (one class, decks ≤ 24
   energy, a sloppy AI) → *Chrome* (one class, ≤ 30) → *Neon* (two-class combos, ≤ 36) → *Apex* (top combos at the
   full 42, a sharp AI; the boss is Armor guards kept alive by Repair medics). Beat every team of your division once
@@ -179,7 +191,7 @@ Contract (Rust, near-sdk 5):
 
 ```bash
 cd contract
-cargo test                              # 20 unit tests: full loop + every price / reward / wear / abuse limit
+cargo test                              # 29 unit tests: full loop + every price / reward / wear / abuse limit
 cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
 ```
 
@@ -191,12 +203,16 @@ npm install
 npm run deploy     # builds the app into web/public and runs `cf deploy`
 ```
 
-Tests and checks (CI runs all of them on every push — `.github/workflows/ci.yml`):
+Tests and checks (CI runs them on every push — `.github/workflows/ci.yml`: contract tests + the wasm build,
+lint, type check, engine tests, the production build, `npm run verify`):
 
 ```bash
-cd contract && cargo test   # 22 contract tests: every price / reward / wear / abuse limit, merges
-cd app && npm test          # 16 engine tests: battle rules, determinism and replays, prices inside the contract's
-                            # ranges, the game's constants = the contract's, a simulated week, league, veterans
+cd contract && cargo test   # 29 contract tests: every price / reward / wear / abuse limit, server-only moves
+                            # (incl. both exploits from the review), merges, transfers, login links
+cd app && npm test          # 18 engine tests: battle rules, determinism and replays, prices inside the contract's
+                            # ranges, the game's constants = the contract's, a simulated week, league, veterans,
+                            # the shared world's clock, LLM broker answers clamped to their bounds
+cd app && npx eslint .      # lint (0 errors)
 cd app && npm run verify    # reads NEAR testnet + the live site and prints ✓/✗ for each claim in this README
 cd app && npm run verify-battle <tx>   # replays a recorded battle from its public log and checks the record
 ```
@@ -212,7 +228,8 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 | `app/src/screens/` | Arena, Hangar, Market, Brokers, Analytics, Ratings |
 | `app/src/ui/` | cards, drag & drop, effects, boot screen, procedural pixel robots |
 | `app/scripts/` | balance and economy simulations |
-| `app/src/near/` | NEAR session, login, transaction queue, game ↔ chain bridge |
+| `app/src/near/` | NEAR session, login (NEAR Auth, Privy, wallets), restore from chain |
+| `web/` | the public site: static assets + a Worker — the shared world (`src/world.ts`), email login, battle logs |
 | `contract/` | the NEP-245 game contract (Rust) |
 | `DEVLOG.md` | development history |
 
@@ -221,10 +238,13 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 - [x] Playable game: combat, market, brokers, NPC economy, analytics
 - [x] NEAR: NEP-245 contract on testnet for credits and robots, trades and battle results on-chain
 - [x] Email login (NEAR Auth, localhost) and wallet login (NEAR Connect)
-- [ ] Battle verifier (replay from the recorded seed), second-device email login
-- [ ] Card art
+- [x] Battle replays (public logs + on-chain hashes, `npm run verify-battle`), second-device login
+- [x] Shared real-time world; brokers run by an LLM on NEAR AI Cloud
+- [x] Only the game server records moves (`*_for`); exploit tests
+- [ ] The battle engine in Rust, so the contract replays battles itself
+- [ ] Brokers and NPC teams as NEAR accounts with their own wallets; on-chain orders
+- [ ] PvP battles between players
 - [ ] Demo video
-- [ ] Brokers as NEAR accounts with their own wallets
 
 ## Credits
 

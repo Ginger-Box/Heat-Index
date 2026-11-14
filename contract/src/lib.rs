@@ -15,7 +15,7 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::{IterableSet, LookupMap};
-use near_sdk::{env, near, require, AccountId, Allowance, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseResult, PublicKey};
+use near_sdk::{env, near, require, AccountId, Allowance, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PublicKey};
 
 pub const CREDITS: &str = "cr";
 const START_CREDITS: u128 = 1_000;
@@ -122,7 +122,8 @@ enum Key {
 /// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
 const NEW_ACCOUNT_FUNDING: NearToken = NearToken::from_millinear(150);
 const GAME_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(120);
-const GAME_METHODS: &str = "register,buy_robot,sell_robot,repair_robot,record_battle";
+/// A new account's browser key may only register — trades and battles are recorded by the game server.
+const GAME_METHODS: &str = "register";
 /// At most this many new accounts per hour (the sponsor key is public on testnet).
 const ACCOUNTS_PER_HOUR: u32 = 40;
 
@@ -368,7 +369,7 @@ impl Contract {
     /// Callback: if the account was created, remember it for this login and register the player.
     #[private]
     pub fn on_player_account(&mut self, account_id: AccountId, owner_key: String) -> Option<AccountId> {
-        if !matches!(env::promise_result(0), PromiseResult::Successful(_)) {
+        if !matches!(env::promise_result_checked(0, 64), Ok(_)) {
             return None; // e.g. the name was taken — nothing to undo
         }
         self.owner_keys.insert(owner_key, account_id.clone());
@@ -482,10 +483,47 @@ impl Contract {
         ids
     }
 
+    // ---------------- moves, recorded by the game server ----------------
+    //
+    // The shared world (web/src/world.ts) is the market and the arena: it prices every trade from its brokers'
+    // quotes and replays every battle from its action log, then records the result here, signed by this contract
+    // account (a function-call key limited to these methods). A player's own key can't record moves any more, so a
+    // browser can't report a made-up price or a battle that never happened. The rules below still bound every value.
+
+    /// The game server only: a purchase at the shared world's broker price.
+    pub fn buy_robot_for(&mut self, player: AccountId, model_id: String, price: U128, durability: u32, broker: String) -> String {
+        self.server_only();
+        self.do_buy_robot(player, model_id, price, durability, broker)
+    }
+
+    /// The game server only: a sale at the shared world's broker bid.
+    pub fn sell_robot_for(&mut self, player: AccountId, token_id: String, price: U128, broker: String) {
+        self.server_only();
+        self.do_sell_robot(player, token_id, price, broker)
+    }
+
+    /// The game server only: a repair at the shared world's cheapest workshop.
+    pub fn repair_robot_for(&mut self, player: AccountId, token_id: String, cost: U128, durability: u32) {
+        self.server_only();
+        self.do_repair_robot(player, token_id, cost, durability)
+    }
+
+    /// The game server only: a battle the server replayed from its action log. `replay` (the log's SHA-256) is
+    /// required, and a win must name the robots that fought.
+    pub fn record_battle_for(&mut self, player: AccountId, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: String) {
+        self.server_only();
+        require!(result != 1 || !wear.is_empty(), "A win must list the robots that fought");
+        self.do_record_battle(player, opponent, result, reward, seed, wear, Some(replay))
+    }
+
+    fn server_only(&self) {
+        require!(env::predecessor_account_id() == self.owner_id, "Moves are recorded by the game server");
+    }
+
     /// Buy a new robot from a broker for `price` credits. The price comes from the game's market, but it must lie in
     /// the market's possible range for that model (BUY_MIN_PCT…BUY_MAX_PCT of its base price, set on-chain).
-    pub fn buy_robot(&mut self, model_id: String, price: U128, durability: u32, broker: String) -> String {
-        let who = self.player();
+    fn do_buy_robot(&mut self, who: AccountId, model_id: String, price: U128, durability: u32, broker: String) -> String {
+        require!(self.players.get(&who).is_some(), "Register first");
         let base = base_price(&model_id);
         require!(
             price.0 * 100 >= base * BUY_MIN_PCT && price.0 * 100 <= base * BUY_MAX_PCT,
@@ -501,8 +539,8 @@ impl Contract {
 
     /// Sell a robot to a broker: the robot token is burned, the credits are minted to the seller.
     /// The price can't exceed what a broker could pay for this model at this wear (SELL_MAX_PCT × wear factor).
-    pub fn sell_robot(&mut self, token_id: String, price: U128, broker: String) {
-        let who = self.player();
+    fn do_sell_robot(&mut self, who: AccountId, token_id: String, price: U128, broker: String) {
+        require!(self.players.get(&who).is_some(), "Register first");
         let r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
         let max_d = max_durability(&r.model_id) as u128;
         let d = (r.durability as u128).min(max_d);
@@ -532,8 +570,8 @@ impl Contract {
 
     /// Repair a robot: pay `cost` credits, raise its durability. The cost can't be below the game's cheapest
     /// possible repair for the restored durability, and durability can't exceed the model's maximum.
-    pub fn repair_robot(&mut self, token_id: String, cost: U128, durability: u32) {
-        let who = self.player();
+    fn do_repair_robot(&mut self, who: AccountId, token_id: String, cost: U128, durability: u32) {
+        require!(self.players.get(&who).is_some(), "Register first");
         let mut r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
         require!(r.owner_id == who, "Not your robot");
         let max_d = max_durability(&r.model_id);
@@ -557,11 +595,11 @@ impl Contract {
     /// `replay` (optional): SHA-256 (hex) of the battle's full action log, published by the game at
     /// /api/battles/<hash> — anyone can replay it with the game engine and check this record
     /// (`npm run verify-battle <tx>`).
-    pub fn record_battle(&mut self, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: Option<String>) {
+    fn do_record_battle(&mut self, who: AccountId, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: Option<String>) {
         if let Some(h) = &replay {
             require!(h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()), "replay must be a SHA-256 hex hash");
         }
-        let who = self.player();
+        require!(self.players.get(&who).is_some(), "Register first");
         require!(result <= 2, "Bad result");
         require!(wear.len() <= 15, "A deck has at most 15 robots");
         let mut ids: Vec<&String> = wear.iter().map(|w| &w.token_id).collect();
@@ -750,11 +788,6 @@ impl Contract {
 
     // ---------------- internals ----------------
 
-    fn player(&self) -> AccountId {
-        let who = env::predecessor_account_id();
-        require!(self.players.get(&who).is_some(), "Register first");
-        who
-    }
 
     fn balance(&self, token_id: &str, account: &AccountId) -> u128 {
         self.balances.get(&bal_key(token_id, account)).copied().unwrap_or(0)
@@ -936,13 +969,13 @@ mod tests {
         assert_eq!(c.mt_token(vec![ids[0].clone()])[0].as_ref().unwrap().metadata.as_ref().unwrap().durability, 6);
 
         // buy, battle, repair, sell — all within the market's limits
-        let bought = c.buy_robot("titan".into(), U128(560), 16, "kessler".into());
+        let bought = c.do_buy_robot(env::predecessor_account_id(), "titan".into(), U128(560), 16, "kessler".into());
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 440);
-        c.record_battle("npc3".into(), 1, U128(90), 42, vec![Wear { token_id: bought.clone(), durability: 14 }], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc3".into(), 1, U128(90), 42, vec![Wear { token_id: bought.clone(), durability: 14 }], None);
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 530);
         assert_eq!(c.mt_token(vec![bought.clone()])[0].as_ref().unwrap().metadata.as_ref().unwrap().durability, 14);
-        c.repair_robot(bought.clone(), U128(30), 16);
-        c.sell_robot(bought.clone(), U128(500), "magpie".into());
+        c.do_repair_robot(env::predecessor_account_id(), bought.clone(), U128(30), 16);
+        c.do_sell_robot(env::predecessor_account_id(), bought.clone(), U128(500), "magpie".into());
         assert_eq!(c.mt_balance_of(alice.clone(), bought.clone()).0, 0);
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 1000);
         let p = c.player_of(alice).unwrap();
@@ -953,7 +986,7 @@ mod tests {
     #[should_panic(expected = "Not enough balance")]
     fn cannot_overspend() {
         let (mut c, _) = setup("bob.testnet");
-        c.buy_robot("apoc".into(), U128(1500), 16, "kessler".into());
+        c.do_buy_robot(env::predecessor_account_id(), "apoc".into(), U128(1500), 16, "kessler".into());
     }
 
     #[test]
@@ -961,45 +994,45 @@ mod tests {
     fn battle_cannot_heal() {
         let (mut c, ids) = setup("carol.testnet");
         ctx_at("carol.testnet", 1_000);
-        c.record_battle("npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }], None);
         ctx_at("carol.testnet", 40_000);
-        c.record_battle("npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 6 }], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 6 }], None);
     }
 
     #[test]
     #[should_panic(expected = "above what any broker would pay")]
     fn cannot_sell_for_a_fortune() {
         let (mut c, ids) = setup("dave.testnet");
-        c.sell_robot(ids[0].clone(), U128(100_000), "magpie".into()); // a Spark (base 30)
+        c.do_sell_robot(env::predecessor_account_id(), ids[0].clone(), U128(100_000), "magpie".into()); // a Spark (base 30)
     }
 
     #[test]
     #[should_panic(expected = "outside this model's market range")]
     fn cannot_buy_for_free() {
         let (mut c, _) = setup("erin.testnet");
-        c.buy_robot("titan".into(), U128(0), 16, "kessler".into());
+        c.do_buy_robot(env::predecessor_account_id(), "titan".into(), U128(0), 16, "kessler".into());
     }
 
     #[test]
     #[should_panic(expected = "Unknown robot model")]
     fn cannot_invent_models() {
         let (mut c, _) = setup("fay.testnet");
-        c.buy_robot("god-mode".into(), U128(10), 10, "kessler".into());
+        c.do_buy_robot(env::predecessor_account_id(), "god-mode".into(), U128(10), 10, "kessler".into());
     }
 
     #[test]
     #[should_panic(expected = "Repair cost is out of range")]
     fn cannot_repair_for_free() {
         let (mut c, ids) = setup("gus.testnet");
-        c.record_battle("npc1".into(), 0, U128(0), 1, vec![Wear { token_id: ids[0].clone(), durability: 1 }], None);
-        c.repair_robot(ids[0].clone(), U128(0), 6);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 0, U128(0), 1, vec![Wear { token_id: ids[0].clone(), durability: 1 }], None);
+        c.do_repair_robot(env::predecessor_account_id(), ids[0].clone(), U128(0), 6);
     }
 
     #[test]
     #[should_panic(expected = "Reward out of range")]
     fn reward_is_capped() {
         let (mut c, _) = setup("hal.testnet");
-        c.record_battle("npc1".into(), 1, U128(2_000), 1, vec![], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(2_000), 1, vec![], None);
     }
 
     #[test]
@@ -1009,19 +1042,19 @@ mod tests {
         // 4 wins a day over two days (the daily cap is 6)
         for i in 0..8u64 {
             ctx_at("jon.testnet", 1_000 + (i / 4) * DAY_MS + (i % 4) * 31_000);
-            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }], None);
+            c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }], None);
         }
         let rec = c.mt_token(vec![volt.clone()])[0].as_ref().unwrap().record.clone().unwrap();
         assert_eq!((rec.battles, rec.wins, rec.rank), (8, 8, 2));
         // a normal Volt sells for at most 240 at full durability; an Elite (★★) for up to 135% of that
-        c.sell_robot(volt, U128(320), "magpie".into());
+        c.do_sell_robot(env::predecessor_account_id(), volt, U128(320), "magpie".into());
     }
 
     #[test]
     #[should_panic(expected = "above what any broker would pay")]
     fn rookies_get_no_veteran_price() {
         let (mut c, ids) = setup("kim.testnet");
-        c.sell_robot(ids[5].clone(), U128(320), "magpie".into());
+        c.do_sell_robot(env::predecessor_account_id(), ids[5].clone(), U128(320), "magpie".into());
     }
 
     #[test]
@@ -1029,7 +1062,7 @@ mod tests {
         let (mut c, ids) = setup("lea.testnet");
         for i in 0..10u64 {
             ctx_at("lea.testnet", 1_000 + i * 31_000);
-            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: ids[5].clone(), durability: 10 }], None);
+            c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(20), i, vec![Wear { token_id: ids[5].clone(), durability: 10 }], None);
         }
         let rec = c.mt_token(vec![ids[5].clone()])[0].as_ref().unwrap().record.clone().unwrap();
         assert_eq!((rec.battles, rec.wins), (10, 6));
@@ -1040,8 +1073,8 @@ mod tests {
     fn cheap_buy_cannot_be_flipped() {
         let (mut c, _) = setup("max.testnet");
         // a Titan (base 560) bought at the market's floor (168) can't be sold at the market's ceiling
-        let t = c.buy_robot("titan".into(), U128(168), 16, "magpie".into());
-        c.sell_robot(t, U128(1_300), "kessler".into());
+        let t = c.do_buy_robot(env::predecessor_account_id(), "titan".into(), U128(168), 16, "magpie".into());
+        c.do_sell_robot(env::predecessor_account_id(), t, U128(1_300), "kessler".into());
     }
 
     #[test]
@@ -1050,8 +1083,8 @@ mod tests {
         let (mut c, _) = setup("ned.testnet");
         c.mint_credits(&"ned.testnet".parse().unwrap(), 5_000, "test");
         for _ in 0..5 {
-            let t = c.buy_robot("titan".into(), U128(300), 16, "magpie".into());
-            c.sell_robot(t, U128(700), "kessler".into()); // +400 each: the 4th sale passes 1500
+            let t = c.do_buy_robot(env::predecessor_account_id(), "titan".into(), U128(300), 16, "magpie".into());
+            c.do_sell_robot(env::predecessor_account_id(), t, U128(700), "kessler".into()); // +400 each: the 4th sale passes 1500
         }
     }
 
@@ -1061,14 +1094,14 @@ mod tests {
         let ola: AccountId = "ola.testnet".parse().unwrap();
         for (i, team) in ["Rusty Dogs", "Glitch", "Short Circuit"].iter().enumerate() {
             ctx_at("ola.testnet", 1_000 + i as u64 * 31_000);
-            c.record_battle(team.to_string(), 1, U128(10), i as u64, vec![], None);
+            c.do_record_battle(env::predecessor_account_id(), team.to_string(), 1, U128(10), i as u64, vec![], None);
         }
         let l = c.league_of(ola.clone());
         assert_eq!((l.div, l.beaten.len()), (1, 0));
         assert_eq!(c.mt_balance_of(ola, CREDITS.into()).0, 1000 + 30 + 150);
         // a team of another division doesn't count
         ctx_at("ola.testnet", 200_000);
-        c.record_battle("Protocol Omega".into(), 1, U128(10), 9, vec![], None);
+        c.do_record_battle(env::predecessor_account_id(), "Protocol Omega".into(), 1, U128(10), 9, vec![], None);
         assert_eq!(c.league_of("ola.testnet".parse().unwrap()).beaten.len(), 0);
     }
 
@@ -1084,18 +1117,18 @@ mod tests {
     fn battle_purse_is_capped_per_day() {
         let (mut c, _) = setup("quinn.testnet");
         let q: AccountId = "quinn.testnet".parse().unwrap();
-        c.buy_robot("titan".into(), U128(400), 16, "kessler".into()); // working robots' value 750 + 560
+        c.do_buy_robot(env::predecessor_account_id(), "titan".into(), U128(400), 16, "kessler".into()); // working robots' value 750 + 560
         let before = c.mt_balance_of(q.clone(), CREDITS.into()).0;
         // 12 battles × 300 = 3600 asked, but at most 3000 a day is paid (unknown opponent: no league prize)
         for i in 0..12u64 {
             ctx_at("quinn.testnet", 1_000 + i * 31_000);
-            c.record_battle("npc".into(), 1, U128(300), i, vec![], None);
+            c.do_record_battle(env::predecessor_account_id(), "npc".into(), 1, U128(300), i, vec![], None);
         }
         assert_eq!(c.mt_balance_of(q.clone(), CREDITS.into()).0 - before, 3_000);
         assert_eq!(c.purse_today(q.clone()).0, 3_000);
         // the next day the purse is full again
         ctx_at("quinn.testnet", DAY_MS + 1_000);
-        c.record_battle("npc".into(), 1, U128(300), 99, vec![], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc".into(), 1, U128(300), 99, vec![], None);
         assert_eq!(c.mt_balance_of(q, CREDITS.into()).0 - before, 3_300);
     }
 
@@ -1103,7 +1136,7 @@ mod tests {
     #[should_panic(expected = "listed only once")]
     fn wear_cannot_repeat_a_robot() {
         let (mut c, ids) = setup("ray.testnet");
-        c.record_battle("npc".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }, Wear { token_id: ids[0].clone(), durability: 5 }], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }, Wear { token_id: ids[0].clone(), durability: 5 }], None);
     }
 
     #[test]
@@ -1150,11 +1183,86 @@ mod tests {
         c.merge_players(vec!["x.testnet".parse().unwrap()], "wes.testnet".parse().unwrap());
     }
 
+    // ---- the moves only the game server can record (jury findings, Nov 14) ----
+
+    fn as_server() {
+        ctx("game.testnet");
+    }
+
+    #[test]
+    #[should_panic(expected = "Moves are recorded by the game server")]
+    fn a_player_cannot_report_a_battle_directly() {
+        let (mut c, _) = setup("xan.testnet");
+        // the exploit: a win with no robots and no replay, straight from the browser key
+        c.record_battle_for("xan.testnet".parse().unwrap(), "npc".into(), 1, U128(180), 1, vec![], "00".repeat(32));
+    }
+
+    #[test]
+    #[should_panic(expected = "Moves are recorded by the game server")]
+    fn a_player_cannot_set_their_own_buy_price() {
+        let (mut c, _) = setup("yul.testnet");
+        // the exploit: buy a Titan at the floor (30%) from the browser, resell it at 2.5×
+        c.buy_robot_for("yul.testnet".parse().unwrap(), "titan".into(), U128(168), 16, "magpie".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "A win must list the robots that fought")]
+    fn even_the_server_cannot_record_a_win_without_robots() {
+        let (mut c, _) = setup("zed.testnet");
+        as_server();
+        c.record_battle_for("zed.testnet".parse().unwrap(), "npc".into(), 1, U128(50), 1, vec![], "ab".repeat(32));
+    }
+
+    #[test]
+    fn the_server_records_trades_and_replayed_battles_for_a_player() {
+        let (mut c, ids) = setup("amy.testnet");
+        let amy: AccountId = "amy.testnet".parse().unwrap();
+        as_server();
+        let t = c.buy_robot_for(amy.clone(), "volt".into(), U128(110), 10, "kessler".into());
+        c.record_battle_for(amy.clone(), "Glitch".into(), 1, U128(40), 7, vec![Wear { token_id: ids[0].clone(), durability: 5 }], "cd".repeat(32));
+        c.repair_robot_for(amy.clone(), ids[0].clone(), U128(10), 6);
+        c.sell_robot_for(amy.clone(), t, U128(120), "magpie".into());
+        assert_eq!(c.mt_balance_of(amy.clone(), CREDITS.into()).0, 1000 - 110 + 40 - 10 + 120);
+        assert_eq!(c.player_of(amy).unwrap().battles, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "replay must be a SHA-256 hex hash")]
+    fn a_battle_needs_a_real_replay_hash() {
+        let (mut c, ids) = setup("bea.testnet");
+        as_server();
+        c.record_battle_for("bea.testnet".parse().unwrap(), "npc".into(), 1, U128(40), 7, vec![Wear { token_id: ids[0].clone(), durability: 5 }], "nope".into());
+    }
+
+    #[test]
+    fn robots_move_between_players_with_mt_transfer() {
+        let (mut c, ids) = setup("cal.testnet");
+        ctx("dee.testnet");
+        c.register();
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id("cal.testnet".parse().unwrap())
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .build());
+        c.mt_transfer("dee.testnet".parse().unwrap(), ids[0].clone(), U128(1), None, Some("gift".into()));
+        assert_eq!(c.mt_token(vec![ids[0].clone()])[0].as_ref().unwrap().owner_id.as_ref().unwrap().as_str(), "dee.testnet");
+        assert_eq!(c.mt_tokens_for_owner("dee.testnet".parse().unwrap(), None, Some(100)).len(), 13);
+    }
+
+    #[test]
+    fn a_login_can_be_pointed_at_an_existing_account_only_by_the_owner() {
+        let (mut c, _) = setup("eve.testnet");
+        as_server();
+        c.link_owner_key("ed25519:abc".into(), "eve.testnet".parse().unwrap());
+        assert_eq!(c.account_for_owner_key("ed25519:abc".into()).unwrap().as_str(), "eve.testnet");
+        c.forget_owner_key("ed25519:abc".into());
+        assert!(c.account_for_owner_key("ed25519:abc".into()).is_none());
+    }
+
     #[test]
     #[should_panic(expected = "One battle per 30 seconds")]
     fn battles_are_rate_limited() {
         let (mut c, _) = setup("ivy.testnet");
-        c.record_battle("npc1".into(), 1, U128(50), 1, vec![], None);
-        c.record_battle("npc1".into(), 1, U128(50), 2, vec![], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(50), 1, vec![], None);
+        c.do_record_battle(env::predecessor_account_id(), "npc1".into(), 1, U128(50), 2, vec![], None);
     }
 }

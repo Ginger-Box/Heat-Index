@@ -78,9 +78,13 @@ async function robotsOf(id: string): Promise<ChainRobot[]> {
   return (await view('mt_tokens_for_owner', { account_id: id, limit: 50 })) as ChainRobot[];
 }
 
+// moves are recorded by the game's server account (contract *_for methods): sign with the contract account's key
+const server = new Account(C, rpc, JSON.parse(readFileSync(join(homedir(), '.near-credentials', 'testnet', `${C}.json`), 'utf8')).private_key);
 async function call(acc: Account, label: string, method: string, args: Record<string, unknown>) {
   try {
-    const r = await retry(() => acc.callFunctionRaw({ contractId: C, methodName: method, args, gas: 30_000_000_000_000n }));
+    const r = await retry(() =>
+      server.callFunctionRaw({ contractId: C, methodName: `${method}_for`, args: { player: acc.accountId, ...args }, gas: 60_000_000_000_000n }),
+    );
     console.log(`[${acc.accountId.split('.')[0]}] ${label} → ${r.transaction.hash}`);
     return r;
   } catch (e) {

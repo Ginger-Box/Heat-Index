@@ -18,6 +18,8 @@ export default defineConfig({
       // battle replays (action logs by SHA-256) — provisioned by `cf deploy`
       BATTLES: bindings.kv(),
       RELAYER_KEY: bindings.secret(),
+      // the shared world's key: records trades and replayed battles on-chain (*_for methods only)
+      SERVER_KEY: bindings.secret(),
       OWNER_SECRET: bindings.secret(),
       // NEAR AI Cloud keys for the brokers' minds (the second one is a fallback)
       NEARAI_KEY: bindings.secret(),

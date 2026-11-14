@@ -27,6 +27,8 @@ export const PRIVY_APP_ID = 'cmwfvxb4s018e0hkzqvudzfpb';
 export const PUBLIC_ORIGIN = 'https://heat-index-web.ginger-box.workers.dev';
 
 /** Contract methods the in-browser game key may call (must match GAME_METHODS in the contract). */
-export const GAME_METHODS = ['register', 'buy_robot', 'sell_robot', 'repair_robot', 'record_battle'];
+// (trades and battles are recorded by the shared world's server — contract *_for methods — so the browser's key
+// only needs to register the account)
+export const GAME_METHODS = ['register'];
 /** How much of the account's NEAR the game key may spend on gas. */
 export const GAME_KEY_ALLOWANCE = 120_000_000_000_000_000_000_000n; // 0.12 NEAR

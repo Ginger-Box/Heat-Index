@@ -423,6 +423,10 @@ export function buy(w: World, managerId: string, brokerId: string, modelId: stri
   b.credits += price;
   r.owner = m.id;
   r.paid = price;
+  if (isHuman(m)) {
+    r.chainId = undefined; // a fresh token is minted for it on-chain
+    r.vet = undefined; // …with a fresh battle record
+  }
   ledger(w, { kind: 'buy', from: m.id, to: b.id, uid: r.uid, amount: price });
   if (m.id === PLAYER_ID) {
     log(w, 'player', `You bought ${model(modelId).name} from ${b.name} for ${price} CR`);
@@ -471,8 +475,8 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
   if (m.id === PLAYER_ID) {
     log(w, 'player', `You sold ${model(r.modelId).name} to ${deal.broker.name} for ${deal.price} CR`);
     playerHooks.sell?.(r, deal.price, deal.broker.id);
-    r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
   }
+  if (isHuman(m)) r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
   shareOp(managerId, 'sell', [uid, brokerId]);
   return null;
 }
@@ -1350,7 +1354,11 @@ function marketEvent(w: World, r: Rng) {
     case 'recall': {
       const x = r.pick(MODELS.filter((m) => m.cost >= 2));
       let lost = 0;
-      for (const b of w.brokers) for (const rb of brokerStock(w, b, x.id)) (delete w.robots[rb.uid], lost++);
+      for (const b of w.brokers)
+        for (const rb of brokerStock(w, b, x.id)) {
+          delete w.robots[rb.uid];
+          lost++;
+        }
       log(w, 'broker', `⚠ Factory recall: every ${x.name} in brokers' stock is defective and recalled (${lost} robots). Shortage ahead.`);
       break;
     }

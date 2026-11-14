@@ -380,6 +380,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - UI: Market news is a fixed scrolling box; broker faces blink on their own random rhythm; the SHARED WORLD tag has
   a blinking LED; in the shared world Reset becomes "Log out" and says it only affects you.
 
+### Review fixes: the server is the only writer (Nov 14)
+- A review found that a browser key could call `record_battle` with no battle (empty wear, no replay — 180 CR a
+  call) and `buy_robot` at the market's floor then resell at 2.5× (+252 CR a cycle), because the contract trusted
+  client-reported results and prices. Fix, contract v0.8: trades and battles are recorded only through
+  `buy_robot_for` / `sell_robot_for` / `repair_robot_for` / `record_battle_for`, callable only by the contract
+  account; the shared world's server signs them with a key limited to those methods, after pricing the trade from
+  its brokers or replaying the battle. `record_battle_for` requires the replay hash and, for a win, the robots that
+  fought; new accounts' browser keys can only `register`. Both exploits are now unit tests that fail. Checked live:
+  a bot battle recorded through `record_battle_for` verifies with `npm run verify-battle`.
+- The world server mirrors each move on-chain before saving it; if the chain refuses, the world rolls back.
+- `promise_result` → `promise_result_checked`; more contract tests (transfers, login links, server-only moves) — 29.
+- Lint: 0 errors (typed RPC JSON in the scripts, an unused variable, a comma expression); CI now runs lint and builds
+  the contract for wasm32. `npm run verify` checks the new key layout and that the AI brokers' decisions are public
+  (`/api/world/public`). README corrected (model name, test counts, verifier status, hybrid-economy limits).
+
 ## Next
 - Card art.
 - README for judges, demo video.

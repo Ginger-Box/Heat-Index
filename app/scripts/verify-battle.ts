@@ -16,13 +16,13 @@ const rpc = (method: string, params: unknown) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  }).then((r) => r.json() as Promise<{ result?: any; error?: any }>);
+  }).then((r) => r.json() as Promise<{ result?: { receipts_outcome?: { outcome: { logs: string[] } }[] }; error?: unknown }>);
 
-const meta = (await fetch(`https://api-testnet.nearblocks.io/v1/txns/${hash}`).then((r) => r.json())) as any;
+const meta = (await fetch(`https://api-testnet.nearblocks.io/v1/txns/${hash}`).then((r) => r.json())) as { txns?: { signer_account_id?: string; predecessor_account_id?: string }[] };
 const signer = meta?.txns?.[0]?.signer_account_id ?? meta?.txns?.[0]?.predecessor_account_id;
 if (!signer) throw new Error('transaction not found');
 const tx = await rpc('tx', { tx_hash: hash, sender_account_id: signer, wait_until: 'FINAL' });
-const logs: string[] = (tx.result?.receipts_outcome ?? []).flatMap((o: any) => o.outcome.logs);
+const logs: string[] = (tx.result?.receipts_outcome ?? []).flatMap((o) => o.outcome.logs);
 const ev = logs
   .filter((l) => l.startsWith('EVENT_JSON:'))
   .map((l) => JSON.parse(l.slice(11)))

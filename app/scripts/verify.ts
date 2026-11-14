@@ -3,6 +3,20 @@
 import { readFileSync } from 'node:fs';
 import { JsonRpcProvider } from 'near-api-js';
 
+interface Token {
+  token_id: string;
+  metadata?: { model_id: string; durability: number };
+  record?: { battles: number; wins: number; rank: number } | null;
+}
+interface AccessKey {
+  public_key: string;
+  access_key: { permission: 'FullAccess' | { FunctionCall: { receiver_id: string; method_names: string[] } } };
+}
+interface RpcTx {
+  status?: Record<string, unknown>;
+  final_execution_outcome?: { status?: Record<string, unknown> };
+}
+
 const C = 'heat-index-game.testnet';
 const SITE = 'https://heat-index-web.ginger-box.workers.dev';
 const rpc = new JsonRpcProvider({ url: process.env.NEAR_RPC ?? 'https://test.rpc.fastnear.com' });
@@ -12,7 +26,7 @@ const raw = (method: string, params: unknown) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  }).then((r) => r.json() as Promise<{ result?: any; error?: any }>);
+  }).then((r) => r.json() as Promise<{ result?: RpcTx; error?: unknown }>);
 
 let failed = 0;
 async function check(claim: string, fn: () => Promise<string | true>) {
@@ -29,7 +43,7 @@ const ok = (cond: unknown, msg: string) => {
 };
 
 await check('the game contract is deployed on testnet', async () => {
-  const acc = (await rpc.query({ request_type: 'view_account', finality: 'final', account_id: C })) as any;
+  const acc = (await rpc.query({ request_type: 'view_account', finality: 'final', account_id: C })) as unknown as { code_hash: string };
   ok(acc.code_hash && acc.code_hash !== '11111111111111111111111111111111', 'no contract code');
   return `code hash ${acc.code_hash}`;
 });
@@ -43,37 +57,38 @@ await check('players have battled and traded on-chain', async () => {
 await check('credits and robots are NEP-245 tokens (mt_balance_of, mt_tokens_for_owner, mt_token)', async () => {
   const who = 'bot-alpha.heat-index-game.testnet';
   const cr = await view<string>('mt_balance_of', { account_id: who, token_id: 'cr' });
-  const tokens = await view<any[]>('mt_tokens_for_owner', { account_id: who, limit: 50 });
+  const tokens = await view<Token[]>('mt_tokens_for_owner', { account_id: who, limit: 50 });
   ok(tokens.length > 0 && tokens[0].token_id.startsWith('robot:'), 'no robot tokens');
-  const [t] = await view<any[]>('mt_token', { token_ids: [tokens[0].token_id] });
+  const [t] = await view<Token[]>('mt_token', { token_ids: [tokens[0].token_id] });
   ok(t.metadata?.model_id && typeof t.metadata.durability === 'number', 'no metadata');
   return `${who.split('.')[0]}: ${cr} CR, ${tokens.length} robots`;
 });
 
 await check('robots carry their veteran battle record on-chain', async () => {
-  const tokens = await view<any[]>('mt_tokens_for_owner', { account_id: 'bot-alpha.heat-index-game.testnet', limit: 50 });
+  const tokens = await view<Token[]>('mt_tokens_for_owner', { account_id: 'bot-alpha.heat-index-game.testnet', limit: 50 });
   const rec = tokens.find((t) => t.record);
   ok(rec, 'no record on any token');
   return `${rec.token_id}: ${rec.record.wins} wins in ${rec.record.battles} battles`;
 });
 
 await check('league progress, purchase basis and the daily purse are readable views', async () => {
-  const l = await view<any>('league_of', { account_id: 'bot-alpha.heat-index-game.testnet' });
+  const l = await view<{ div: number; beaten: string[]; crowns: number }>('league_of', { account_id: 'bot-alpha.heat-index-game.testnet' });
   const p = await view<string>('purse_today', { account_id: 'bot-alpha.heat-index-game.testnet' });
   ok(typeof l.div === 'number' && p !== undefined, 'missing');
   return `league division ${l.div}, purse today ${p}`;
 });
 
-await check('the contract account has one full-access key; the site relayer key can only create player accounts', async () => {
-  const r = (await rpc.query({ request_type: 'view_access_key_list', finality: 'final', account_id: C })) as any;
-  const full = r.keys.filter((k: any) => k.access_key.permission === 'FullAccess');
-  const fn = r.keys.filter((k: any) => k.access_key.permission !== 'FullAccess');
+await check('the contract account has one full-access key; its other keys can only create accounts or record checked moves', async () => {
+  const r = (await rpc.query({ request_type: 'view_access_key_list', finality: 'final', account_id: C })) as unknown as { keys: AccessKey[] };
+  const full = r.keys.filter((k) => k.access_key.permission === 'FullAccess');
+  const fn = r.keys.filter((k) => k.access_key.permission !== 'FullAccess');
   ok(full.length === 1, `${full.length} full-access keys`);
   for (const k of fn) {
-    const p = k.access_key.permission.FunctionCall;
-    ok(p.receiver_id === C && p.method_names.length === 1 && p.method_names[0] === 'create_player_account', 'a function-call key can do more');
+    const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
+    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for'];
+    ok(p.receiver_id === C && p.method_names.every((m) => allowed.includes(m)), `a function-call key can do more: ${p.method_names}`);
   }
-  return `${full.length} full-access, ${fn.length} limited to create_player_account`;
+  return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: *_for moves)`;
 });
 
 await check('every transaction linked in the README succeeded', async () => {
@@ -99,6 +114,16 @@ await check('the public site is up and its login API refuses other websites', as
   });
   ok(api.status === 403, `API answered ${api.status}`);
   return SITE;
+});
+
+await check("the shared world's AI brokers publish their latest LLM decisions (NEAR AI Cloud)", async () => {
+  const d = (await fetch(`${SITE}/api/world/public`).then((r) => r.json())) as {
+    brokerModel: string;
+    brokers: { id: string; ai: { remark: string; chatId?: string } | null }[];
+  };
+  const decided = d.brokers.filter((b) => b.ai?.remark);
+  ok(decided.length > 0, 'no broker has an LLM decision yet');
+  return `${d.brokerModel}: ${decided.map((b) => `${b.id} (${b.ai!.chatId?.slice(0, 18)}…)`).join(', ')}`;
 });
 
 console.log(failed ? `\n${failed} claim(s) failed` : '\nall claims hold');

@@ -1,27 +1,10 @@
-// Mirrors the human player's moves on NEAR: the engine calls playerHooks (engine/world.ts), the bridge turns
-// them into contract calls signed with the browser's game key (near/chain.ts), and links the game's robots to
-// their NEP-245 token ids (OwnedRobot.chainId).
+// Links a local world's robots to the player's NEP-245 tokens after a login. Moves themselves are recorded on NEAR
+// by the shared world's server (web/src/world.ts), not from the browser.
 
-import { PLAYER_ID, playerHooks, restorePlayerFromChain } from '../engine/world';
-import { model } from '../engine/robots';
+import { PLAYER_ID, restorePlayerFromChain } from '../engine/world';
 import { act, getWorld, isShared } from '../store';
-import { chainCall, chainCredits, chainRobots, chainSession, view } from './chain';
-import { PUBLIC_ORIGIN } from './config';
-import { battleLogOf, logText, sha256Hex } from '../engine/replay';
-import type { BattleState } from '../engine/battle';
+import { chainCredits, chainRobots, chainSession, view } from './chain';
 
-/** Stores the battle's action log at the public site's Worker; returns its SHA-256 (what goes on-chain). */
-async function publishBattle(st: BattleState): Promise<string | undefined> {
-  const log = battleLogOf(st);
-  if (!log) return undefined;
-  const text = logText(log);
-  const hash = await sha256Hex(text);
-  const res = await fetch(`${PUBLIC_ORIGIN}/api/battles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
-  return res.ok ? hash : undefined;
-}
-
-const MAX_DUR = 16; // the contract's durability cap
-const clampDur = (d: number) => Math.max(0, Math.min(MAX_DUR, Math.round(d)));
 
 /**
  * After a login: if this world isn't tied to the account yet (a new browser, or after "start over"), restore the
@@ -69,52 +52,11 @@ export async function linkRobots() {
   });
 }
 
+/**
+ * Trades and battles are no longer sent from the browser: a logged-in player plays the shared world, whose server
+ * checks every move (prices from its brokers, battles replayed from their logs) and records it on NEAR itself
+ * (contract `*_for` methods, web/src/world.ts). The browser key can only `register`.
+ */
 export function installBridge() {
-  playerHooks.buy = (r, price, brokerId) => {
-    if (!chainSession()) return;
-    const uid = r.uid;
-    void chainCall<string>(`Buy ${model(r.modelId).name} · ${price} CR`, 'buy_robot', {
-      model_id: r.modelId,
-      price: String(price),
-      durability: Math.max(1, clampDur(r.durability)),
-      broker: brokerId,
-    }).then((tokenId) => {
-      if (!tokenId) return;
-      act((w) => {
-        const rr = w.robots[uid];
-        if (rr && rr.owner === PLAYER_ID) rr.chainId = tokenId;
-      });
-    });
-  };
-  playerHooks.sell = (r, price, brokerId) => {
-    if (!chainSession() || !r.chainId) return;
-    void chainCall(`Sell ${model(r.modelId).name} · ${price} CR`, 'sell_robot', {
-      token_id: r.chainId,
-      price: String(price),
-      broker: brokerId,
-    });
-  };
-  playerHooks.repair = (r, cost) => {
-    if (!chainSession() || !r.chainId) return;
-    void chainCall(`Repair ${model(r.modelId).name} · ${cost} CR`, 'repair_robot', {
-      token_id: r.chainId,
-      cost: String(cost),
-      durability: clampDur(r.durability),
-    });
-  };
-  playerHooks.match = (st, opponentId, result, reward) => {
-    if (!chainSession()) return;
-    const w = getWorld();
-    if (!w) return;
-    const wear = Object.keys(st.wear)
-      .filter((uid) => st.wear[uid].fielded && w.robots[uid]?.owner === PLAYER_ID && w.robots[uid]?.chainId)
-      .map((uid) => ({ token_id: w.robots[uid].chainId!, durability: clampDur(w.robots[uid].durability) }));
-    const opp = w.managers.find((m) => m.id === opponentId)?.name ?? opponentId;
-    // publish the battle's action log; its hash goes on-chain, so anyone can replay and check the record.
-    // The call takes its place in the queue now (order of moves), the args wait for the upload.
-    const args = publishBattle(st)
-      .catch(() => undefined)
-      .then((replay) => ({ opponent: opp, result, reward: String(reward), seed: (st.input?.seed ?? st.rngState) >>> 0, wear, replay }));
-    void chainCall(`Battle vs ${opp}: ${result === 1 ? 'win' : result === 0 ? 'loss' : 'draw'} · +${reward} CR`, 'record_battle', args);
-  };
+  /* nothing to install: see web/src/world.ts → mirror() */
 }

@@ -100,6 +100,13 @@ export const chainCredits = async (accountId: string) =>
 // ---------- writes: one queue, signed with the game key ----------
 
 /** Send a game move to the contract. Never throws into the game: errors are shown in the chain log. */
+/** A move the game server recorded on-chain for this player (shared world) — shown in the NEAR panel. */
+export function addServerTx(label: string, hash?: string, error?: string) {
+  const tx: ChainTx = { id: ++txId, label, status: error ? 'error' : 'ok', hash, error, at: Date.now() };
+  txs = [tx, ...txs].slice(0, 30);
+  emit();
+}
+
 /** Queues a game transaction. `args` may be a promise (e.g. waiting for a battle log upload) — the call keeps its
  *  place in the queue, so transactions always land in the order the player made the moves. */
 export function chainCall<T = unknown>(
