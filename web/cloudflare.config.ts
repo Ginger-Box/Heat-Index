@@ -19,6 +19,9 @@ export default defineConfig({
       BATTLES: bindings.kv(),
       RELAYER_KEY: bindings.secret(),
       OWNER_SECRET: bindings.secret(),
+      // NEAR AI Cloud keys for the brokers' minds (the second one is a fallback)
+      NEARAI_KEY: bindings.secret(),
+      NEARAI_KEY_2: bindings.secret(),
     },
     exports: { SharedWorld: exports.durableObject({ storage: "sqlite" }) },
     observability: { enabled: true },

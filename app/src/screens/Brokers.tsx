@@ -84,10 +84,10 @@ const BANNER: Record<string, string> = {
 /** The latest market events and broker news (bankruptcies, investments, audits, raids…). */
 function MarketNews({ w }: { w: World }) {
   const news = w.events.filter((e) => e.kind === 'broker').slice(-40).reverse();
-  if (!news.length) return null;
   return (
     <div className="market-news">
       <b>Market news</b>
+      {!news.length && <span className="muted">Quiet so far — audits, raids, strikes and the brokers' moves show up here.</span>}
       {news.map((e, i) => (
         <div key={`${e.tick}-${i}`} className={/bankrupt/.test(e.text) ? 'down' : /reopened|contract|shipment/.test(e.text) ? 'up' : ''}>
           <span className="muted">Day {e.day} · </span>
@@ -154,7 +154,6 @@ export function Brokers({ w }: { w: World }) {
           Own a piece of a broker — get a cut of its profit every day.
         </p>
         {msg && <div className="error">{msg}</div>}
-        <MarketNews w={w} />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
@@ -341,6 +340,10 @@ export function Brokers({ w }: { w: World }) {
             </div>
           );
         })}
+      </div>
+      {/* the brokers come first; the news feed sits under them */}
+      <div className="panel">
+        <MarketNews w={w} />
       </div>
     </div>
   );

@@ -163,6 +163,7 @@ export class SharedWorld extends DurableObject<Env> {
   // ---------- the brokers' minds (NEAR AI Cloud) ----------
 
   private tried = new Map<string, number>();
+  private mindError = '';
 
   /** once a game hour, each open broker asks its model for a policy (clamped to its bounds: engine/brokerAi.ts) */
   private async brokerMinds(w: World) {
@@ -196,16 +197,19 @@ export class SharedWorld extends DurableObject<Env> {
               out = await res.json();
               break;
             }
+            this.mindError = `${res.status} ${(await res.text()).slice(0, 160)}`;
           }
           if (!out) return;
           const text = (out.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
           const p = parsePolicy(b, text);
+          if (!p) this.mindError = `unparsable answer: ${text.slice(0, 160)}`;
           if (p) {
             applyPolicy(w, b, p, { model: BROKER_MODEL, chatId: out.id });
             this.dirty = true;
           }
-        } catch {
-          /* the model is unavailable — the broker keeps its last policy */
+        } catch (e) {
+          // the model is unavailable — the broker keeps its last policy
+          this.mindError = e instanceof Error ? e.message : String(e);
         }
       }),
     );
@@ -218,7 +222,11 @@ export class SharedWorld extends DurableObject<Env> {
     for (const b of w.brokers) if (b.ai) b.ai.at = -Infinity;
     await this.brokerMinds(w);
     await this.save();
-    return json({ brokers: w.brokers.map((b) => ({ id: b.id, ai: b.ai ?? null, style: b.style })) });
+    return json({
+      keys: [!!this.env.NEARAI_KEY, !!this.env.NEARAI_KEY_2],
+      lastError: this.mindError || null,
+      brokers: w.brokers.map((b) => ({ id: b.id, ai: b.ai ?? null, style: b.style })),
+    });
   }
 
   // ---------- players ----------

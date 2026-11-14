@@ -5318,12 +5318,12 @@ p.tour-swap {
 
 /* ---------- market news (Brokers) ---------- */
 .market-news {
-  /* a fixed box that scrolls (new news no longer pushes the broker cards down) */
-  height: 132px;
+  /* a fixed box that scrolls (new news doesn't make the page jump) */
+  height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
   align-content: start;
-  margin-top: 12px;
+  margin-top: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--yellow);
