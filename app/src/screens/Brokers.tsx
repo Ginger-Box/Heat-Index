@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { brokerAccount } from '../engine/wallets';
 import {
   DIVIDEND_SHARE,
   HOUSE,
@@ -265,6 +266,22 @@ export function Brokers({ w }: { w: World }) {
                   🧠 <b>{b.ai.model.split('/').pop()}</b> · NEAR AI · markup {Math.round(b.ai.spread * 100)}% · reacts {Math.round(b.ai.react * 100)}% · keeps {b.ai.targetStock}
                   {b.ai.focus.length ? ` · stocking up: ${b.ai.focus.map((id) => model(id).name).join(', ')}` : ''}
                   {b.ai.dump.length ? ` · dumping: ${b.ai.dump.map((id) => model(id).name).join(', ')}` : ''}
+                  <div className="broker-chain">
+                    NEAR{' '}
+                    <a href={`https://testnet.nearblocks.io/address/${brokerAccount(b.id)}`} target="_blank" rel="noreferrer">
+                      {brokerAccount(b.id)}
+                    </a>
+                    {b.ai.tx ? (
+                      <>
+                        {' · '}
+                        <a href={`https://testnet.nearblocks.io/txns/${b.ai.tx}`} target="_blank" rel="noreferrer" title="The broker recorded this decision on its own account; the contract checked NEAR AI's TEE signature for it">
+                          ✓ TEE-verified on-chain
+                        </a>
+                      </>
+                    ) : b.ai.verifyError ? (
+                      <span className="muted" title={b.ai.verifyError}> · on-chain check pending</span>
+                    ) : null}
+                  </div>
                 </div>
               ) : b.mindOff !== undefined ? (
                 <div className="broker-mind muted" title="Off the AI for now: the broker's LLM on NEAR AI Cloud can't be reached. It trades by its built-in rules, bent a little by its mood, and goes back to the AI by itself once it answers.">

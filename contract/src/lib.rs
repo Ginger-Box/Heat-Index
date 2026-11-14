@@ -181,6 +181,23 @@ pub struct Wear {
     pub durability: u32,
 }
 
+/// A robot of a world wallet (adopt_world_wallet).
+#[near(serializers = [json])]
+pub struct WalletRobot {
+    pub model_id: String,
+    pub durability: u32,
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+fn unhex(s: &str) -> Vec<u8> {
+    if s.len() % 2 != 0 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return vec![];
+    }
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+}
+
 /// NEP-245 token view (`mt_token`).
 #[near(serializers = [json])]
 pub struct TokenView {
@@ -679,6 +696,116 @@ impl Contract {
         );
     }
 
+    // ---------------- the world's own wallets: brokers and NPC teams ----------------
+    //
+    // The 3 brokers and the 12 Pit League teams are NEAR accounts (`<name>.heat-index-game.testnet`). A team's
+    // robots are tokens on its account and its trades and battles are recorded with the same `*_for` methods as a
+    // player's. A broker records its own AI decisions (`record_broker_decision`, signed by the broker's account), and
+    // the contract checks each one against the NEAR AI Cloud TEE signature before storing it.
+    // Stored under raw keys (no change to the contract's state layout).
+
+    /// Owner: make `account` one of the world's wallets — a broker (`kind` "broker") or an NPC team ("npc") — with
+    /// its in-game credits and robots minted to it. Once per account; returns the robot token ids.
+    pub fn adopt_world_wallet(&mut self, account: AccountId, kind: String, name: String, credits: U128, robots: Vec<WalletRobot>) -> Vec<String> {
+        self.server_only();
+        require!(kind == "broker" || kind == "npc", "kind is broker or npc");
+        require!(self.players.get(&account).is_none(), "Already registered");
+        require!(robots.len() <= 200, "Too many robots");
+        self.players.insert(account.clone(), Player { registered_at_ms: env::block_timestamp_ms(), ..Default::default() });
+        if credits.0 > 0 {
+            self.mint_credits(&account, credits.0, "world wallet");
+        }
+        let ids: Vec<String> = robots
+            .iter()
+            .map(|r| {
+                require!(r.durability <= max_durability(&r.model_id), "Durability out of range");
+                self.mint_robot(&account, &r.model_id, r.durability, "world wallet")
+            })
+            .collect();
+        env::storage_write(format!("ww:{account}").as_bytes(), json!({ "kind": kind, "name": short(&name) }).to_string().as_bytes());
+        event("heat_index", "1.0.0", "world_wallet", json!([{ "account_id": account, "kind": kind, "name": short(&name), "credits": credits, "robots": ids }]));
+        ids
+    }
+
+    /// Owner: bring a world wallet's credits to the world's number (NPC stipends, broker upkeep and dividends happen
+    /// in the simulation) — the difference is minted or burned, with an event.
+    pub fn sync_world_credits(&mut self, account: AccountId, credits: U128) {
+        self.server_only();
+        require!(env::storage_has_key(format!("ww:{account}").as_bytes()), "Not a world wallet");
+        let have = self.balance(CREDITS, &account);
+        if credits.0 > have {
+            self.mint_credits(&account, credits.0 - have, "world sync");
+        } else if have > credits.0 {
+            self.burn_credits(&account, have - credits.0, "world sync");
+        }
+    }
+
+    /// Owner: a world wallet's robot left the world (scrapped, written off) — its token is burned.
+    pub fn drop_world_robot(&mut self, account: AccountId, token_id: String) {
+        self.server_only();
+        require!(env::storage_has_key(format!("ww:{account}").as_bytes()), "Not a world wallet");
+        self.burn_robot(&account, &token_id, "left the world");
+    }
+
+    /// Owner: the NEAR AI Cloud TEE signing addresses (0x…, from the model's attestation report) that broker
+    /// decisions must be signed by.
+    pub fn set_tee_signers(&mut self, signers: Vec<String>) {
+        self.server_only();
+        let list: Vec<String> = signers.iter().map(|x| x.trim_start_matches("0x").to_lowercase()).collect();
+        env::storage_write(b"tee_signers", json!(list).to_string().as_bytes());
+    }
+
+    pub fn tee_signers(&self) -> Vec<String> {
+        env::storage_read(b"tee_signers").and_then(|v| serde_json::from_slice(&v).ok()).unwrap_or_default()
+    }
+
+    /// A broker records its AI decision itself (called by the broker's own account). `response` is the exact
+    /// body NEAR AI Cloud returned; `text` and `signature` are NEAR AI's signature for that chat
+    /// (`<model>:<sha256 request>:<sha256 response>`, EIP-191, by a key inside the TEE). The contract checks that
+    /// `text` names this response, recovers the signer and requires it to be an attested TEE address.
+    pub fn record_broker_decision(&mut self, model: String, chat_id: String, response: String, text: String, signature: String) {
+        let broker = env::predecessor_account_id();
+        let ww: serde_json::Value = env::storage_read(format!("ww:{broker}").as_bytes())
+            .and_then(|v| serde_json::from_slice(&v).ok())
+            .unwrap_or_else(|| env::panic_str("Not a broker"));
+        require!(ww["kind"] == "broker", "Not a broker");
+        require!(response.len() <= 16_000 && text.len() <= 300, "Too long");
+        // the signed text names the model and this exact response
+        let resp_hash = hex(&env::sha256(response.as_bytes()));
+        require!(text.starts_with(&format!("{model}:")) && text.ends_with(&format!(":{resp_hash}")), "The signature is for another response");
+        // EIP-191 personal message → recover the signing address
+        let sig = unhex(signature.trim_start_matches("0x"));
+        require!(sig.len() == 65, "Bad signature");
+        let msg = format!("\x19Ethereum Signed Message:\n{}{}", text.len(), text);
+        let digest = env::keccak256(msg.as_bytes());
+        let v = if sig[64] >= 27 { sig[64] - 27 } else { sig[64] };
+        let pubkey = env::ecrecover(&digest, &sig[..64], v, true).unwrap_or_else(|| env::panic_str("Bad signature"));
+        let signer = hex(&env::keccak256(&pubkey)[12..]);
+        require!(self.tee_signers().contains(&signer), "Not signed by an attested NEAR AI TEE key");
+        // what the model said (the policy the game then clamps to the broker's bounds)
+        let content = serde_json::from_str::<serde_json::Value>(&response)
+            .ok()
+            .and_then(|v| v["choices"][0]["message"]["content"].as_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        let content: String = content.chars().take(1500).collect();
+        let rec = json!({
+            "model": model, "chat_id": chat_id, "signer": format!("0x{signer}"), "response_sha256": resp_hash,
+            "content": content, "at_ms": env::block_timestamp_ms(),
+        });
+        env::storage_write(format!("bd:{broker}").as_bytes(), rec.to_string().as_bytes());
+        event("heat_index", "1.0.0", "broker_decision", json!([{ "broker": broker, "model": model, "chat_id": short(&chat_id), "signer": format!("0x{signer}"), "response_sha256": resp_hash }]));
+    }
+
+    /// A broker's latest TEE-verified AI decision.
+    pub fn broker_decision(&self, broker: AccountId) -> Option<serde_json::Value> {
+        env::storage_read(format!("bd:{broker}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok())
+    }
+
+    /// Whether an account is one of the world's wallets (broker / NPC team) and its name.
+    pub fn world_wallet(&self, account: AccountId) -> Option<serde_json::Value> {
+        env::storage_read(format!("ww:{account}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok())
+    }
+
     // ---------------- NEP-245 core ----------------
 
     /// Standard transfer (needs exactly 1 yoctoNEAR, as NEP-245 requires, so it is always a wallet-confirmed action).
@@ -955,6 +1082,39 @@ mod tests {
         ctx(who);
         let ids = c.register();
         (c, ids)
+    }
+
+    #[test]
+    fn world_wallets_and_tee_verified_broker_decisions() {
+        let (mut c, _) = setup("alice.testnet");
+        ctx("game.testnet");
+        let ids = c.adopt_world_wallet("magpie.game.testnet".parse().unwrap(), "broker".into(), "Magpie".into(), U128(1200), vec![]);
+        assert!(ids.is_empty());
+        let npc = c.adopt_world_wallet(
+            "rusty-dogs.game.testnet".parse().unwrap(),
+            "npc".into(),
+            "Rusty Dogs".into(),
+            U128(500),
+            vec![WalletRobot { model_id: "ram".into(), durability: 7 }],
+        );
+        assert_eq!(npc.len(), 1);
+        c.sync_world_credits("rusty-dogs.game.testnet".parse().unwrap(), U128(320));
+        assert_eq!(c.mt_balance_of("rusty-dogs.game.testnet".parse().unwrap(), CREDITS.into()).0, 320);
+        // a real NEAR AI Cloud response and its TEE signature
+        let resp = include_str!("../fixtures/nearai-response.json").to_string();
+        let sig: serde_json::Value = serde_json::from_str(include_str!("../fixtures/nearai-signature.json")).unwrap();
+        let (text, signature, signer) = (sig["text"].as_str().unwrap().to_string(), sig["signature"].as_str().unwrap().to_string(), sig["signing_address"].as_str().unwrap().to_string());
+        c.set_tee_signers(vec![signer]);
+        ctx("magpie.game.testnet");
+        c.record_broker_decision("deepseek-ai/DeepSeek-V4.1-Flash-1017".into(), "chat-1".into(), resp.clone(), text.clone(), signature.clone());
+        let d = c.broker_decision("magpie.game.testnet".parse().unwrap()).unwrap();
+        assert_eq!(d["chat_id"], "chat-1");
+        // a changed response is refused
+        let forged = resp.replacen("\"content\"", "\"content\" ", 1);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.record_broker_decision("deepseek-ai/DeepSeek-V4.1-Flash-1017".into(), "chat-2".into(), forged, text.clone(), signature.clone())
+        }));
+        assert!(r.is_err());
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { DIVISIONS } from '../engine/league';
 import { CLASS_LABEL, model, type RobotClass } from '../engine/robots';
 import { PLAYER_ID, STRATEGY_LABEL, bestBid, getManager, isHuman, netWorth, robotsOf, sharePrice, type Manager, type World } from '../engine/world';
+import { npcAccount } from '../engine/wallets';
 import { ClassTag, Cr } from '../ui/common';
 
 const classOf = (modelId: string): RobotClass => (model(modelId).ability?.kind as RobotClass | undefined) ?? 'none';
@@ -68,6 +69,15 @@ export function Profile({ w, id, onClose }: { w: World; id: string; onClose: () 
             )
           ) : (
             <>
+              {npcAccount(m.name) && (
+                <>
+                  NEAR account{' '}
+                  <a href={`https://testnet.nearblocks.io/address/${npcAccount(m.name)}`} target="_blank" rel="noreferrer">
+                    {npcAccount(m.name)}
+                  </a>
+                  <br />
+                </>
+              )}
               A bot team · {STRATEGY_LABEL[m.strategy]} {m.focus && <ClassTag cls={m.focus} />} {m.focus2 && (m.div ?? 0) >= 2 && <ClassTag cls={m.focus2} />}
             </>
           )}
@@ -168,6 +178,7 @@ export function Profile({ w, id, onClose }: { w: World; id: string; onClose: () 
             .map(([c, n]) => `${CLASS_LABEL[c]} ${n}`)
             .join(' · ') || 'No robots.'}
           {human && id !== PLAYER_ID && ' — the robots it owns, not its battle deck (that stays secret).'}
+          {!human && npcAccount(m.name) && ' — tokens on its own NEAR account.'}
         </p>
         <div className="profile-models">
           {models.map(([mid, n]) => (

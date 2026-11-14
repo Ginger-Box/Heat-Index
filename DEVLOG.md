@@ -431,6 +431,20 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Rage-quit closed: starting a new search or 30 minutes without a move forfeits the open battle (a loss, ELO moves).
 - Guests (no login) keep local battles against bot decks.
 
+### The world's own NEAR wallets + TEE-verified broker decisions (Nov 14)
+- Contract (code upgrade, new data under raw storage keys — no migration): `adopt_world_wallet`, `sync_world_credits`,
+  `drop_world_robot`, `set_tee_signers`, `record_broker_decision` (+ views `world_wallet`, `broker_decision`,
+  `tee_signers`). near-sdk's `unstable` feature for `env::ecrecover`.
+- 15 accounts: `broker-kessler-corp`, `broker-magpie`, `broker-junkman` and `npc-<team>` for the 12 Pit League teams.
+  The world server adopted them with their real credits and robots (113 team robots minted as tokens) and now
+  mirrors every bot buy / sell / repair / battle (with the public replay log) onto the team's account; credits are
+  synced hourly (stipends, upkeep, dividends happen in the simulation). Engine: `worldHooks` (npcBuy/npcSell/
+  npcRepair/npcMatch).
+- Each broker signs its own AI decision with a key limited to `record_broker_decision`. The contract checks that
+  NEAR AI's signed text names the exact response (SHA-256), recovers the EIP-191 signer with `ecrecover` and
+  requires the attested TEE address of the model (from NEAR AI's attestation report). Test with a real NEAR AI
+  response + signature. `npm run verify` has two new claims (15 wallets, 3 TEE-verified decisions).
+
 ## Next
 - Card art.
 - README for judges, demo video.

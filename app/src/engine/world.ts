@@ -42,6 +42,16 @@ export const playerHooks: {
    *  (operation, args) — the server replays it on the shared world with the player's account as the manager */
   op?: (name: string, args: unknown[]) => void;
 } = {};
+/**
+ * Hooks for the bot teams' moves — the shared world's server mirrors them on their own NEAR accounts
+ * (engine/wallets.ts). Called after the move is applied.
+ */
+export const worldHooks: {
+  npcBuy?: (managerId: string, uid: string, price: number, brokerId: string) => void;
+  npcSell?: (managerId: string, uid: string, chainId: string | undefined, price: number, brokerId: string) => void;
+  npcRepair?: (managerId: string, uid: string, cost: number, durability: number) => void;
+  npcMatch?: (st: BattleState, aId: string, bId: string) => void;
+} = {};
 const shareOp = (managerId: string, name: string, args: unknown[]) => {
   if (managerId === PLAYER_ID) playerHooks.op?.(name, args);
 };
@@ -139,6 +149,10 @@ export interface Broker {
     remark: string;
     model: string;
     chatId?: string;
+    /** the broker's on-chain record of this decision (record_broker_decision, TEE signature checked) */
+    tx?: string;
+    /** why the on-chain record failed, if it did */
+    verifyError?: string;
   };
 }
 
@@ -216,6 +230,8 @@ export interface World {
   /** game hours per day / NPC matches per game hour (absent: 12 / 12 — a local world) */
   hoursPerDay?: number;
   matchesPerHour?: number;
+  /** shared world: the world wallets (engine/wallets.ts) already adopted on-chain, by account */
+  walletsAdopted?: Record<string, boolean>;
   /** ELO and W/D/L count only ranked (online) battles — set once the old, mixed records were reset */
   rankedOnly?: boolean;
   /** the Factory is on strike (no restocking) until this game hour */
@@ -436,6 +452,10 @@ export function buy(w: World, managerId: string, brokerId: string, modelId: stri
     r.vet = undefined; // …with a fresh battle record
   }
   ledger(w, { kind: 'buy', from: m.id, to: b.id, uid: r.uid, amount: price });
+  if (!isHuman(m)) {
+    r.chainId = undefined; // the team's account gets a fresh token for it
+    worldHooks.npcBuy?.(m.id, r.uid, price, b.id);
+  }
   if (m.id === PLAYER_ID) {
     log(w, 'player', `You bought ${model(modelId).name} from ${b.name} for ${price} CR`);
     r.chainId = undefined; // a fresh token is minted for it on-chain
@@ -484,7 +504,8 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     log(w, 'player', `You sold ${model(r.modelId).name} to ${deal.broker.name} for ${deal.price} CR`);
     playerHooks.sell?.(r, deal.price, deal.broker.id);
   }
-  if (isHuman(m)) r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
+  if (!isHuman(m)) worldHooks.npcSell?.(m.id, uid, r.chainId, deal.price, deal.broker.id);
+  r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
   shareOp(managerId, 'sell', [uid, brokerId]);
   return null;
 }
@@ -511,6 +532,7 @@ export function repair(w: World, managerId: string, uid: string): string | null 
   m.credits -= q.cost; // credits are burned — an economy sink
   r.durability = maxDurability(r.modelId);
   ledger(w, { kind: 'repair', from: m.id, to: 'burn', uid, amount: q.cost });
+  if (!isHuman(m)) worldHooks.npcRepair?.(m.id, uid, q.cost, r.durability);
   if (m.id === PLAYER_ID) playerHooks.repair?.(r, q.cost);
   if (m.id === PLAYER_ID) log(w, 'player', `You repaired ${model(r.modelId).name} for ${q.cost} CR`);
   shareOp(managerId, 'repair', [uid]);
@@ -1546,6 +1568,7 @@ export function playNpcMatch(w: World) {
     const seed = withRng(w, (r) => r.int(2 ** 31));
     const st = simulateBattle(ta, tb, seed, [{ careful: a.careful }, { careful: b.careful }]);
     applyMatch(w, a.id, b.id, st);
+    worldHooks.npcMatch?.(st, a.id, b.id);
   }
   withRng(w, (r) => {
     npcManage(w, a, r);

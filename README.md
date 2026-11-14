@@ -45,7 +45,9 @@ shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bou
 | **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result; `npm run verify-battle <tx>` replays it with the engine and checks every move's legality, the result and each robot's wear against the record | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
 | Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (`record_battle_for` → `league_of`, `league` events) | `league_of` of any `bot-*` account |
 | Anti-abuse: a robot sells for at most 2.5 × what its owner paid (× veteran bonus); trading profit ≤ 1500 CR a day; battle rewards + league prizes ≤ 3000 CR a day (`purse_today`); 6 rank-wins a day per robot; credits can't be transferred, robots only to registered players; only the game's relayer can create accounts | **on-chain** (`paid_for`, `purse_today`) | a Spark bought for 9 CR [can't be resold for 60](https://testnet.nearblocks.io/txns/3vwmqfQE2pyDapvWL8XHtDq5TmFfiBkWsFWnBec7HVxy) — *"Price is too far above what you paid"*; [22 CR goes through](https://testnet.nearblocks.io/txns/HWYqks4NJdp24wXDnDg7Jrneprh2S6wn7k47kAsfrbKD) |
-| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 29 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 30 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| **The world has its own wallets**: each of the 3 brokers (`broker-<name>`) and the 12 Pit League teams (`npc-<name>` `.heat-index-game.testnet`) is a NEAR account. A team's robots are NEP-245 tokens on its account, and its purchases, sales, repairs and battles (with public replay logs) are recorded there by the world server with the same `*_for` methods as a player's; credits are synced to the world's number hourly | **on-chain** (`adopt_world_wallet`, `world_wallet`, `mt_tokens_for_owner`) | [npc-protocol-omega](https://testnet.nearblocks.io/address/npc-protocol-omega.heat-index-game.testnet) · [broker-magpie](https://testnet.nearblocks.io/address/broker-magpie.heat-index-game.testnet) |
+| **TEE-verified AI decisions**: each broker records its own LLM decision from its own account (`record_broker_decision`). The contract hashes the model's exact response, recovers the NEAR AI Cloud signature over `<model>:<sha256 request>:<sha256 response>` with `ecrecover` and accepts it only if the signer is the attested TEE key of the model | **on-chain** (`broker_decision`, `tee_signers`, `broker_decision` events) | each broker card in the game links its latest verified decision tx |
 | Email login → a NEAR account owned by the player's NEAR Auth (MPC) key | **on-chain** (account factory in the contract) | `account_for_owner_key` |
 | The 3 brokers' cash and stock, the 12 NPC teams, prices, relevance, battle simulation | **the shared world's server** for logged-in players (a Cloudflare Durable Object running the engine, `web/src/world.ts`); **the browser** for guests | [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public) |
 
@@ -55,9 +57,10 @@ prices through the same `*_for` contract methods, signed by the game's account (
 `stats()` shows 45+ battles and 50+ trades. Bots can't join the shared world as players.
 
 **Honest limits — this is a hybrid economy.** The players' assets and every move they make are on NEAR; the
-*world* around them (NPC teams, brokers, prices) is simulated by the game's engine on one server. If that server
-stops, players keep their tokens and history, but the NPC economy stops with it. Brokers and NPC teams have
-in-game wallets, not NEAR accounts. The contract doesn't replay battles itself (that needs the engine in
+*world* around them (NPC teams, brokers, prices) is simulated by the game's engine on one server, which mirrors the
+teams' moves onto their own NEAR accounts. If that server stops, every account keeps its tokens and history, but the
+NPC economy stops with it. A broker's shop stock stays off-chain (only its cash is on its account), and the world's
+wallets are synced by the server, not driven by the contract. The contract doesn't replay battles itself (that needs the engine in
 Rust): the server replays every battle before recording it, and the public log makes any record checkable, so a
 forged result is *detectable* and can't be sent from a browser — but the trust in the server is real. The public
 site's email login is custodial (see below). PvP is asynchronous: an online opponent's deck is played by the
@@ -205,7 +208,7 @@ Contract (Rust, near-sdk 5):
 
 ```bash
 cd contract
-cargo test                              # 29 unit tests: full loop + every price / reward / wear / abuse limit
+cargo test                              # 30 unit tests: full loop + every price / reward / wear / abuse limit
 cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
 ```
 
@@ -221,7 +224,7 @@ Tests and checks (CI runs them on every push — `.github/workflows/ci.yml`: con
 lint, type check, engine tests, the production build, `npm run verify`):
 
 ```bash
-cd contract && cargo test   # 29 contract tests: every price / reward / wear / abuse limit, server-only moves
+cd contract && cargo test   # 30 contract tests (incl. a real NEAR AI TEE signature checked on-chain): every price / reward / wear / abuse limit, server-only moves
                             # (incl. both exploits from the review), merges, transfers, login links
 cd app && npm test          # 21 engine tests: battle rules, determinism and replays, prices inside the contract's
                             # ranges, the game's constants = the contract's, a simulated week, league, veterans,

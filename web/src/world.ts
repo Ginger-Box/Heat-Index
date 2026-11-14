@@ -36,8 +36,11 @@ import {
   sell,
   setDeck,
   setTeam,
+  worldHooks,
   type World,
 } from '../../app/src/engine/world';
+import { WORLD_WALLETS, brokerAccount, npcAccount } from '../../app/src/engine/wallets';
+import { maxDurability, model as robotModel } from '../../app/src/engine/robots';
 import { battleLogOf, logText, replayBattle, sha256Hex, type BattleLog } from '../../app/src/engine/replay';
 import { applyAction, createBattle, type Action, type BattleEvent, type BattleState } from '../../app/src/engine/battle';
 import { planTurn } from '../../app/src/engine/ai';
@@ -56,7 +59,16 @@ interface Env {
   /** NEAR AI Cloud API keys — the brokers' minds (absent: rule-based brokers); the second is a fallback */
   NEARAI_KEY?: string;
   NEARAI_KEY_2?: string;
+  /** JSON {broker account: key limited to record_broker_decision} — each broker signs its own AI decisions */
+  BROKER_KEYS?: string;
 }
+
+/** a bot team's or broker's move waiting to be recorded on its NEAR account */
+type WalletTask =
+  | { t: 'buy'; account: string; uid: string; modelId: string; durability: number; price: number; broker: string }
+  | { t: 'sell'; account: string; uid: string; chainId?: string; price: number; broker: string }
+  | { t: 'repair'; account: string; uid: string; cost: number; durability: number }
+  | { t: 'battle'; account: string; opponent: string; result: number; reward: number; seed: number; replay: string; wear: { uid: string; durability: number }[] };
 
 interface PvpSession {
   st: BattleState;
@@ -120,6 +132,12 @@ export class SharedWorld extends DurableObject<Env> {
   private cache: { version: number; text: string } | null = null;
   private lastBattle = new Map<string, number>();
   private dirty = false;
+  /** bot teams' moves to record on their NEAR accounts (in order) */
+  private walletTasks: WalletTask[] = [];
+  private walletBusy = false;
+  private lastCreditSync = 0;
+  /** the latest world-wallet error (for /public) */
+  private walletError = '';
 
   /** load the world (or create it on the very first request) */
   private async world(): Promise<World> {
@@ -147,6 +165,7 @@ export class SharedWorld extends DurableObject<Env> {
       await this.save();
     }
     if (this.w) markDevs(this.w);
+    if (this.w) this.hookWallets(this.w);
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
     return this.w;
   }
@@ -173,6 +192,7 @@ export class SharedWorld extends DurableObject<Env> {
     }
     await this.brokerMinds(w);
     await this.sweepPvp(w);
+    await this.syncWallets(w);
     await this.save();
     await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
   }
@@ -221,6 +241,8 @@ export class SharedWorld extends DurableObject<Env> {
             chat_template_kwargs: { thinking: false, enable_thinking: false },
           });
           let out: { id?: string; choices?: { message?: { content?: string } }[] } | null = null;
+          let raw = '';
+          let usedKey = '';
           for (const key of keys) {
             // the second key is a fallback (rate limit, empty balance, an outage)
             const res = await fetch('https://cloud-api.near.ai/v1/chat/completions', {
@@ -230,7 +252,9 @@ export class SharedWorld extends DurableObject<Env> {
               signal: AbortSignal.timeout(30_000),
             });
             if (res.ok) {
-              out = await res.json();
+              raw = await res.text();
+              out = JSON.parse(raw);
+              usedKey = key;
               break;
             }
             this.mindError = `${res.status} ${(await res.text()).slice(0, 160)}`;
@@ -252,6 +276,20 @@ export class SharedWorld extends DurableObject<Env> {
           }
           if (p) {
             applyPolicy(w, b, p, { model: BROKER_MODEL, chatId: out.id });
+            // …and the broker records it on its own NEAR account; the contract checks NEAR AI's TEE signature
+            if (out.id && b.ai) {
+              const ai = b.ai;
+              this.recordBrokerDecision(b.id, usedKey, raw, out.id)
+                .then((hash) => {
+                  ai.tx = hash;
+                  ai.verifyError = undefined;
+                  this.dirty = true;
+                })
+                .catch((e) => {
+                  ai.verifyError = (e instanceof Error ? e.message : String(e)).slice(0, 160);
+                  this.dirty = true;
+                });
+            }
             this.dirty = true;
           }
         } catch (e) {
@@ -377,7 +415,11 @@ export class SharedWorld extends DurableObject<Env> {
       managers: w.managers.map((m) => ({ id: m.id, name: m.name, human: isHuman(m), dev: !!m.dev, elo: m.elo, wins: m.wins, losses: m.losses, credits: m.credits })),
       // the brokers' minds, publicly: the latest policy each LLM chose, the model, and the NEAR AI chat id
       brokerModel: BROKER_MODEL,
-      brokers: w.brokers.map((b) => ({ id: b.id, name: b.name, closed: b.closed, credits: Math.round(b.credits), style: b.style, ai: b.ai ?? null })),
+      brokers: w.brokers.map((b) => ({ id: b.id, name: b.name, account: brokerAccount(b.id), closed: b.closed, credits: Math.round(b.credits), style: b.style, ai: b.ai ?? null })),
+      // every broker and bot team is a NEAR account; their robots are tokens there, their moves are recorded there
+      worldWallets: WORLD_WALLETS.map((x) => ({ ...x, adopted: !!w.walletsAdopted?.[x.account] })),
+      walletQueue: this.walletTasks.length,
+      walletError: this.walletError || undefined,
       clock: { hour: w.hour, day: Math.floor(w.hour / hoursPerDay(w)) + 1, season: w.season },
     });
   }
@@ -542,6 +584,202 @@ export class SharedWorld extends DurableObject<Env> {
       result = { reward, tx, txError };
     } else await this.ctx.storage.put(`pvp:${me}`, s);
     return json({ steps, result, version: this.version });
+  }
+
+  // ---------- the world's own wallets: every bot team and broker is a NEAR account ----------
+
+  /** the engine reports each bot team's move; it is queued to be recorded on the team's own account */
+  private hookWallets(w: World) {
+    const acct = (managerId: string) => {
+      const m = w.managers.find((x) => x.id === managerId);
+      return m && !isHuman(m) ? npcAccount(m.name) : undefined;
+    };
+    const ready = (a?: string): a is string => !!a && !!w.walletsAdopted?.[a];
+    worldHooks.npcBuy = (mid, uid, price, brokerId) => {
+      const account = acct(mid);
+      const r = w.robots[uid];
+      if (ready(account) && r) this.walletTasks.push({ t: 'buy', account, uid, modelId: r.modelId, durability: r.durability, price, broker: brokerAccount(brokerId) ?? brokerId });
+    };
+    worldHooks.npcSell = (mid, uid, chainId, price, brokerId) => {
+      const account = acct(mid);
+      if (ready(account)) this.walletTasks.push({ t: 'sell', account, uid, chainId, price, broker: brokerAccount(brokerId) ?? brokerId });
+    };
+    worldHooks.npcRepair = (mid, uid, cost, durability) => {
+      const account = acct(mid);
+      if (ready(account)) this.walletTasks.push({ t: 'repair', account, uid, cost, durability });
+    };
+    worldHooks.npcMatch = (st, aId, bId) => {
+      const log = battleLogOf(st);
+      if (!log) return;
+      const text = logText(log);
+      // the reward each side got (the last 'reward' entries of this match)
+      const tail = w.ledger.slice(-8);
+      const rewardOf = (id: string) => tail.filter((x) => x.kind === 'reward' && x.to === id && !x.note).reduce((t, x) => t + x.amount, 0);
+      const sides: [string, string] = [aId, bId];
+      const queue = async () => {
+        const replay = await sha256Hex(text);
+        await this.env.BATTLES.put(replay, text); // the public log behind the on-chain hash, as for players
+        sides.forEach((id, s) => {
+          const account = acct(id);
+          if (!ready(account)) return;
+          const opp = w.managers.find((m) => m.id === sides[1 - s]);
+          const team = s === 0 ? log.input.a : log.input.b;
+          this.walletTasks.push({
+            t: 'battle',
+            account,
+            // the opponent's NEAR account — not a league name, so the contract never counts it toward the Pit League
+            opponent: (opp && npcAccount(opp.name)) ?? opp?.name ?? 'npc',
+            result: st.winner === null ? 2 : st.winner === s ? 1 : 0,
+            reward: rewardOf(id),
+            seed: log.input.seed >>> 0,
+            replay,
+            wear: team.map((r) => ({ uid: r.uid, durability: Math.max(0, w.robots[r.uid]?.durability ?? 0) })),
+          });
+        });
+      };
+      queue().catch((e) => (this.walletError = `battle log: ${e instanceof Error ? e.message : e}`));
+    };
+  }
+
+  /** adopt the wallets that aren't on-chain yet, record the queued moves, and once an hour bring every wallet's
+   *  credits to the world's number (stipends, upkeep, dividends happen in the simulation) */
+  private async syncWallets(w: World) {
+    if (this.walletBusy || !this.env.SERVER_KEY) return;
+    this.walletBusy = true;
+    const started = Date.now();
+    try {
+      w.walletsAdopted ??= {};
+      for (const x of WORLD_WALLETS) {
+        if (w.walletsAdopted[x.account]) continue;
+        const owner = x.kind === 'broker' ? w.brokers.find((b) => b.id === x.key) : w.managers.find((m) => !isHuman(m) && m.name === x.key);
+        if (!owner) continue;
+        // a team's robots become tokens on its account (not the Arena's loaners); a broker's stock stays in the shop
+        const robots = x.kind === 'npc' ? robotsOf(w, owner.id).filter((r) => !r.loaner).slice(0, 200) : [];
+        try {
+          const out = await this.chainCall('adopt_world_wallet', {
+            account: x.account,
+            kind: x.kind,
+            name: x.name,
+            credits: String(Math.max(0, Math.round(owner.credits))),
+            robots: robots.map((r) => ({ model_id: r.modelId, durability: Math.max(0, Math.min(maxDurability(r.modelId), r.durability)) })),
+          });
+          const ids = (out.value as string[]) ?? [];
+          robots.forEach((r, i) => (r.chainId = ids[i]));
+          w.walletsAdopted[x.account] = true;
+          this.dirty = true;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg.includes('Already registered')) w.walletsAdopted[x.account] = true;
+          this.walletError = `adopt ${x.account}: ${msg.slice(0, 160)}`;
+        }
+        if (Date.now() - started > 20_000) return;
+      }
+      // the queued moves, oldest first (each one ~2 s on testnet; the rest waits for the next alarm)
+      while (this.walletTasks.length && Date.now() - started < 25_000) {
+        const task = this.walletTasks.shift()!;
+        await this.recordWalletTask(w, task).catch((e) => {
+          this.walletError = `${task.t} ${task.account}: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`;
+        });
+      }
+      if (Date.now() - this.lastCreditSync > 3_600_000 && Date.now() - started < 15_000) {
+        this.lastCreditSync = Date.now();
+        for (const x of WORLD_WALLETS) {
+          if (!w.walletsAdopted[x.account]) continue;
+          const owner = x.kind === 'broker' ? w.brokers.find((b) => b.id === x.key) : w.managers.find((m) => !isHuman(m) && m.name === x.key);
+          if (!owner) continue;
+          await this.chainCall('sync_world_credits', { account: x.account, credits: String(Math.max(0, Math.round(owner.credits))) }).catch((e) => {
+            this.walletError = `sync ${x.account}: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`;
+          });
+        }
+      }
+    } finally {
+      this.walletBusy = false;
+    }
+  }
+
+  private async recordWalletTask(w: World, task: WalletTask) {
+    if (task.t === 'buy') {
+      const out = await this.chainCall('buy_robot_for', {
+        player: task.account,
+        model_id: task.modelId,
+        price: String(task.price),
+        durability: Math.max(1, task.durability),
+        broker: task.broker,
+      });
+      const r = w.robots[task.uid];
+      if (r) r.chainId = String(out.value);
+      // sold again before its purchase reached the chain: the token goes now
+      if (r && r.owner !== w.managers.find((m) => npcAccount(m.name) === task.account)?.id) {
+        await this.chainCall('drop_world_robot', { account: task.account, token_id: String(out.value) }).catch(() => {});
+        r.chainId = undefined;
+      }
+      this.dirty = true;
+      return;
+    }
+    if (task.t === 'sell') {
+      const tokenId = task.chainId ?? w.robots[task.uid]?.chainId;
+      if (!tokenId) return;
+      try {
+        await this.chainCall('sell_robot_for', { player: task.account, token_id: tokenId, price: String(task.price), broker: task.broker });
+      } catch (e) {
+        // a sale the contract's limits refuse (daily profit cap…): the robot still left the team — burn its token
+        await this.chainCall('drop_world_robot', { account: task.account, token_id: tokenId });
+        this.walletError = `sell ${task.account}: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)} (token burned)`;
+      }
+      return;
+    }
+    if (task.t === 'repair') {
+      const tokenId = w.robots[task.uid]?.chainId;
+      if (!tokenId) return;
+      await this.chainCall('repair_robot_for', { player: task.account, token_id: tokenId, cost: String(task.cost), durability: task.durability });
+      return;
+    }
+    // a battle: the robots on-chain that fought, their wear, the reward (inside the contract's cap)
+    const wear = task.wear
+      .map((x) => ({ token_id: w.robots[x.uid]?.chainId, durability: x.durability }))
+      .filter((x): x is { token_id: string; durability: number } => !!x.token_id);
+    if (task.result === 1 && !wear.length) return;
+    const value = Object.values(w.robots)
+      .filter((r) => r.chainId && r.durability > 0 && w.managers.find((m) => m.id === r.owner && npcAccount(m.name) === task.account))
+      .reduce((t, r) => t + robotModel(r.modelId).basePrice, 0);
+    const reward = Math.max(0, Math.min(task.reward, 400, Math.floor((value * 25) / 100)));
+    await this.chainCall('record_battle_for', {
+      player: task.account,
+      opponent: task.opponent.slice(0, 64),
+      result: task.result,
+      reward: String(reward),
+      seed: task.seed,
+      wear,
+      replay: task.replay,
+    });
+  }
+
+  /** a broker records its AI decision on its own NEAR account; the contract checks the NEAR AI TEE signature */
+  private async recordBrokerDecision(brokerId: string, key: string, raw: string, chatId: string): Promise<string> {
+    const account = brokerAccount(brokerId);
+    const keys = this.env.BROKER_KEYS ? (JSON.parse(this.env.BROKER_KEYS) as Record<string, string>) : {};
+    if (!account || !keys[account]) throw new Error('no broker key');
+    // NEAR AI's signature for this chat: "<model>:<sha256 request>:<sha256 response>", signed inside the TEE
+    let sig: { text?: string; signature?: string } | null = null;
+    for (let i = 0; i < 4 && !sig?.signature; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 1500));
+      const res = await fetch(`https://cloud-api.near.ai/v1/signature/${chatId}?model=${encodeURIComponent(BROKER_MODEL)}&signing_algo=ecdsa`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) sig = await res.json();
+    }
+    if (!sig?.signature || !sig.text) throw new Error('no TEE signature');
+    const acc = new Account(account, new JsonRpcProvider({ url: RPC_URL }), keys[account] as `ed25519:${string}`);
+    const r = await acc.callFunctionRaw({
+      contractId: CONTRACT_ID,
+      methodName: 'record_broker_decision',
+      args: { model: BROKER_MODEL, chat_id: chatId, response: raw, text: sig.text, signature: sig.signature },
+      gas: 100_000_000_000_000n,
+    });
+    const st = r.status as { Failure?: unknown };
+    if (st && typeof st === 'object' && 'Failure' in st) throw new Error(JSON.stringify(st.Failure).slice(0, 200));
+    return r.transaction.hash as string;
   }
 
   // ---------- recording moves on NEAR (the server is the only writer: contract *_for methods) ----------

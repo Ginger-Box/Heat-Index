@@ -85,10 +85,10 @@ await check('the contract account has one full-access key; its other keys can on
   ok(full.length === 1, `${full.length} full-access keys`);
   for (const k of fn) {
     const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
-    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for'];
+    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot'];
     ok(p.receiver_id === C && p.method_names.every((m) => allowed.includes(m)), `a function-call key can do more: ${p.method_names}`);
   }
-  return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: *_for moves)`;
+  return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: *_for moves and the world wallets)`;
 });
 
 await check('every transaction linked in the README succeeded', async () => {
@@ -124,6 +124,29 @@ await check("the shared world's AI brokers publish their latest LLM decisions (N
   const decided = d.brokers.filter((b) => b.ai?.remark);
   ok(decided.length > 0, 'no broker has an LLM decision yet');
   return `${d.brokerModel}: ${decided.map((b) => `${b.id} (${b.ai!.chatId?.slice(0, 18)}…)`).join(', ')}`;
+});
+
+await check('every broker and bot team is a NEAR account holding its credits and robots', async () => {
+  const { WORLD_WALLETS } = await import('../src/engine/wallets');
+  let robots = 0;
+  for (const x of WORLD_WALLETS) {
+    const kind = await view<{ kind: string } | null>('world_wallet', { account: x.account });
+    ok(kind?.kind === x.kind, `${x.account} is not a ${x.kind} wallet`);
+    if (x.kind === 'npc') robots += (await view<unknown[]>('mt_tokens_for_owner', { account_id: x.account, limit: 200 })).length;
+  }
+  return `${WORLD_WALLETS.length} accounts (3 brokers, 12 teams), ${robots} team robots as tokens`;
+});
+
+await check("each broker records its AI decision itself, and the contract checks NEAR AI's TEE signature", async () => {
+  const { WORLD_WALLETS } = await import('../src/engine/wallets');
+  const signers = await view<string[]>('tee_signers');
+  const out: string[] = [];
+  for (const x of WORLD_WALLETS.filter((w) => w.kind === 'broker')) {
+    const d = await view<{ signer: string; chat_id: string } | null>('broker_decision', { broker: x.account });
+    ok(!!d && signers.includes(d.signer.slice(2)), `${x.account}: no TEE-verified decision`);
+    out.push(`${x.name} (${d!.chat_id.slice(0, 16)}…)`);
+  }
+  return `signed by ${signers.map((s) => `0x${s.slice(0, 8)}…`).join(', ')}: ${out.join(', ')}`;
 });
 
 console.log(failed ? `\n${failed} claim(s) failed` : '\nall claims hold');

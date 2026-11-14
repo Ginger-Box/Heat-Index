@@ -5475,3 +5475,5 @@ p.tour-swap {
 @media (prefers-reduced-motion: reduce) {
   .end-overlay.leaving, .end-overlay.leaving .end-inner, .screen-enter { animation-duration: 0.01s; }
 }
+
+.broker-chain { margin-top: 4px; font-size: 11px; }
