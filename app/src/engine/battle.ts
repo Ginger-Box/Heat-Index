@@ -75,6 +75,27 @@ export interface BattleState {
   history: BattleEvent[];
   winner: number | null | undefined; // undefined — ongoing; null — draw
   rngState: number;
+  /** what the battle started from (seed + both decks in order) — with `log` it replays the whole battle */
+  input?: BattleInput;
+  /** every accepted action of both sides, in order (engine/replay.ts replays it) */
+  log?: Action[];
+}
+
+/** A robot as it entered the battle (enough to rebuild it): its veteran wins give extra HP. */
+export interface BattleRobot {
+  uid: string;
+  modelId: string;
+  /** veteran wins (HP bonus) */
+  vw?: number;
+  /** durability before the battle (to check the reported wear) */
+  dur?: number;
+  /** NEP-245 token id, for the player's on-chain robots */
+  tokenId?: string;
+}
+export interface BattleInput {
+  seed: number;
+  a: BattleRobot[];
+  b: BattleRobot[];
 }
 
 export type Action =
@@ -170,6 +191,22 @@ export function createBattle(teamA: Robot[], teamB: Robot[], seed: number): Batt
     history: [],
     winner: undefined,
     rngState: rng.state,
+    input: {
+      seed,
+      ...Object.fromEntries(
+        (['a', 'b'] as const).map((k, i) => [
+          k,
+          [teamA, teamB][i].map((r) => ({
+            uid: r.uid,
+            modelId: r.modelId,
+            ...(r.vet?.w ? { vw: r.vet.w } : {}),
+            dur: r.durability,
+            ...((r as { chainId?: string }).chainId ? { tokenId: (r as { chainId?: string }).chainId } : {}),
+          })),
+        ]),
+      ),
+    } as BattleInput,
+    log: [],
   };
   startTurn(st, st.history);
   return st;
@@ -287,7 +324,14 @@ export function autoTarget(st: BattleState, side: number, modelId: string, targe
 }
 
 /** Applies an action of the active side. Returns an error text or null. Mutates st. */
+/** Applies one action; accepted actions are appended to `st.log`, so the battle can be replayed and checked. */
 export function applyAction(st: BattleState, a: Action, ev: BattleEvent[] | null = st.history): string | null {
+  const err = applyActionInner(st, a, ev);
+  if (!err) st.log?.push(a);
+  return err;
+}
+
+function applyActionInner(st: BattleState, a: Action, ev: BattleEvent[] | null): string | null {
   if (st.winner !== undefined) return 'The battle is over';
   const side = st.active;
   const me = st.sides[side];
@@ -445,7 +489,7 @@ export function simulateBattle(teamA: Robot[], teamB: Robot[], seed: number, sty
       if (st.winner !== undefined || st.active !== side) break;
       applyAction(st, a, null);
     }
-    if (st.winner === undefined && st.active === side) endTurn(st, null);
+    if (st.winner === undefined && st.active === side) applyAction(st, { t: 'end' }, null);
   }
   return st;
 }

@@ -231,3 +231,26 @@ test('restoring a player from chain data rebuilds robots, credits, records, leag
   assert.equal(leagueOf(w).beaten.length, 1);
   assert.equal(w.chainAccount, 'alice.testnet');
 });
+
+// ---------- replays ----------
+
+test('a recorded battle replays to the same winner and wear; a tampered log is rejected', async () => {
+  const { battleLogOf, replayBattle, replayWear, logText, sha256Hex } = await import('../src/engine/replay');
+  for (const seed of [3, 8, 21]) {
+    const st = simulateBattle(deckA, deckB, seed, [{ careful: 0.4 }, { careful: 0.6, sloppy: 0.3 }]);
+    const log = JSON.parse(logText(battleLogOf(st)!));
+    const r = replayBattle(log);
+    assert.equal(r.error, undefined);
+    assert.equal(r.st.winner, st.winner);
+    for (const w of replayWear(log, r.st)) assert.equal(w.after, Math.max(0, w.before - wearLoss(st, w.uid, true)));
+    assert.equal((await sha256Hex(logText(log))).length, 64);
+  }
+  const st = simulateBattle(deckA, deckB, 5, [{ careful: 0.5 }, { careful: 0.5 }]);
+  const log = battleLogOf(st)!;
+  // claim a win the replay doesn't show: drop the last actions
+  const cut = { ...log, actions: log.actions.slice(0, Math.floor(log.actions.length / 2)) };
+  assert.ok(replayBattle(cut).error);
+  // an attack by a robot that isn't on the board
+  const bad = { ...log, actions: [{ t: 'attack', from: 'ghost#x', to: 'core' } as const, ...log.actions] };
+  assert.match(replayBattle(bad).error ?? '', /illegal/);
+});

@@ -37,6 +37,7 @@ A robot's market price follows its **relevance** (how often it wins and how many
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
 | Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
 | Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
+| **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result; `npm run verify-battle <tx>` replays it with the engine and checks every move's legality, the result and each robot's wear against the record | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
 | Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (`record_battle` → `league_of`, `league` events) | `league_of` of any `bot-*` account |
 | Anti-abuse: a robot sells for at most 2.5 × what its owner paid (× veteran bonus); trading profit ≤ 1500 CR a day; battle rewards + league prizes ≤ 3000 CR a day (`purse_today`); 6 rank-wins a day per robot; credits can't be transferred, robots only to registered players; only the game's relayer can create accounts | **on-chain** (`paid_for`, `purse_today`) | a Spark bought for 9 CR [can't be resold for 60](https://testnet.nearblocks.io/txns/3vwmqfQE2pyDapvWL8XHtDq5TmFfiBkWsFWnBec7HVxy) — *"Price is too far above what you paid"*; [22 CR goes through](https://testnet.nearblocks.io/txns/HWYqks4NJdp24wXDnDg7Jrneprh2S6wn7k47kAsfrbKD) |
 | Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 20 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
@@ -96,8 +97,11 @@ against the game's own rules, kept on-chain: each model's base price and durabil
 contract; a purchase must lie in the market's possible range for that model (30–280% of base), a sale can't exceed
 what a broker could pay at that wear, a repair can't be cheaper than the game's minimum for the restored durability,
 a battle reward is capped (≤ 25% of the player's robots' base value, ≤ 400 CR) and limited to one battle per 30 s,
-durability only goes down in battle, and nobody can spend credits they don't have. Battles are recorded with their
-seed so a verifier can replay them — the next step.
+durability only goes down in battle, and nobody can spend credits they don't have. **Battles are replayable**: the
+action log's SHA-256 is on-chain with each result and the log is public, so anyone can re-run the battle
+(`npm run verify-battle <tx>`) and see whether the reported win and wear are real. The contract doesn't run the
+replay itself (yet) — it would need the battle engine in Rust — so a forged result is *detectable*, not
+*impossible*; the daily caps bound what it could earn.
 
 ## Two ways to play
 
@@ -172,9 +176,10 @@ Tests and checks (CI runs all of them on every push — `.github/workflows/ci.ym
 
 ```bash
 cd contract && cargo test   # 22 contract tests: every price / reward / wear / abuse limit, merges
-cd app && npm test          # 15 engine tests: battle rules and determinism, prices inside the contract's
+cd app && npm test          # 16 engine tests: battle rules, determinism and replays, prices inside the contract's
                             # ranges, the game's constants = the contract's, a simulated week, league, veterans
 cd app && npm run verify    # reads NEAR testnet + the live site and prints ✓/✗ for each claim in this README
+cd app && npm run verify-battle <tx>   # replays a recorded battle from its public log and checks the record
 ```
 
 Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run economy`,

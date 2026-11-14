@@ -13,6 +13,8 @@ export default defineConfig({
     env: {
       // public: Privy app ids are shown to every visitor anyway
       PRIVY_APP_ID: bindings.text("cmwfvxb4s018e0hkzqvudzfpb"),
+      // battle replays (action logs by SHA-256) — provisioned by `cf deploy`
+      BATTLES: bindings.kv(),
       RELAYER_KEY: bindings.secret(),
       OWNER_SECRET: bindings.secret(),
     },

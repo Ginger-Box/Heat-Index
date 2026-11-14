@@ -100,7 +100,13 @@ export const chainCredits = async (accountId: string) =>
 // ---------- writes: one queue, signed with the game key ----------
 
 /** Send a game move to the contract. Never throws into the game: errors are shown in the chain log. */
-export function chainCall<T = unknown>(label: string, method: string, args: Record<string, unknown>): Promise<T | null> {
+/** Queues a game transaction. `args` may be a promise (e.g. waiting for a battle log upload) — the call keeps its
+ *  place in the queue, so transactions always land in the order the player made the moves. */
+export function chainCall<T = unknown>(
+  label: string,
+  method: string,
+  args: Record<string, unknown> | Promise<Record<string, unknown>>,
+): Promise<T | null> {
   const s = session;
   if (!s) return Promise.resolve(null);
   const tx: ChainTx = { id: ++txId, label, status: 'pending', at: Date.now() };
@@ -110,7 +116,7 @@ export function chainCall<T = unknown>(label: string, method: string, args: Reco
     try {
       const acc = new Account(s.accountId, provider, s.gameKey as `ed25519:${string}`);
       // 30 TGas: the heaviest call (record_battle) burns ~7; prepaid gas must be covered by the account balance
-      const res = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas: 30_000_000_000_000n });
+      const res = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args: await args, gas: 30_000_000_000_000n });
       const status = res.status as { SuccessValue?: string; Failure?: unknown };
       tx.hash = res.transaction?.hash;
       if (status && typeof status === 'object' && 'Failure' in status) throw new Error(JSON.stringify(status.Failure).slice(0, 200));

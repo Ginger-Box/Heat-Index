@@ -6,6 +6,19 @@ import { PLAYER_ID, playerHooks, restorePlayerFromChain } from '../engine/world'
 import { model } from '../engine/robots';
 import { act, getWorld } from '../store';
 import { chainCall, chainCredits, chainRobots, chainSession, view } from './chain';
+import { PUBLIC_ORIGIN } from './config';
+import { battleLogOf, logText, sha256Hex } from '../engine/replay';
+import type { BattleState } from '../engine/battle';
+
+/** Stores the battle's action log at the public site's Worker; returns its SHA-256 (what goes on-chain). */
+async function publishBattle(st: BattleState): Promise<string | undefined> {
+  const log = battleLogOf(st);
+  if (!log) return undefined;
+  const text = logText(log);
+  const hash = await sha256Hex(text);
+  const res = await fetch(`${PUBLIC_ORIGIN}/api/battles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+  return res.ok ? hash : undefined;
+}
 
 const MAX_DUR = 16; // the contract's durability cap
 const clampDur = (d: number) => Math.max(0, Math.min(MAX_DUR, Math.round(d)));
@@ -97,10 +110,11 @@ export function installBridge() {
       .filter((uid) => st.wear[uid].fielded && w.robots[uid]?.owner === PLAYER_ID && w.robots[uid]?.chainId)
       .map((uid) => ({ token_id: w.robots[uid].chainId!, durability: clampDur(w.robots[uid].durability) }));
     const opp = w.managers.find((m) => m.id === opponentId)?.name ?? opponentId;
-    void chainCall(
-      `Battle vs ${opp}: ${result === 1 ? 'win' : result === 0 ? 'loss' : 'draw'} · +${reward} CR`,
-      'record_battle',
-      { opponent: opp, result, reward: String(reward), seed: st.rngState >>> 0, wear },
-    );
+    // publish the battle's action log; its hash goes on-chain, so anyone can replay and check the record.
+    // The call takes its place in the queue now (order of moves), the args wait for the upload.
+    const args = publishBattle(st)
+      .catch(() => undefined)
+      .then((replay) => ({ opponent: opp, result, reward: String(reward), seed: (st.input?.seed ?? st.rngState) >>> 0, wear, replay }));
+    void chainCall(`Battle vs ${opp}: ${result === 1 ? 'win' : result === 0 ? 'loss' : 'draw'} · +${reward} CR`, 'record_battle', args);
   };
 }

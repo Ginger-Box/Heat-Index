@@ -16,6 +16,17 @@ import { battleReward, ECON } from '../src/engine/pricing';
 import { MODELS, maxDurability, model } from '../src/engine/robots';
 import { advanceHours, bestBid, createWorld, quote, repairQuote, sideTeamValues, teamOf, type World } from '../src/engine/world';
 import { Rng } from '../src/engine/rng';
+import { battleLogOf, logText, sha256Hex } from '../src/engine/replay';
+
+const SITE = 'https://heat-index-web.ginger-box.workers.dev';
+/** publishes a battle's action log (its hash goes on-chain with the result) */
+async function publish(st: Parameters<typeof battleLogOf>[0]): Promise<string | undefined> {
+  const log = battleLogOf(st);
+  if (!log) return undefined;
+  const text = logText(log);
+  const res = await fetch(`${SITE}/api/battles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+  return res.ok ? sha256Hex(text) : undefined;
+}
 
 const C = 'heat-index-game.testnet';
 const BATTLES = Number(process.argv[2] ?? 8);
@@ -103,6 +114,7 @@ async function botRound(acc: Account, w: World, seed: number, rng: Rng, i: numbe
         reward: String(reward),
         seed: (seed * 100 + i) >>> 0,
         wear,
+        replay: await publish(st),
       });
     }
     // a trade between battles, at the simulated market's prices

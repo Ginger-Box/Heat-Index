@@ -554,7 +554,13 @@ impl Contract {
     /// `result`: 1 win, 0 loss, 2 draw. `seed` lets a verifier replay the battle later.
     /// Limits: one battle per BATTLE_COOLDOWN_MS per account; the reward is at most REWARD_MAX_PCT of the base value
     /// of the player's robots on-chain and at most MAX_REWARD; durability can only go down.
-    pub fn record_battle(&mut self, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>) {
+    /// `replay` (optional): SHA-256 (hex) of the battle's full action log, published by the game at
+    /// /api/battles/<hash> — anyone can replay it with the game engine and check this record
+    /// (`npm run verify-battle <tx>`).
+    pub fn record_battle(&mut self, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: Option<String>) {
+        if let Some(h) = &replay {
+            require!(h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()), "replay must be a SHA-256 hex hash");
+        }
         let who = self.player();
         require!(result <= 2, "Bad result");
         require!(wear.len() <= 15, "A deck has at most 15 robots");
@@ -629,7 +635,7 @@ impl Contract {
             "1.0.0",
             "battle",
             json!([{
-                "account_id": who, "opponent": short(&opponent), "result": result, "reward": U128(paid_reward), "seed": seed,
+                "account_id": who, "opponent": short(&opponent), "result": result, "reward": U128(paid_reward), "seed": seed, "replay": replay,
                 "wear": wear.iter().map(|w| json!({ "token_id": w.token_id, "durability": w.durability })).collect::<Vec<_>>()
             }]),
         );
@@ -932,7 +938,7 @@ mod tests {
         // buy, battle, repair, sell — all within the market's limits
         let bought = c.buy_robot("titan".into(), U128(560), 16, "kessler".into());
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 440);
-        c.record_battle("npc3".into(), 1, U128(90), 42, vec![Wear { token_id: bought.clone(), durability: 14 }]);
+        c.record_battle("npc3".into(), 1, U128(90), 42, vec![Wear { token_id: bought.clone(), durability: 14 }], None);
         assert_eq!(c.mt_balance_of(alice.clone(), CREDITS.into()).0, 530);
         assert_eq!(c.mt_token(vec![bought.clone()])[0].as_ref().unwrap().metadata.as_ref().unwrap().durability, 14);
         c.repair_robot(bought.clone(), U128(30), 16);
@@ -955,9 +961,9 @@ mod tests {
     fn battle_cannot_heal() {
         let (mut c, ids) = setup("carol.testnet");
         ctx_at("carol.testnet", 1_000);
-        c.record_battle("npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }]);
+        c.record_battle("npc1".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }], None);
         ctx_at("carol.testnet", 40_000);
-        c.record_battle("npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 6 }]);
+        c.record_battle("npc1".into(), 1, U128(10), 2, vec![Wear { token_id: ids[0].clone(), durability: 6 }], None);
     }
 
     #[test]
@@ -985,7 +991,7 @@ mod tests {
     #[should_panic(expected = "Repair cost is out of range")]
     fn cannot_repair_for_free() {
         let (mut c, ids) = setup("gus.testnet");
-        c.record_battle("npc1".into(), 0, U128(0), 1, vec![Wear { token_id: ids[0].clone(), durability: 1 }]);
+        c.record_battle("npc1".into(), 0, U128(0), 1, vec![Wear { token_id: ids[0].clone(), durability: 1 }], None);
         c.repair_robot(ids[0].clone(), U128(0), 6);
     }
 
@@ -993,7 +999,7 @@ mod tests {
     #[should_panic(expected = "Reward out of range")]
     fn reward_is_capped() {
         let (mut c, _) = setup("hal.testnet");
-        c.record_battle("npc1".into(), 1, U128(2_000), 1, vec![]);
+        c.record_battle("npc1".into(), 1, U128(2_000), 1, vec![], None);
     }
 
     #[test]
@@ -1003,7 +1009,7 @@ mod tests {
         // 4 wins a day over two days (the daily cap is 6)
         for i in 0..8u64 {
             ctx_at("jon.testnet", 1_000 + (i / 4) * DAY_MS + (i % 4) * 31_000);
-            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }]);
+            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: volt.clone(), durability: 10 }], None);
         }
         let rec = c.mt_token(vec![volt.clone()])[0].as_ref().unwrap().record.clone().unwrap();
         assert_eq!((rec.battles, rec.wins, rec.rank), (8, 8, 2));
@@ -1023,7 +1029,7 @@ mod tests {
         let (mut c, ids) = setup("lea.testnet");
         for i in 0..10u64 {
             ctx_at("lea.testnet", 1_000 + i * 31_000);
-            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: ids[5].clone(), durability: 10 }]);
+            c.record_battle("npc1".into(), 1, U128(20), i, vec![Wear { token_id: ids[5].clone(), durability: 10 }], None);
         }
         let rec = c.mt_token(vec![ids[5].clone()])[0].as_ref().unwrap().record.clone().unwrap();
         assert_eq!((rec.battles, rec.wins), (10, 6));
@@ -1055,14 +1061,14 @@ mod tests {
         let ola: AccountId = "ola.testnet".parse().unwrap();
         for (i, team) in ["Rusty Dogs", "Glitch", "Short Circuit"].iter().enumerate() {
             ctx_at("ola.testnet", 1_000 + i as u64 * 31_000);
-            c.record_battle(team.to_string(), 1, U128(10), i as u64, vec![]);
+            c.record_battle(team.to_string(), 1, U128(10), i as u64, vec![], None);
         }
         let l = c.league_of(ola.clone());
         assert_eq!((l.div, l.beaten.len()), (1, 0));
         assert_eq!(c.mt_balance_of(ola, CREDITS.into()).0, 1000 + 30 + 150);
         // a team of another division doesn't count
         ctx_at("ola.testnet", 200_000);
-        c.record_battle("Protocol Omega".into(), 1, U128(10), 9, vec![]);
+        c.record_battle("Protocol Omega".into(), 1, U128(10), 9, vec![], None);
         assert_eq!(c.league_of("ola.testnet".parse().unwrap()).beaten.len(), 0);
     }
 
@@ -1083,13 +1089,13 @@ mod tests {
         // 12 battles × 300 = 3600 asked, but at most 3000 a day is paid (unknown opponent: no league prize)
         for i in 0..12u64 {
             ctx_at("quinn.testnet", 1_000 + i * 31_000);
-            c.record_battle("npc".into(), 1, U128(300), i, vec![]);
+            c.record_battle("npc".into(), 1, U128(300), i, vec![], None);
         }
         assert_eq!(c.mt_balance_of(q.clone(), CREDITS.into()).0 - before, 3_000);
         assert_eq!(c.purse_today(q.clone()).0, 3_000);
         // the next day the purse is full again
         ctx_at("quinn.testnet", DAY_MS + 1_000);
-        c.record_battle("npc".into(), 1, U128(300), 99, vec![]);
+        c.record_battle("npc".into(), 1, U128(300), 99, vec![], None);
         assert_eq!(c.mt_balance_of(q, CREDITS.into()).0 - before, 3_300);
     }
 
@@ -1097,7 +1103,7 @@ mod tests {
     #[should_panic(expected = "listed only once")]
     fn wear_cannot_repeat_a_robot() {
         let (mut c, ids) = setup("ray.testnet");
-        c.record_battle("npc".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }, Wear { token_id: ids[0].clone(), durability: 5 }]);
+        c.record_battle("npc".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }, Wear { token_id: ids[0].clone(), durability: 5 }], None);
     }
 
     #[test]
@@ -1148,7 +1154,7 @@ mod tests {
     #[should_panic(expected = "One battle per 30 seconds")]
     fn battles_are_rate_limited() {
         let (mut c, _) = setup("ivy.testnet");
-        c.record_battle("npc1".into(), 1, U128(50), 1, vec![]);
-        c.record_battle("npc1".into(), 1, U128(50), 2, vec![]);
+        c.record_battle("npc1".into(), 1, U128(50), 1, vec![], None);
+        c.record_battle("npc1".into(), 1, U128(50), 2, vec![], None);
     }
 }

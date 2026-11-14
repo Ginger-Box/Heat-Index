@@ -329,6 +329,20 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   - Result: `ginger` holds 50 robots and 3109 CR; both email logins (Privy on the site, NEAR Auth on localhost)
     open `ginger`.
 
+### Verifiable battles, tests, CI (Nov 14)
+- Jury feedback: battles are computed in the client with no verifier; no engine tests; CI tests nothing.
+- **Battle replays**: the engine records every accepted action of both sides plus the battle's input (seed, both
+  decks in order, veteran HP bonuses, durability before). The game publishes the log at the Worker
+  (`/api/battles/<sha256>`, Cloudflare KV, content-addressed) and `record_battle` gets the hash (`replay`, contract
+  v0.7; the transaction keeps its place in the queue while the log uploads). `npm run verify-battle <tx>` reads the
+  event from testnet, checks the hash, replays the log (illegal moves fail) and compares the result and each robot's
+  wear — checked on a live bot battle: 34 actions, win and 5 wear values match.
+- **Tests**: 16 engine tests (battle rules, determinism, replays and tamper detection, prices inside the contract's
+  ranges, the game's constants = the contract's (parsed from `lib.rs`), a simulated week, league, veterans, daily
+  caps, restore from chain); 22 contract tests. **`npm run verify`** checks 8 README claims against testnet and the
+  live site. **CI** (`ci.yml`) runs all of it on every push; the failing GitHub Pages workflow is gone.
+- "AI brokers" → "algorithmic brokers": they are rule-based, there is no LLM. Phones get a "open on a computer" stub.
+
 ## Next
 - Card art.
 - README for judges, demo video.

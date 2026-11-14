@@ -15,6 +15,8 @@ import { Account, JsonRpcProvider, KeyPair, PublicKey, actions, baseEncode } fro
 import { ed25519 } from '@noble/curves/ed25519.js';
 
 interface Env {
+  /** battle action logs, by their SHA-256 (POST/GET /api/battles) */
+  BATTLES: KVNamespace;
   PRIVY_APP_ID: string;
   RELAYER_KEY: string;
   OWNER_SECRET: string;
@@ -122,9 +124,51 @@ async function login(req: Request, env: Env): Promise<Response> {
   return json({ accountId, returning: false });
 }
 
+const MAX_LOG = 256 * 1024;
+const cors = (origin: string | null): Record<string, string> => ({
+  'Access-Control-Allow-Origin': origin && SITE_ORIGINS.includes(origin) ? origin : '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+});
+
+async function sha256Hex(text: string) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Battle replays. POST stores a battle's action log under its SHA-256 (content-addressed, so nobody can change a
+ * stored log); the same hash goes on-chain with the battle result. GET returns it for `npm run verify-battle`.
+ */
+async function battles(req: Request, env: Env, path: string): Promise<Response> {
+  const h = cors(req.headers.get('origin'));
+  if (req.method === 'OPTIONS') return new Response(null, { headers: h });
+  if (req.method === 'POST' && path === '/api/battles') {
+    const text = await req.text();
+    if (text.length > MAX_LOG) return new Response('Log too big', { status: 413, headers: h });
+    try {
+      const log = JSON.parse(text) as { v?: number; input?: { seed?: number }; actions?: unknown[] };
+      if (log.v !== 1 || typeof log.input?.seed !== 'number' || !Array.isArray(log.actions)) throw new Error();
+    } catch {
+      return new Response('Not a battle log', { status: 400, headers: h });
+    }
+    const hash = await sha256Hex(text);
+    await env.BATTLES.put(hash, text);
+    return new Response(JSON.stringify({ hash }), { headers: { ...h, 'Content-Type': 'application/json' } });
+  }
+  const m = path.match(/^\/api\/battles\/([0-9a-f]{64})$/);
+  if (req.method === 'GET' && m) {
+    const text = await env.BATTLES.get(m[1]);
+    if (!text) return new Response('No such battle log', { status: 404, headers: h });
+    return new Response(text, { headers: { ...h, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+  }
+  return new Response('Not found', { status: 404, headers: h });
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname.startsWith('/api/battles')) return battles(req, env, url.pathname);
     if (url.pathname === '/api/privy/login') {
       try {
         return await login(req, env);
