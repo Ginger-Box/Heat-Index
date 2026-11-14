@@ -260,6 +260,25 @@ export function Brokers({ w }: { w: World }) {
                   <span className="tag">👥 {outside.toFixed(0)}%</span>
                 </Tip>
               </div>
+              {(() => {
+                const list = Object.entries(b.shares)
+                  .filter(([id, sh]) => id !== HOUSE && sh > 0)
+                  .map(([id, sh]) => ({ id, pct: (sh / total) * 100, name: w.managers.find((m) => m.id === id)?.name ?? id }))
+                  .sort((x, y) => y.pct - x.pct)
+                  .slice(0, 4);
+                return list.length ? (
+                  <div className="muted investors">
+                    Investors:{' '}
+                    {list.map((x, k) => (
+                      <span key={x.id}>
+                        {k ? ', ' : ''}
+                        <b style={x.id === PLAYER_ID ? { color: 'var(--yellow)' } : undefined}>{x.id === PLAYER_ID ? 'you' : x.name}</b>{' '}
+                        {x.pct.toFixed(1)}%
+                      </span>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
 
               <div className={`my-stake ${mine > 0 ? 'has' : ''}`}>
                 {mine > 0 ? (

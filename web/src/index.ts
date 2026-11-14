@@ -14,7 +14,11 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { Account, JsonRpcProvider, KeyPair, PublicKey, actions, baseEncode } from 'near-api-js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 
+export { SharedWorld } from './world';
+
 interface Env {
+  /** the shared world (one Durable Object) */
+  WORLD: DurableObjectNamespace;
   /** battle action logs, by their SHA-256 (POST/GET /api/battles) */
   BATTLES: KVNamespace;
   PRIVY_APP_ID: string;
@@ -169,6 +173,16 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname.startsWith('/api/battles')) return battles(req, env, url.pathname);
+    if (url.pathname.startsWith('/api/world/')) {
+      const origin = req.headers.get('origin');
+      const h = { ...cors(origin), 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
+      if (req.method === 'OPTIONS') return new Response(null, { headers: h });
+      if (origin && !SITE_ORIGINS.includes(origin)) return new Response('Forbidden', { status: 403, headers: h });
+      const res = await env.WORLD.get(env.WORLD.idFromName('main')).fetch(req);
+      const out = new Response(res.body, res);
+      for (const [k, v] of Object.entries(h)) out.headers.set(k, v);
+      return out;
+    }
     if (url.pathname === '/api/privy/login') {
       try {
         return await login(req, env);

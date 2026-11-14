@@ -2,7 +2,10 @@
 // The player's trades and battles are mirrored on NEAR by src/near/bridge.ts.
 import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
-import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, type World } from './engine/world';
+import { KeyPair } from 'near-api-js';
+import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, playerHooks, type World } from './engine/world';
+import { chainSession } from './near/chain';
+import { PUBLIC_ORIGIN } from './near/config';
 
 const KEY = 'neon-pit-world-v5'; // v5: decks of 10–15 robots, 5 board slots (v4: new economy)
 const NAME_KEY = 'neon-pit-player';
@@ -39,7 +42,98 @@ function migrate(w: World): World {
   return w;
 }
 
+// ---------- the shared world (logged-in players) ----------
+// Guests play a local world (this browser: pause, fast-forward, their own timeline). A player logged in with
+// email or a wallet plays the one shared world run by the game's server (web/src/world.ts): every move is applied
+// here at once (so the game stays snappy) and sent to the server, which replays it on the shared world; the
+// server's world then replaces the local copy (every 10 s, and after each move).
+
+let mode: 'local' | 'shared' = 'local';
+export const isShared = () => mode === 'shared';
+const WORLD_API = `${typeof location !== 'undefined' && location.origin === PUBLIC_ORIGIN ? '' : PUBLIC_ORIGIN}/api/world`;
+let shared: { token: string; version: number; poll: ReturnType<typeof setInterval> | null; pending: number; startMs: number } | null = null;
+let serverNote: { text: string; at: number } | null = null;
+export const sharedInfo = () => (shared ? { startMs: shared.startMs, version: shared.version } : null);
+export const lastServerNote = () => (serverNote && Date.now() - serverNote.at < 6000 ? serverNote.text : null);
+
+/** Log in to the shared world with the NEAR session's game key and load it. */
+export async function startShared(name: string) {
+  const s = chainSession();
+  if (!s) throw new Error('Not logged in');
+  const kp = KeyPair.fromString(s.gameKey as `ed25519:${string}`);
+  const ts = String(Date.now());
+  const sig = kp.sign(new TextEncoder().encode(`heat-index-world:${s.accountId}:${ts}`)).signature;
+  const res = await fetch(`${WORLD_API}/auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: s.accountId,
+      publicKey: kp.getPublicKey().toString(),
+      ts,
+      signature: btoa(String.fromCharCode(...sig)),
+      name,
+    }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
+  if (!res.ok || !out.token) throw new Error(out.error ?? 'Could not join the shared world');
+  shared = { token: out.token, version: -1, poll: null, pending: 0, startMs: 0 };
+  await pull(true);
+  mode = 'shared';
+  shared.poll = setInterval(() => void pull(false), 10_000);
+  try {
+    localStorage.setItem(NAME_KEY, name);
+  } catch {
+    /* ignore */
+  }
+  notify();
+}
+
+/** Fetch the shared world if it changed (not while our own moves are still on their way). */
+async function pull(force: boolean) {
+  if (!shared || (!force && shared.pending > 0)) return;
+  const res = await fetch(`${WORLD_API}/state?since=${force ? -1 : shared.version}`, { headers: { Authorization: `Bearer ${shared.token}` } });
+  if (res.status === 204) return;
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `World server: ${res.status}`);
+  const out = (await res.json()) as { version: number; startMs: number; world: World };
+  if (!shared || (!force && shared.pending > 0)) return;
+  shared.version = out.version;
+  shared.startMs = out.startMs;
+  world = migrate(out.world);
+  notify(true);
+}
+
+/** Send one of the player's moves to the shared world (playerHooks.op — the engine calls it for every move). */
+function sendOp(name: string, args: unknown[]) {
+  if (!shared) return;
+  shared.pending++;
+  const token = shared.token;
+  void fetch(`${WORLD_API}/op`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name, args }),
+  })
+    .then((r) => r.json())
+    .then((out: { error?: string | null }) => {
+      if (out.error) serverNote = { text: `Shared world: ${out.error}`, at: Date.now() };
+    })
+    .catch(() => (serverNote = { text: 'Shared world: the move did not reach the server', at: Date.now() }))
+    .finally(() => {
+      if (shared) shared.pending--;
+      void pull(true).catch(() => {});
+    });
+}
+playerHooks.op = (name, args) => {
+  if (mode === 'shared') sendOp(name, args);
+};
+
+function leaveShared() {
+  if (shared?.poll) clearInterval(shared.poll);
+  shared = null;
+  mode = 'local';
+}
+
 function save() {
+  if (mode === 'shared') return; // the shared world lives on the server; the local save stays the guest's
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -70,6 +164,7 @@ export function startGame(name: string) {
 }
 
 export function resetGame() {
+  leaveShared();
   if (saveTimer) {
     clearTimeout(saveTimer); // a pending save would write the old world back
     saveTimer = null;
@@ -86,7 +181,8 @@ export function resetGame() {
 }
 
 export function getWorld(): World | null {
-  if (!world && getPlayerName()) world = load();
+  // a logged-in player gets the shared world (startShared), never this browser's guest save
+  if (!world && mode === 'local' && !chainSession() && getPlayerName()) world = load();
   return world;
 }
 

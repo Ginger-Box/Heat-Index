@@ -4,7 +4,7 @@
 
 import { PLAYER_ID, playerHooks, restorePlayerFromChain } from '../engine/world';
 import { model } from '../engine/robots';
-import { act, getWorld } from '../store';
+import { act, getWorld, isShared } from '../store';
 import { chainCall, chainCredits, chainRobots, chainSession, view } from './chain';
 import { PUBLIC_ORIGIN } from './config';
 import { battleLogOf, logText, sha256Hex } from '../engine/replay';
@@ -30,7 +30,7 @@ const clampDur = (d: number) => Math.max(0, Math.min(MAX_DUR, Math.round(d)));
  */
 export async function linkRobots() {
   const s = chainSession();
-  if (!s) return;
+  if (!s || isShared()) return; // the shared world's server restores players from the chain itself
   const tokens = await chainRobots(s.accountId);
   if (getWorld()?.chainAccount !== s.accountId) {
     const [credits, league] = await Promise.all([

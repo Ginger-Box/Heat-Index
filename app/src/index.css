@@ -5377,3 +5377,11 @@ p.tour-swap {
 .phone-stub { max-width: 92vw; margin: 18vh auto 0; text-align: center; zoom: 1; }
 .phone-stub p { font-size: 16px; line-height: 1.5; }
 .period-row { gap: 6px; margin: 4px 0 8px; flex-wrap: wrap; }
+
+.shared-tag { color: var(--green); border-color: var(--green); text-shadow: 0 0 6px #39ff1466; }
+.server-note { color: var(--red, #ff4d6d); border-color: currentColor; }
+
+.bot-tag, .human-tag, .you-tag { margin-left: 6px; font-size: 10px; padding: 0 5px; vertical-align: 1px; }
+.bot-tag { color: var(--muted); border-color: var(--muted); }
+.human-tag { color: var(--cyan); border-color: var(--cyan); }
+.you-tag { color: var(--yellow); border-color: var(--yellow); }

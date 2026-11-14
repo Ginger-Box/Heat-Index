@@ -1,4 +1,4 @@
-import { bindings, defineConfig } from "cf/config";
+import { bindings, defineConfig, exports } from "cf/config";
 
 // The public HEAT INDEX site: the game's static build (public/) plus a small Worker for the email login
 // (src/index.ts, only /api/* reaches it). Secrets RELAYER_KEY and OWNER_SECRET are uploaded with `cf deploy
@@ -13,11 +13,14 @@ export default defineConfig({
     env: {
       // public: Privy app ids are shown to every visitor anyway
       PRIVY_APP_ID: bindings.text("cmwfvxb4s018e0hkzqvudzfpb"),
+      // the shared world for logged-in players (src/world.ts)
+      WORLD: bindings.durableObject({ worker: "heat-index-web", exportName: "SharedWorld" }),
       // battle replays (action logs by SHA-256) — provisioned by `cf deploy`
       BATTLES: bindings.kv(),
       RELAYER_KEY: bindings.secret(),
       OWNER_SECRET: bindings.secret(),
     },
+    exports: { SharedWorld: exports.durableObject({ storage: "sqlite" }) },
     observability: { enabled: true },
   },
 });

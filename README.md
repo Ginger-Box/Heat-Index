@@ -103,6 +103,18 @@ action log's SHA-256 is on-chain with each result and the log is public, so anyo
 replay itself (yet) — it would need the battle engine in Rust — so a forged result is *detectable*, not
 *impossible*; the daily caps bound what it could earn.
 
+## Two worlds
+
+- **Guest** — your own world in this browser: pause it, fast-forward a week, start over. Nothing on-chain.
+- **Logged in (email or NEAR wallet) — the shared world.** One world for every player, run by the game's server
+  (a Cloudflare Durable Object running the same engine, [`web/src/world.ts`](web/src/world.ts)): real time — an NPC
+  match every 10 minutes, a game day is a real day, **a season is 7 real days**, no pause, no fast-forward. The
+  3 brokers, prices, investments (each broker card lists its investors) and the leaderboards are the same for
+  everyone; the **12 bot teams** of the Pit League are marked `BOT`, players `PLAYER`. Joining, the server reads
+  the player's robots, credits and league progress **from the chain**, not from the browser; every move the player
+  makes is replayed on the shared world with their account as the manager, and **a battle only counts if its action
+  log replays** to the reported result. Battles are against the bots for now.
+
 ## Two ways to play
 
 - **Champion** — build a deck of 10–15 robots, fight in the Arena, climb the ELO ladder. Push your robots hard

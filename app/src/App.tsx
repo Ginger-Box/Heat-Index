@@ -14,12 +14,11 @@ import { Brokers } from './screens/Brokers';
 import { Hangar } from './screens/Hangar';
 import { Market } from './screens/Market';
 import { Ratings } from './screens/Ratings';
-import { actBackground, getWorld, resetGame, startGame, useWorld } from './store';
+import { actBackground, getPlayerName, isShared, lastServerNote, resetGame, sharedInfo, startGame, startShared, useWorld } from './store';
 import { chainSession, emailLoginPending, resumeEmailLogin, signOutChain } from './near/chain';
 import { Boot } from './ui/Boot';
 import { tvSound } from './audio';
 import type { World } from './engine/world';
-import { linkRobots } from './near/bridge';
 import { onSoundChange, setSoundEnabled, setSoundVolume, sfx, soundEnabled, soundVolume } from './audio';
 import { Cr, Glitch } from './ui/common';
 import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './ui/icons';
@@ -84,8 +83,7 @@ export default function App() {
     if (!resume.busy) return;
     resumeEmailLogin()
       .then(async (r) => {
-        if (r && !getWorld()) startGame(r.name);
-        if (r) await linkRobots();
+        if (r) joinShared(r.name);
         setResume({ busy: false, error: null });
       })
       .catch((e) => {
@@ -94,8 +92,23 @@ export default function App() {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // logged in with email or a wallet: join the shared world (the server's), not this browser's guest world
+  const [joining, setJoining] = useState<{ busy: boolean; error: string | null }>(() => ({ busy: !!chainSession(), error: null }));
+  const joinShared = (name: string, after?: () => void) => {
+    setJoining({ busy: true, error: null });
+    startShared(name)
+      .then(() => {
+        setJoining({ busy: false, error: null });
+        after?.();
+      })
+      .catch((e) => setJoining({ busy: false, error: e instanceof Error ? e.message : String(e) }));
+  };
   useEffect(() => {
-    if (!w || !live || ff || stage !== 'game') return;
+    if (joining.busy && !resume.busy && !isShared()) joinShared(getPlayerName() ?? '');
+  }, [resume.busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!w || !live || ff || stage !== 'game' || isShared()) return;
     const t = setInterval(() => actBackground((w) => playNpcMatch(w)), LIVE_MS);
     return () => clearInterval(t);
   }, [!!w, live, ff, stage]);
@@ -112,11 +125,26 @@ export default function App() {
         <p className="near-resume">Creating your NEAR account…</p>
       </div>
     );
+  if (joining.busy)
+    return (
+      <div className="panel login">
+        <div className="logo" data-text="HEAT INDEX" style={{ fontSize: 40, marginBottom: 8 }}>
+          HEAT INDEX
+        </div>
+        <p className="near-resume">Joining the shared world…</p>
+      </div>
+    );
   if (!w)
     return (
       <Login
-        error={resume.error}
+        error={resume.error ?? joining.error}
         onEnter={(name) => {
+          // on NEAR (email or wallet): the shared world; a guest: a world of their own in this browser
+          if (chainSession()) {
+            advanceTutorial(readTutorial() === 'done' ? 'done' : 'battle');
+            joinShared(name, () => setStage('boot'));
+            return;
+          }
           startGame(name);
           // a brand-new player always starts with the training battle, even if an older save on this browser
           // had finished it
@@ -193,6 +221,15 @@ export default function App() {
             </b>
           </div>
         </div>
+        {isShared() && (
+          <span
+            className="tag shared-tag"
+            title={`One world for every player on NEAR. Season ${w.season}: ${Math.max(0, Math.ceil(((sharedInfo()?.startMs ?? Date.now()) + w.season * 7 * 86_400_000 - Date.now()) / 86_400_000))} real days left.`}
+          >
+            ● SHARED WORLD
+          </span>
+        )}
+        {lastServerNote() && <span className="tag server-note">{lastServerNote()}</span>}
         {!live && (
           <span className="tag paused-tag" title="The world is paused — open settings to resume">
             PAUSED
@@ -271,7 +308,18 @@ function SettingsMenu({
       </button>
       {open && (
         <div className="settings-pop">
-          <div className="set-row">
+          {isShared() && (
+            <div className="set-row">
+              <div>
+                <b>Shared world</b>
+                <div className="muted">
+                  One world for every player on NEAR: a game day is a real day, a season is 7 days. No pause, no
+                  fast-forward — play as a guest for your own world.
+                </div>
+              </div>
+            </div>
+          )}
+          {!isShared() && <div className="set-row">
             <div>
               <b>Live world</b>
               <div className="muted">NPCs fight and trade in real time.</div>
@@ -287,7 +335,7 @@ function SettingsMenu({
                 </>
               )}
             </button>
-          </div>
+          </div>}
           <div className="set-row">
             <div>
               <b>Sound</b>
@@ -295,7 +343,7 @@ function SettingsMenu({
             </div>
             <VolumeControl />
           </div>
-          <div className="set-row">
+          {!isShared() && <div className="set-row">
             <div>
               <b>Fast-forward a week</b>
               <div className="muted">Watch 7 days of the economy in ~35 s.</div>
@@ -310,7 +358,7 @@ function SettingsMenu({
             >
               <FastForwardIcon /> Play
             </button>
-          </div>
+          </div>}
           <div className="set-row">
             <div>
               <b>Start over</b>

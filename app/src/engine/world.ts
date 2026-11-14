@@ -25,6 +25,7 @@ import { MAX_SAME_MODEL, MODELS, TEAM_MIN, classOf, durFrac, maxDurability, mode
 import { buildTeam, partialTeamError, teamEnergy, teamError } from './team';
 import { DIVISIONS, KING_TITLE, NPC_SETUP, divisionPrize, type LeagueState } from './league';
 import { VET_NAME, VET_WINS_PER_DAY, vetRank, vetStars } from './veteran';
+import { battleLogOf } from './replay';
 
 export const PLAYER_ID = 'player';
 
@@ -37,7 +38,17 @@ export const playerHooks: {
   sell?: (r: OwnedRobot, price: number, brokerId: string) => void;
   repair?: (r: OwnedRobot, cost: number) => void;
   match?: (st: BattleState, opponentId: string, result: 0 | 1 | 2, reward: number) => void;
+  /** shared world (logged-in players): every move of the local player is also sent to the world server as
+   *  (operation, args) — the server replays it on the shared world with the player's account as the manager */
+  op?: (name: string, args: unknown[]) => void;
 } = {};
+const shareOp = (managerId: string, name: string, args: unknown[]) => {
+  if (managerId === PLAYER_ID) playerHooks.op?.(name, args);
+};
+
+/** A live person (the local player, or a logged-in player in the shared world) — they play by the human rules:
+ *  light wear, the Arena purse, the league, daily caps. */
+export const isHuman = (m: Manager) => m.id === PLAYER_ID || !!m.human;
 /** NPC deck cost limit = their league's (Scrap 24 … Apex 42); the player's limit is always 42. */
 export const npcDeckCost = (m: Manager) => DIVISIONS[m.div ?? 0].cap;
 export const HOUSE = 'house'; // the broker's founders
@@ -62,8 +73,16 @@ export interface Manager {
   focus?: RobotClass; // the robot class this NPC plays (the player has none)
   /** second class for the combo teams of the upper leagues (e.g. Armor + Repair) */
   focus2?: RobotClass;
-  /** league division 0…3 (NPCs; the player's is in World.league) */
+  /** league division 0…3 (NPCs; a human's climb is in `league`) */
   div?: number;
+  /** a logged-in player in the shared world (id = their NEAR account) */
+  human?: boolean;
+  /** a human's climb through the Pit League */
+  league?: LeagueState;
+  /** a human's battle rewards + league prizes today (UTC day) — capped like on NEAR */
+  purseDay?: { day: number; amount: number };
+  /** a human's realised trading profit today — capped like on NEAR */
+  gainDay?: { day: number; amount: number };
   credits: number;
   team: string[]; // uid robot uids — the deck that goes into battle (for the player = the active deck from decks)
   /** Player: 5 named decks; a robot can stand in one deck only. activeDeck — the one that goes into battle. */
@@ -385,6 +404,7 @@ export function buy(w: World, managerId: string, brokerId: string, modelId: stri
     r.vet = undefined; // …with a fresh battle record
     playerHooks.buy?.(r, price, b.id);
   }
+  shareOp(managerId, 'buy', [brokerId, modelId]);
   return null;
 }
 
@@ -406,14 +426,15 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     deal = { broker: b, price };
   } else deal = bestBid(w, r);
   if (!deal) return 'Nobody wants to buy this robot';
-  if (m.id === PLAYER_ID) {
+  if (isHuman(m)) {
     // the daily trading-profit cap (the same limit the NEAR contract enforces)
     const gain = Math.max(0, deal.price - (r.paid ?? model(r.modelId).basePrice));
     const day = Math.floor(Date.now() / 86_400_000);
-    const g = w.gainDay?.day === day ? w.gainDay : { day, amount: 0 };
+    const prev = m.gainDay ?? (m.id === PLAYER_ID ? w.gainDay : undefined);
+    const g = prev?.day === day ? prev : { day, amount: 0 };
     if (g.amount + gain > DAILY_GAIN_MAX)
       return `Daily trading profit limit: ${DAILY_GAIN_MAX} CR a day (${g.amount} used) — sell it tomorrow`;
-    w.gainDay = { day, amount: g.amount + gain };
+    m.gainDay = { day, amount: g.amount + gain };
   }
   m.credits += deal.price;
   deal.broker.credits -= deal.price;
@@ -426,6 +447,7 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     playerHooks.sell?.(r, deal.price, deal.broker.id);
     r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
   }
+  shareOp(managerId, 'sell', [uid, brokerId]);
   return null;
 }
 
@@ -453,6 +475,7 @@ export function repair(w: World, managerId: string, uid: string): string | null 
   ledger(w, { kind: 'repair', from: m.id, to: 'burn', uid, amount: q.cost });
   if (m.id === PLAYER_ID) playerHooks.repair?.(r, q.cost);
   if (m.id === PLAYER_ID) log(w, 'player', `You repaired ${model(r.modelId).name} for ${q.cost} CR`);
+  shareOp(managerId, 'repair', [uid]);
   return null;
 }
 
@@ -477,6 +500,7 @@ export function invest(w: World, managerId: string, brokerId: string, amount: nu
     b.closed = false;
     log(w, 'broker', `${b.name} reopened thanks to investors`);
   }
+  shareOp(managerId, 'invest', [brokerId, amount]);
   return null;
 }
 
@@ -510,6 +534,7 @@ export function divest(w: World, managerId: string, brokerId: string, fraction =
   m.credits += amount;
   ledger(w, { kind: 'divest', from: b.id, to: m.id, amount });
   if (m.id === PLAYER_ID) log(w, 'player', `You sold shares of ${b.name} for ${amount} CR`);
+  shareOp(managerId, 'divest', [brokerId, fraction]);
   return null;
 }
 
@@ -536,6 +561,7 @@ export function claimLoaner(w: World, managerId: string): string | null {
   r.loaner = true;
   ledger(w, { kind: 'mint', from: 'arena', to: m.id, uid: r.uid, amount: 0, note: 'loaner' });
   if (m.id === PLAYER_ID) log(w, 'player', `The Arena gave you a loaner robot: ${model(id).name}`);
+  shareOp(managerId, 'claimLoaner', []);
   return null;
 }
 
@@ -549,6 +575,7 @@ export function recycle(w: World, managerId: string, uid: string): string | null
   m.team = m.team.filter((x) => x !== uid);
   syncDecks(w, m);
   if (managerId === PLAYER_ID) log(w, 'player', `You recycled ${model(r.modelId).name}`);
+  shareOp(managerId, 'recycle', [uid]);
   return null;
 }
 
@@ -588,12 +615,12 @@ export interface ChainPlayer {
  * around (NPC teams, brokers, prices) is this browser's own simulation. A world already tied to this account only
  * links its robots to their tokens.
  */
-export function restorePlayerFromChain(w: World, accountId: string, chain: ChainPlayer) {
-  const me = getManager(w, PLAYER_ID);
-  for (const r of robotsOf(w, PLAYER_ID)) if (!r.loaner) delete w.robots[r.uid];
+export function restorePlayerFromChain(w: World, accountId: string, chain: ChainPlayer, managerId = PLAYER_ID) {
+  const me = getManager(w, managerId);
+  for (const r of robotsOf(w, managerId)) if (!r.loaner) delete w.robots[r.uid];
   for (const t of chain.robots) {
     if (!MODELS.some((x) => x.id === t.modelId)) continue;
-    const r = mint(w, t.modelId, PLAYER_ID);
+    const r = mint(w, t.modelId, managerId);
     r.durability = Math.max(0, Math.min(t.durability, maxDurability(t.modelId)));
     r.chainId = t.tokenId;
     if (t.battles) r.vet = { b: t.battles, w: t.wins ?? 0 };
@@ -601,19 +628,33 @@ export function restorePlayerFromChain(w: World, accountId: string, chain: Chain
   me.credits = chain.credits;
   if (chain.league) {
     const byName = (n: string) => w.managers.find((m) => m.name === n)?.id;
-    w.league = {
+    me.league = {
       div: Math.max(0, Math.min(DIVISIONS.length - 1, chain.league.div)),
       beaten: chain.league.beaten.map(byName).filter((x): x is string => !!x),
       crowns: chain.league.crowns,
     };
   }
   // a fresh battle deck from the restored robots (the strongest that fit the limit), the other teams empty
-  const team = buildTeam(robotsOf(w, PLAYER_ID), (r) => model(r.modelId).cost * 10 + durFrac(r));
+  const team = buildTeam(robotsOf(w, managerId), (r) => model(r.modelId).cost * 10 + durFrac(r));
   me.team = team ? team.map((r) => r.uid) : [];
   me.decks = undefined;
   ensureDecks(me);
-  w.chainAccount = accountId;
-  log(w, 'player', `Restored from NEAR (${accountId}): ${chain.robots.length} robots, ${chain.credits} CR`);
+  if (managerId === PLAYER_ID) {
+    w.chainAccount = accountId;
+    w.league = me.league;
+    log(w, 'player', `Restored from NEAR (${accountId}): ${chain.robots.length} robots, ${chain.credits} CR`);
+  }
+}
+
+/** Shared world: a logged-in player joins (their robots and credits come from the chain — restorePlayerFromChain). */
+export function addHuman(w: World, accountId: string, name: string): Manager {
+  const existing = w.managers.find((m) => m.id === accountId);
+  if (existing) return existing;
+  const m: Manager = { id: accountId, name, human: true, strategy: 'player', careful: 0.5, credits: 0, team: [], elo: 1000, wins: 0, losses: 0, draws: 0 };
+  w.managers.push(m);
+  ensureDecks(m);
+  log(w, 'season', `${name} joined the Arena`);
+  return m;
 }
 
 /** Which deck a robot stands in (or -1). */
@@ -634,6 +675,7 @@ export function setDeck(w: World, managerId: string, idx: number, uids: string[]
   if (err) return err;
   decks[idx].uids = [...uids];
   if (idx === (m.activeDeck ?? 0)) m.team = [...uids];
+  shareOp(managerId, 'setDeck', [idx, uids]);
   return null;
 }
 
@@ -644,6 +686,7 @@ export function selectDeck(w: World, managerId: string, idx: number): string | n
   if (!decks[idx]) return 'No such deck';
   m.activeDeck = idx;
   m.team = [...decks[idx].uids];
+  shareOp(managerId, 'selectDeck', [idx]);
   return null;
 }
 
@@ -653,6 +696,7 @@ export function renameDeck(w: World, managerId: string, idx: number, name: strin
   const n = name.trim().slice(0, 24);
   if (!n) return 'The name cannot be empty';
   decks[idx].name = n;
+  shareOp(managerId, 'renameDeck', [idx, name]);
   return null;
 }
 
@@ -664,6 +708,7 @@ export function setTeam(w: World, managerId: string, uids: string[]): string | n
   const err = partialTeamError(team);
   if (err) return err;
   m.team = [...uids];
+  shareOp(managerId, 'setTeam', [uids]);
   return null;
 }
 
@@ -709,17 +754,17 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     for (const uid of Object.keys(st.wear)) {
       const r = w.robots[uid];
       if (!r || r.owner !== m.id || !st.wear[uid].fielded) continue;
-      r.durability = Math.max(0, r.durability - wearLoss(st, uid, m.id === PLAYER_ID));
+      r.durability = Math.max(0, r.durability - wearLoss(st, uid, isHuman(m)));
       // veteran record: a win counts for every robot that fought
       const rankBefore = vetRank(r);
       // your robots count at most VET_WINS_PER_DAY wins a day toward the rank (as on NEAR)
       const day = Math.floor(Date.now() / 86_400_000);
       const today = r.vet?.d === day ? (r.vet.t ?? 0) : 0;
-      const counts = res === 1 && (m.id !== PLAYER_ID || today < VET_WINS_PER_DAY);
+      const counts = res === 1 && (!isHuman(m) || today < VET_WINS_PER_DAY);
       r.vet = {
         b: (r.vet?.b ?? 0) + 1,
         w: (r.vet?.w ?? 0) + (counts ? 1 : 0),
-        ...(m.id === PLAYER_ID ? { d: day, t: today + (counts ? 1 : 0) } : {}),
+        ...(isHuman(m) ? { d: day, t: today + (counts ? 1 : 0) } : {}),
       };
       const rank = vetRank(r);
       if (m.id === PLAYER_ID && rank > rankBefore)
@@ -731,14 +776,14 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
       if (res === 1) ms.wins++;
     }
     let reward: number;
-    if (m.id === PLAYER_ID) {
+    if (isHuman(m)) {
       // the same bounds the NEAR contract applies: ≤ 25% of your working robots' base value, and the daily purse
       const full = playerReward(teamValue[s], teamValue[1 - s], res, sides[1 - s]);
-      const owned = robotsOf(w, PLAYER_ID)
+      const owned = robotsOf(w, m.id)
         .filter((r) => r.durability > 0 && !r.loaner)
         .reduce((x, r) => x + model(r.modelId).basePrice, 0);
-      reward = takePurse(w, Math.min(full, Math.floor(owned * 0.25)));
-      w.lastPlayerReward = { reward, capped: reward < full };
+      reward = takePurse(w, m, Math.min(full, Math.floor(owned * 0.25)));
+      if (m.id === PLAYER_ID) w.lastPlayerReward = { reward, capped: reward < full };
     } else reward = battleReward(teamValue[s], teamValue[1 - s], res, ECON.purseRate);
     m.credits += reward;
     if (m.id === PLAYER_ID) playerHooks.match?.(st, sides[1 - s].id, res === 1 ? 1 : res === 0 ? 0 : 2, reward);
@@ -765,13 +810,14 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     m.team = m.team.filter((u) => (w.robots[u]?.durability ?? 0) > 0);
     syncDecks(w, m);
   }
-  if (a.id === PLAYER_ID || b.id === PLAYER_ID) {
-    const me = a.id === PLAYER_ID ? 0 : 1;
+  if (isHuman(a) || isHuman(b)) {
+    const me = isHuman(a) ? 0 : 1;
     const opp = sides[1 - me];
     const txt = st.winner === null ? 'draw' : st.winner === me ? 'win' : 'loss';
-    log(w, 'match', `Battle vs ${opp.name}: ${txt}`);
-    if (st.winner === me) leagueWin(w, opp);
+    if (sides[me].id === PLAYER_ID) log(w, 'match', `Battle vs ${opp.name}: ${txt}`);
+    if (st.winner === me) leagueWin(w, sides[me], opp);
   }
+  if (a.id === PLAYER_ID) shareOp(PLAYER_ID, 'match', [b.id, battleLogOf(st)]);
 }
 
 // ---------- the Pit League ----------
@@ -786,38 +832,50 @@ export function playerReward(mine: number, theirs: number, res: number, opp: Man
  * same (DAILY_PURSE_MAX), because results are reported by the client. An honest player rarely reaches it.
  */
 export const DAILY_PURSE_MAX = 3000;
-export function purseLeft(w: World): number {
+const purseOf = (w: World, m: Manager) => m.purseDay ?? (m.id === PLAYER_ID ? w.purseDay : undefined);
+export function purseLeft(w: World, managerId = PLAYER_ID): number {
   const day = Math.floor(Date.now() / 86_400_000);
-  return DAILY_PURSE_MAX - (w.purseDay?.day === day ? w.purseDay.amount : 0);
+  const p = purseOf(w, getManager(w, managerId));
+  return DAILY_PURSE_MAX - (p?.day === day ? p.amount : 0);
 }
-function takePurse(w: World, amount: number): number {
+function takePurse(w: World, m: Manager, amount: number): number {
   const day = Math.floor(Date.now() / 86_400_000);
-  const used = w.purseDay?.day === day ? w.purseDay.amount : 0;
+  const p = purseOf(w, m);
+  const used = p?.day === day ? p.amount : 0;
   const pay = Math.max(0, Math.min(amount, DAILY_PURSE_MAX - used));
-  w.purseDay = { day, amount: used + pay };
+  m.purseDay = { day, amount: used + pay };
   return pay;
 }
 
-export const leagueOf = (w: World): LeagueState => (w.league ??= { div: 0, beaten: [], crowns: 0 });
-export const divisionTeams = (w: World, div: number) => w.managers.filter((m) => m.id !== PLAYER_ID && (m.div ?? 0) === div);
+/** A human's league progress (older saves kept the local player's on the world). */
+export function leagueOf(w: World, managerId = PLAYER_ID): LeagueState {
+  const m = getManager(w, managerId);
+  m.league ??= (managerId === PLAYER_ID ? w.league : undefined) ?? { div: 0, beaten: [], crowns: 0 };
+  if (managerId === PLAYER_ID) w.league = m.league;
+  return m.league;
+}
+/** The bot teams of a division (humans climb the league, they don't sit in it). */
+export const divisionTeams = (w: World, div: number) => w.managers.filter((m) => !isHuman(m) && (m.div ?? 0) === div);
 
 /** A win over a team of your division counts toward the climb; beat all of them to move up. */
-function leagueWin(w: World, opp: Manager) {
-  const L = leagueOf(w);
+function leagueWin(w: World, me: Manager, opp: Manager) {
+  const L = leagueOf(w, me.id);
   if ((opp.div ?? 0) !== L.div || L.beaten.includes(opp.id)) return;
   L.beaten.push(opp.id);
   const teams = divisionTeams(w, L.div);
   if (!teams.every((t) => L.beaten.includes(t.id))) return;
   const d = DIVISIONS[L.div];
-  const prize = takePurse(w, divisionPrize(L.div, L.crowns));
-  getManager(w, PLAYER_ID).credits += prize;
-  ledger(w, { kind: 'reward', from: 'arena', to: PLAYER_ID, amount: prize, note: `${d.name} won` });
+  const prize = takePurse(w, me, divisionPrize(L.div, L.crowns));
+  me.credits += prize;
+  ledger(w, { kind: 'reward', from: 'arena', to: me.id, amount: prize, note: `${d.name} won` });
   if (L.div < DIVISIONS.length - 1) {
     L.div++;
-    log(w, 'season', `You won the ${d.name} (+${prize} CR) and move up to the ${DIVISIONS[L.div].name}!`);
+    const who = me.id === PLAYER_ID ? 'You' : me.name;
+    log(w, 'season', `${who} won the ${d.name} (+${prize} CR) and ${me.id === PLAYER_ID ? 'move' : 'moves'} up to the ${DIVISIONS[L.div].name}!`);
   } else {
     L.crowns++;
-    log(w, 'season', `${L.crowns > 1 ? 'Crown defended' : `You beat the whole Apex League: ${KING_TITLE}!`} +${prize} CR.`);
+    const who = me.id === PLAYER_ID ? 'You' : me.name;
+    log(w, 'season', `${L.crowns > 1 ? `${who}: crown defended` : `${who} beat the whole Apex League: ${KING_TITLE}!`} +${prize} CR.`);
   }
   L.beaten = [];
 }
@@ -1306,7 +1364,7 @@ function marketEvent(w: World, r: Rng) {
     }
     case 'riot': {
       for (const m of w.managers) {
-        if (m.id === PLAYER_ID) continue;
+        if (isHuman(m)) continue;
         for (const rb of robotsOf(w, m.id)) rb.durability = Math.max(0, rb.durability - 2);
       }
       log(w, 'broker', `🔥 Riot in the Pit: every NPC team's robots took a beating. Repairs and scrap are in demand.`);
@@ -1332,7 +1390,7 @@ function endHour(w: World) {
     brokerDayEnd(w);
     // league money: NPC teams get their division's daily stipend
     for (const m of w.managers) {
-      if (m.id === PLAYER_ID) continue;
+      if (isHuman(m)) continue;
       // only a team that is short of money gets it (up to 400 CR), so the league doesn't inflate the economy
       const pay = Math.min(DIVISIONS[m.div ?? 0].stipend, Math.max(0, 400 - m.credits));
       if (pay <= 0) continue;
@@ -1355,8 +1413,8 @@ export function findOpponent(pool: Manager[], me: Manager, r: Rng): Manager {
 }
 
 /** The player meets teams of their own division — first the ones not beaten yet on this climb. */
-export function pickOpponentForPlayer(w: World, exclude?: string): Manager {
-  const L = leagueOf(w);
+export function pickOpponentForPlayer(w: World, exclude?: string, managerId = PLAYER_ID): Manager {
+  const L = leagueOf(w, managerId);
   const teams = divisionTeams(w, L.div);
   const fresh = teams.filter((m) => !L.beaten.includes(m.id) && m.id !== exclude);
   const pool = fresh.length ? fresh : teams.filter((m) => m.id !== exclude);
@@ -1365,7 +1423,7 @@ export function pickOpponentForPlayer(w: World, exclude?: string): Manager {
 
 /** One match between two NPC teams. */
 export function playNpcMatch(w: World) {
-  const npcs = w.managers.filter((m) => m.id !== PLAYER_ID);
+  const npcs = w.managers.filter((m) => !isHuman(m));
   // NPCs play inside their league (a Scrap team would never face the Apex)
   const [a, b] = withRng(w, (r) => {
     const a = r.pick(npcs);
@@ -1529,3 +1587,18 @@ export function createWorld(seed: number, playerName = 'You', warmupHours = HOUR
   log(w, 'season', 'Season 1 has begun. The Arena is open.');
   return w;
 }
+
+/**
+ * The shared world (logged-in players, run by the game's server): the same world, without the local player —
+ * humans join with addHuman. Starts after a day of warm-up so prices already have a history.
+ */
+export function createSharedWorld(seed: number): World {
+  const w = createWorld(seed, 'server');
+  for (const r of robotsOf(w, PLAYER_ID)) delete w.robots[r.uid];
+  w.managers = w.managers.filter((m) => m.id !== PLAYER_ID);
+  w.league = undefined;
+  w.events = [];
+  log(w, 'season', 'The shared Arena is open. Season 1 has begun.');
+  return w;
+}
+

@@ -343,6 +343,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   live site. **CI** (`ci.yml`) runs all of it on every push; the failing GitHub Pages workflow is gone.
 - "AI brokers" → "algorithmic brokers": they are rule-based, there is no LLM. Phones get a "open on a computer" stub.
 
+### The shared world (Nov 14)
+- Jury: the "real economy" was single-player — brokers, NPC teams and prices lived in each browser. Now logged-in
+  players share one world on a Durable Object (`web/src/world.ts`) running the game's engine: real-time clock (an NPC
+  match every 10 min → a game day = a real day, a 7-day season), the 12 bot teams, the brokers, prices, investments
+  and leaderboards are common. Guests keep the local world with pause and fast-forward.
+- Engine: humans are no longer one hard-coded "player" — `isHuman(m)`, and the league, the daily purse, the trading
+  profit cap live on each manager; `addHuman`, `createSharedWorld`; every move of the local player is also emitted
+  as (operation, args) (`playerHooks.op`).
+- Server: login = a signature by a key of the NEAR account (checked against the chain) → a session token; joining
+  restores the player from the chain; moves are replayed on the shared world; a battle must replay from its log
+  (deck owned, durability and veteran records as on the server, every move legal), one per 30 s. Clients get the
+  world with their manager under the local id, every 10 s and after each move. Checked with `bot-bravo` over HTTP:
+  joined with its 20 robots / 819 CR from the chain, a battle replayed and counted, the leaderboard shows 12 BOTs.
+- Ratings mark BOT / PLAYER / YOU; brokers list their investors; a "● SHARED WORLD" tag with the days left.
+
 ## Next
 - Card art.
 - README for judges, demo video.

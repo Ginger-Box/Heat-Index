@@ -1,17 +1,25 @@
-import { PLAYER_ID, STRATEGY_LABEL, netWorth, type World } from '../engine/world';
+import { PLAYER_ID, STRATEGY_LABEL, isHuman, netWorth, type Manager, type World } from '../engine/world';
 import { ClassTag, Cr, Glitch } from '../ui/common';
 
 export function Ratings({ w }: { w: World }) {
   const champs = [...w.managers].sort((a, b) => b.elo - a.elo);
   const mags = w.managers.map((m) => ({ m, worth: netWorth(w, m) })).sort((a, b) => b.worth - a.worth);
   const hl = (id: string) => (id === PLAYER_ID ? { background: '#22e3ff18', fontWeight: 700 } : undefined);
+  /** bots are marked; people are shown by name (you, or another player's NEAR account) */
+  const who = (m: Manager) => (
+    <>
+      {m.name}
+      {m.id === PLAYER_ID ? <span className="tag you-tag">YOU</span> : isHuman(m) ? <span className="tag human-tag" title={m.id}>PLAYER</span> : <span className="tag bot-tag" title="A bot team (algorithmic)">BOT</span>}
+    </>
+  );
   return (
     <div className="grid">
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))' }}>
         <div className="panel">
           <h2>⚔️ Champions</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            ELO rating from battles. The top 3 at season end get 300 / 200 / 100 CR.
+            ELO rating from battles. The top 3 at season end get 300 / 200 / 100 CR. {w.managers.filter((m) => !isHuman(m)).length} bot
+            teams, {w.managers.filter(isHuman).length} {w.managers.filter(isHuman).length === 1 ? 'player' : 'players'}.
           </p>
           <table>
             <thead>
@@ -27,7 +35,7 @@ export function Ratings({ w }: { w: World }) {
                 <tr key={m.id} style={hl(m.id)}>
                   <td>{i + 1}</td>
                   <td title={STRATEGY_LABEL[m.strategy]}>
-                    {m.name} {m.focus && <ClassTag cls={m.focus} />}
+                    {who(m)} {m.focus && <ClassTag cls={m.focus} />}
                   </td>
                   <td>
                     <Glitch text={m.elo} />
@@ -58,7 +66,7 @@ export function Ratings({ w }: { w: World }) {
               {mags.map(({ m, worth }, i) => (
                 <tr key={m.id} style={hl(m.id)}>
                   <td>{i + 1}</td>
-                  <td>{m.name}</td>
+                  <td>{who(m)}</td>
                   <td>
                     <Cr v={worth} />
                   </td>
