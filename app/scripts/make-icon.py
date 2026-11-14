@@ -1,31 +1,33 @@
-# Draws the site icon: a pixel robot head in the game's neon palette (SVG + PNGs, no dependencies).
+# Draws the site icon: the brand's pixel "H" in the game's neon palette (SVG + PNGs, no dependencies).
 # Run: python3 scripts/make-icon.py  → public/favicon.svg, favicon-32.png, apple-touch-icon.png
 import struct, zlib, os
 
+# the brand mark: a heavy pixel "H" like the HEAT INDEX logo — magenta with a cyan chromatic offset, the crossbar
+# glowing hot (yellow → orange), a few heat sparks above
 ART = [
     "................",
-    ".......YY.......",
-    "........m.......",
-    "...MMMMMMMMMM...",
-    "..MddddddddddM..",
-    ".mMdCCCddCCCdMm.",
-    ".mMdCwCddCwCdMm.",
-    "..MdCCCddCCCdM..",
-    "..MddddddddddM..",
-    "..MdyyyyyyyydM..",
-    "..MddddddddddM..",
-    "...MMMMMMMMMM...",
-    ".....mM..Mm.....",
-    "...cccccccccc...",
-    "..cc........cc..",
+    "................",
+    "..MMMM....MMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMMooooMMMM..",
+    ".cMMMMYYYYMMMM..",
+    ".cMMMMooooMMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMM...cMMMM..",
+    ".cMMMM...cMMMM..",
+    ".ccccc...ccccc..",
+    "................",
     "................",
 ]
 PAL = {
-    'M': (255, 42, 138), 'm': (170, 20, 92),   # magenta shell / shade
-    'd': (20, 14, 34),                          # dark face
-    'C': (0, 240, 255), 'w': (220, 255, 255),   # cyan visor eyes + glint
-    'y': (255, 230, 0), 'Y': (255, 230, 0),     # heat bar, antenna tip
-    'c': (0, 160, 190),                         # shoulders
+    'M': (255, 42, 138),   # magenta
+    'c': (0, 240, 255),    # cyan offset (the logo's chromatic split)
+    'Y': (255, 230, 0),    # hot core of the crossbar
+    'o': (255, 120, 40),   # orange glow
+    'y': (255, 230, 0),    # sparks
 }
 BG = (7, 6, 12)
 N = 16
@@ -37,8 +39,9 @@ def svg():
             if ch in PAL:
                 r, g, b = PAL[ch]
                 px.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="#{r:02x}{g:02x}{b:02x}"/>')
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 18 18" shape-rendering="crispEdges">'
-            '<rect x="-1" y="-1" width="18" height="18" rx="3" fill="#07060c"/>' + ''.join(px) + '</svg>\n')
+    # a full square, no rounded corners and no transparency (tabs showed light corners through them)
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">'
+            '<rect width="16" height="16" fill="#07060c"/>' + ''.join(px) + '</svg>\n')
 
 def png(size, pad):
     cell = (size - 2 * pad) // N
@@ -60,5 +63,5 @@ def png(size, pad):
 out = os.path.join(os.path.dirname(__file__), '..', 'public')
 open(os.path.join(out, 'favicon.svg'), 'w').write(svg())
 open(os.path.join(out, 'favicon-32.png'), 'wb').write(png(32, 0))
-open(os.path.join(out, 'apple-touch-icon.png'), 'wb').write(png(180, 10))
+open(os.path.join(out, 'apple-touch-icon.png'), 'wb').write(png(180, 2))
 print('icons written')
