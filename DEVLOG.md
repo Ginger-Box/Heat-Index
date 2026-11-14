@@ -482,6 +482,14 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   without `record_battle_for`, and `npm run verify` checks no key has it. New claim: the on-chain TEE signer is the
   one in NEAR AI's public attestation report.
 
+### NEP-245 transfer_call and approvals; player market search (Nov 14)
+- `mt_transfer_call` / `mt_batch_transfer_call` → receiver's `mt_on_transfer`, unused amounts (or all, if the call
+  failed) refunded by `mt_resolve_transfer`; approvals: `mt_approve` (+ `mt_on_approve`), `mt_revoke`,
+  `mt_revoke_all`, `mt_is_approved`, used through the `approval` argument of the transfers and cleared on every change
+  of hands. Credits stay non-transferable. 36 tests; on testnet a transfer_call to an account without a contract
+  refunded the robot (tx 44K5nuZN…).
+- Market → Player market: search (robot, class, seller) and class chips.
+
 ## Next
 - Card art.
 - README for judges, demo video.

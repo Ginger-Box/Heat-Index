@@ -684,6 +684,8 @@ function PlayerMarket({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
   type PKey = 'robot' | 'class' | 'dur' | 'seller' | 'price' | 'broker' | 'deal' | 'new';
   const [sort, setSort] = useState<{ key: PKey; desc: boolean }>({ key: 'new', desc: true });
+  const [q, setQ] = useState('');
+  const [cls, setCls] = useState<RobotClass | 'all'>('all');
   const cheapestAsk = (modelId: string) => {
     const asks = w.brokers.filter((b) => !b.closed && carries(b, modelId)).map((b) => quote(w, b, modelId).ask);
     return asks.length ? Math.min(...asks) : null;
@@ -704,7 +706,16 @@ function PlayerMarket({ w }: { w: World }) {
         deal: ask ? (ask - l.price) / ask : -Infinity,
       };
     })
-    .filter((x): x is NonNullable<typeof x> => !!x);
+    .filter((x): x is NonNullable<typeof x> => !!x)
+    // search: robot, class or seller; and the class chips
+    .filter((x) => {
+      const t = q.trim().toLowerCase();
+      return (
+        (cls === 'all' || x.cls === cls) &&
+        (!t || x.name.toLowerCase().includes(t) || CLASS_LABEL[x.cls].toLowerCase().includes(t) || x.seller.toLowerCase().includes(t))
+      );
+    });
+  const total = w.listings?.length ?? 0;
   const val = (x: (typeof rows)[number]): number | string => {
     switch (sort.key) {
       case 'robot':
@@ -751,8 +762,25 @@ function PlayerMarket({ w }: { w: World }) {
         Robots players listed at their own price — escrowed on NEAR until sold. The seller gets the price minus a {Math.round(MARKET_FEE * 100)}% fee
         (burned). Bot teams shop here too when a listing beats the brokers. List your own from the Hangar (a robot outside your decks → List).
       </p>
-      {rows.length === 0 ? (
+      {total > 0 && (
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <input className="search" style={{ minWidth: 280 }} placeholder="Search robot, class or seller…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="chips">
+            <button data-sfx="toggle" className={`small ${cls === 'all' ? 'primary' : ''}`} onClick={() => setCls('all')}>
+              All classes
+            </button>
+            {CLASSES.map((c) => (
+              <button key={c} data-sfx="toggle" className={`small ${cls === c ? 'primary' : ''}`} onClick={() => setCls(cls === c ? 'all' : c)}>
+                {CLASS_ICON[c]} {CLASS_LABEL[c]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {total === 0 ? (
         <p className="muted">No listings yet — be the first: Hangar → a robot outside your decks → List.</p>
+      ) : rows.length === 0 ? (
+        <p className="muted">Nothing matches the search.</p>
       ) : (
         <table>
           <thead>

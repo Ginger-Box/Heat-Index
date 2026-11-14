@@ -39,7 +39,7 @@ shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bou
 | Registration: 12 starter robots + 1000 CR | **on-chain** | [register tx](https://testnet.nearblocks.io/txns/9LkHUBch9gbU1rBH9TQAz8WzgFVaFnuo8fdkPHmGpgnk) |
 | Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
-| **Only the game server records moves**: trades and battles go through `buy_robot_for` / `sell_robot_for` / `repair_robot_for` / `record_battle_for`, callable only by the contract account (the world server's key is limited to these methods). A battle needs its replay hash, a win needs the robots that fought. A player's browser key can only `register` | **on-chain** (contract v0.9, 34 unit tests incl. both exploits from the review) | [record_battle_for tx](https://testnet.nearblocks.io/txns/DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt) → `npm run verify-battle DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt` ✓ |
+| **Only the game server records moves**: trades and battles go through `buy_robot_for` / `sell_robot_for` / `repair_robot_for` / `record_battle_for`, callable only by the contract account (the world server's key is limited to these methods). A battle needs its replay hash, a win needs the robots that fought. A player's browser key can only `register` | **on-chain** (contract v0.9, 36 unit tests incl. both exploits from the review) | [record_battle_for tx](https://testnet.nearblocks.io/txns/DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt) → `npm run verify-battle DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt` ✓ |
 | Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
 | Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle_for`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
 | **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result; `npm run verify-battle <tx>` replays it with the engine and checks every move's legality, the result and each robot's wear against the record | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
@@ -49,7 +49,7 @@ shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bou
 | **Player-owned market**: players list their robots at their own price (Hangar → *List*); the token is escrowed by the contract until another player — or a bot team, when a listing beats the brokers — buys it. Credits go from buyer to seller (5% fee burned); the price is capped by what a broker could pay at that wear and 2.5× what the seller paid, and the seller's profit counts toward the daily cap, so the market can't move credits between accounts | **on-chain** (`list_robot_for`, `buy_listing_for`, `unlist_robot_for`, `listings`, `listed` / `trade` events) | Market tab → *Player market* |
 | **Online battles are dealt by the chain**: before an online battle the server must open it on-chain (`open_battle_for`); the contract draws the seed from NEAR's randomness (`env::random_seed`) and stores it, and the battle can only be recorded with exactly that seed — the server can't shop for a favourable deal or replay one it likes | **on-chain** (`open_battle_of`, `battle_opened` events) | the `seed` in each online battle's record = the one drawn in its `open_battle_for` tx |
 | Anti-sybil: a robot transferred to another player (`mt_transfer` / `mt_batch_transfer`) gets a purchase basis of 1 CR, so it can't be sold for credits — fresh accounts can't funnel their starters into one | **on-chain** | `paid_for` of a transferred robot = 1 |
-| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 34 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
+| Price bounds: model table, market range, wear cap, minimum repair cost, reward cap, battle rate limit | **on-chain** (`contract/src/lib.rs`, 36 unit tests) | an over-priced sale is rejected: *"Price is above what any broker would pay"* |
 | **The world has its own wallets**: each of the 3 brokers (`broker-<name>`) and the 12 Pit League teams (`npc-<name>` `.heat-index-game.testnet`) is a NEAR account. A team's robots are NEP-245 tokens on its account, and its purchases, sales, repairs and battles (with public replay logs) are recorded there by the world server with the same `*_for` methods as a player's; credits are synced to the world's number hourly | **on-chain** (`adopt_world_wallet`, `world_wallet`, `mt_tokens_for_owner`) | [npc-protocol-omega](https://testnet.nearblocks.io/address/npc-protocol-omega.heat-index-game.testnet) · [broker-magpie](https://testnet.nearblocks.io/address/broker-magpie.heat-index-game.testnet) |
 | **TEE-verified AI decisions** (`npm run verify` also checks that the contract's TEE signer is the address in NEAR AI's public attestation report for the model): each broker records its own LLM decision from its own account (`record_broker_decision`). The contract hashes the model's exact response, recovers the NEAR AI Cloud signature over `<model>:<sha256 request>:<sha256 response>` with `ecrecover` and accepts it only if the signer is the attested TEE key of the model | **on-chain** (`broker_decision`, `tee_signers`, `broker_decision` events) | each broker card in the game links its latest verified decision tx |
 | **Self-custody for email accounts**: Settings → *Own your account* — the browser makes a new key, the player saves it, and one transaction adds it as the account's full-access key and deletes the key the server derives from the email login. From then on only the player controls the account (they sign in with a NEAR wallet) | **on-chain** (the account's access keys) | `/api/privy/custody` in [`web/src/index.ts`](web/src/index.ts) |
@@ -80,8 +80,11 @@ brokers, prices every game hour. **The player's side of it is on NEAR testnet**:
 
 - **Credits** are the multi token `cr`; **every robot** is its own token `robot:<model>:<serial>` (supply 1) with
   its model and durability on-chain. Standard views: `mt_balance_of`, `mt_batch_balance_of`, `mt_supply`,
-  `mt_token`, `mt_tokens_for_owner`, plus `mt_transfer` and `mt_batch_transfer` — a NEP-245 subset: no approvals and
-  no `mt_transfer_call`, and credits can't be transferred (they're earned in the arena).
+  `mt_token`, `mt_tokens_for_owner`, `mt_transfer`, `mt_batch_transfer`, **`mt_transfer_call` / `mt_batch_transfer_call`**
+  (the receiver gets `mt_on_transfer` and anything it doesn't take — or everything, if its call fails — comes back
+  through `mt_resolve_transfer`: [a failed receiver, robot refunded](https://testnet.nearblocks.io/txns/44K5nuZNZcgdzCRNrAeAHGdDCVFPfCAwaCJKCGrnkhxG))
+  and **approvals** (`mt_approve` with optional `mt_on_approve`, `mt_revoke`, `mt_revoke_all`, `mt_is_approved`;
+  cleared when a robot changes hands). Credits can't be transferred or approved — they're earned in the arena.
 - **Every move is a transaction**: buying a robot burns credits and mints a robot token, selling burns the robot and
   mints credits, a repair burns credits and restores durability, a finished battle mints the prize and writes each
   robot's wear. Each emits NEP-245 events (`mt_mint`, `mt_burn`, `mt_transfer`) and a `heat_index` event with the
@@ -217,7 +220,7 @@ Contract (Rust, near-sdk 5):
 
 ```bash
 cd contract
-cargo test                              # 34 unit tests: full loop + every price / reward / wear / abuse limit
+cargo test                              # 36 unit tests: full loop + every price / reward / wear / abuse limit
 cargo near build non-reproducible-wasm  # → target/near/heat_index_contract.wasm
 ```
 
@@ -233,7 +236,7 @@ Tests and checks (CI runs them on every push — `.github/workflows/ci.yml`: con
 lint, type check, engine tests, the production build, `npm run verify`):
 
 ```bash
-cd contract && cargo test   # 34 contract tests (incl. a real NEAR AI TEE signature checked on-chain): every price / reward / wear / abuse limit, server-only moves
+cd contract && cargo test   # 36 contract tests (incl. a real NEAR AI TEE signature checked on-chain): every price / reward / wear / abuse limit, server-only moves
                             # (incl. both exploits from the review), merges, transfers, login links
 cd app && npm test          # 21 engine tests: battle rules, determinism and replays, prices inside the contract's
                             # ranges, the game's constants = the contract's, a simulated week, league, veterans,

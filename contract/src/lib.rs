@@ -13,8 +13,8 @@
 //! favourable deal — and every battle carries the SHA-256 of its public action log, which anyone can replay
 //! (`npm run verify-battle <tx>`). The world's brokers and bot teams have their own accounts here, and the
 //! brokers' AI decisions are accepted only with NEAR AI Cloud's TEE signature (`record_broker_decision`).
-//! NEP-245 subset: balances, tokens, enumeration, `mt_transfer` / `mt_batch_transfer` (no approvals, no
-//! `mt_transfer_call`); credits can't be transferred.
+//! NEP-245: balances, tokens, enumeration, transfers, batch transfers, `mt_transfer_call` (with refunds through
+//! `mt_resolve_transfer`) and approvals; credits can't be transferred.
 
 pub mod battle;
 
@@ -1008,78 +1008,212 @@ impl Contract {
 
     // ---------------- NEP-245 core ----------------
 
-    /// Standard transfer (needs exactly 1 yoctoNEAR, as NEP-245 requires, so it is always a wallet-confirmed action).
-    #[payable]
-    pub fn mt_transfer(
-        &mut self,
-        receiver_id: AccountId,
-        token_id: String,
-        amount: U128,
-        approval: Option<(AccountId, u64)>,
-        memo: Option<String>,
-    ) {
-        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
-        require!(approval.is_none(), "Approvals are not supported");
-        let from = env::predecessor_account_id();
-        require!(from != receiver_id, "Sender and receiver must differ");
-        require!(amount.0 > 0, "Amount must be positive");
-        // credits are earned in the arena, not moved between accounts (stops sybil farms feeding one account)
+    // ---------------- NEP-245 transfers, transfer_call and approvals ----------------
+    //
+    // Credits can't be transferred (they're earned in the arena). A robot can: to another player, to any contract
+    // with `mt_transfer_call` (e.g. a marketplace — it gets `mt_on_transfer` and can hand the token back), or by an
+    // approved account (`mt_approve`). A transferred robot's resale basis becomes 1 CR (anti-sybil: gifts can't be
+    // cashed in at a broker). Approvals are cleared whenever the robot changes hands.
+
+    /// Moves `amount` of `token_id` from its owner to `to`. With `approval`, the caller is an approved account
+    /// acting for `owner` (approval id must match). Returns the previous owner.
+    fn internal_transfer(&mut self, to: &AccountId, token_id: &str, amount: u128, approval: Option<(AccountId, u64)>, to_players_only: bool) -> AccountId {
+        require!(amount > 0, "Amount must be positive");
         require!(token_id != CREDITS, "Credits can't be transferred");
-        require!(self.players.get(&receiver_id).is_some(), "The receiver must be a registered player");
-        self.sub(&token_id, &from, amount.0);
-        self.add(&token_id, &receiver_id, amount.0);
-        if let Some(mut r) = self.robots.get(&token_id).cloned() {
-            r.owner_id = receiver_id.clone();
-            self.robots.insert(token_id.clone(), r);
-            self.untrack(&from, &token_id);
-            self.track(&receiver_id, &token_id);
-            // anti-sybil: a gifted robot can't be cashed in — its purchase basis becomes 1 CR, so a broker pays at
-            // most GAIN_MAX_PCT of that (fresh accounts can't funnel their starter robots into one account for credits)
-            self.paid.insert(token_id.clone(), 1);
+        let caller = env::predecessor_account_id();
+        let from = match approval {
+            Some((owner, id)) => {
+                let a = self.approvals_of(token_id);
+                require!(a["owner"].as_str() == Some(owner.as_str()), "Approval from another owner");
+                require!(a["approvals"][caller.as_str()].as_u64() == Some(id), "Not approved (or a stale approval id)");
+                owner
+            }
+            None => caller,
+        };
+        require!(&from != to, "Sender and receiver must differ");
+        if to_players_only {
+            require!(self.players.get(to).is_some(), "The receiver must be a registered player");
         }
-        event(
-            "nep245",
-            "1.0.0",
-            "mt_transfer",
-            json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo.as_deref().map(short) }]),
-        );
+        self.sub(token_id, &from, amount);
+        self.add(token_id, to, amount);
+        if let Some(mut r) = self.robots.get(token_id).cloned() {
+            r.owner_id = to.clone();
+            self.robots.insert(token_id.to_string(), r);
+            self.untrack(&from, token_id);
+            self.track(to, token_id);
+            self.paid.insert(token_id.to_string(), 1);
+        }
+        env::storage_remove(format!("appr:{token_id}").as_bytes());
+        from
+    }
+
+    fn approvals_of(&self, token_id: &str) -> serde_json::Value {
+        env::storage_read(format!("appr:{token_id}").as_bytes())
+            .and_then(|v| serde_json::from_slice(&v).ok())
+            .unwrap_or_else(|| json!({ "owner": null, "approvals": {}, "next": 0 }))
+    }
+
+    /// Standard transfer (exactly 1 yoctoNEAR, as NEP-245 requires). `approval`: (owner, approval id) when an
+    /// approved account moves the owner's robot.
+    #[payable]
+    pub fn mt_transfer(&mut self, receiver_id: AccountId, token_id: String, amount: U128, approval: Option<(AccountId, u64)>, memo: Option<String>) {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
+        let from = self.internal_transfer(&receiver_id, &token_id, amount.0, approval, true);
+        event("nep245", "1.0.0", "mt_transfer", json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo.as_deref().map(short) }]));
     }
 
     /// NEP-245 batch transfer: the same rules as `mt_transfer`, for several tokens at once (1 yoctoNEAR).
     #[payable]
-    pub fn mt_batch_transfer(
-        &mut self,
-        receiver_id: AccountId,
-        token_ids: Vec<String>,
-        amounts: Vec<U128>,
-        approvals: Option<Vec<Option<(AccountId, u64)>>>,
-        memo: Option<String>,
-    ) {
+    pub fn mt_batch_transfer(&mut self, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>, approvals: Option<Vec<Option<(AccountId, u64)>>>, memo: Option<String>) {
         require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
-        require!(approvals.is_none(), "Approvals are not supported");
         require!(token_ids.len() == amounts.len() && !token_ids.is_empty() && token_ids.len() <= 50, "Bad batch");
-        let from = env::predecessor_account_id();
-        require!(from != receiver_id, "Sender and receiver must differ");
-        require!(self.players.get(&receiver_id).is_some(), "The receiver must be a registered player");
-        for (token_id, amount) in token_ids.iter().zip(amounts.iter()) {
-            require!(amount.0 > 0, "Amount must be positive");
-            require!(token_id != CREDITS, "Credits can't be transferred");
-            self.sub(token_id, &from, amount.0);
-            self.add(token_id, &receiver_id, amount.0);
-            if let Some(mut r) = self.robots.get(token_id).cloned() {
-                r.owner_id = receiver_id.clone();
-                self.robots.insert(token_id.clone(), r);
-                self.untrack(&from, token_id);
-                self.track(&receiver_id, token_id);
-                self.paid.insert(token_id.clone(), 1);
-            }
+        let approvals = approvals.unwrap_or_else(|| vec![None; token_ids.len()]);
+        require!(approvals.len() == token_ids.len(), "Bad approvals");
+        let mut olds = vec![];
+        for ((t, a), ap) in token_ids.iter().zip(amounts.iter()).zip(approvals.into_iter()) {
+            olds.push(self.internal_transfer(&receiver_id, t, a.0, ap, true));
         }
-        event(
-            "nep245",
-            "1.0.0",
-            "mt_transfer",
-            json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": token_ids, "amounts": amounts, "memo": memo.as_deref().map(short) }]),
-        );
+        event("nep245", "1.0.0", "mt_transfer", json!([{ "old_owner_id": olds[0], "new_owner_id": receiver_id, "token_ids": token_ids, "amounts": amounts, "memo": memo.as_deref().map(short) }]));
+    }
+
+    /// NEP-245 transfer and call: the robot goes to `receiver_id` (any account, e.g. a marketplace contract), which is
+    /// then asked `mt_on_transfer(sender_id, previous_owner_ids, token_ids, amounts, msg)` and returns how much it
+    /// didn't take; `mt_resolve_transfer` gives that back (or everything, if the call failed).
+    #[payable]
+    pub fn mt_transfer_call(&mut self, receiver_id: AccountId, token_id: String, amount: U128, approval: Option<(AccountId, u64)>, memo: Option<String>, msg: String) -> Promise {
+        self.mt_batch_transfer_call(receiver_id, vec![token_id], vec![amount], approval.map(|a| vec![Some(a)]), memo, msg)
+    }
+
+    #[payable]
+    pub fn mt_batch_transfer_call(&mut self, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>, approvals: Option<Vec<Option<(AccountId, u64)>>>, memo: Option<String>, msg: String) -> Promise {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
+        require!(token_ids.len() == amounts.len() && !token_ids.is_empty() && token_ids.len() <= 20, "Bad batch");
+        require!(env::prepaid_gas().as_tgas() >= 60, "Attach at least 60 Tgas");
+        let approvals = approvals.unwrap_or_else(|| vec![None; token_ids.len()]);
+        require!(approvals.len() == token_ids.len(), "Bad approvals");
+        let sender = env::predecessor_account_id();
+        let mut olds: Vec<AccountId> = vec![];
+        for ((t, a), ap) in token_ids.iter().zip(amounts.iter()).zip(approvals.into_iter()) {
+            olds.push(self.internal_transfer(&receiver_id, t, a.0, ap, false));
+        }
+        event("nep245", "1.0.0", "mt_transfer", json!([{ "old_owner_id": olds[0], "new_owner_id": receiver_id, "token_ids": token_ids, "amounts": amounts, "memo": memo.as_deref().map(short) }]));
+        Promise::new(receiver_id.clone())
+            .function_call(
+                "mt_on_transfer".to_string(),
+                json!({ "sender_id": sender, "previous_owner_ids": olds, "token_ids": token_ids, "amounts": amounts, "msg": msg }).to_string().into_bytes(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(25),
+            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "mt_resolve_transfer".to_string(),
+                json!({ "previous_owner_ids": olds, "receiver_id": receiver_id, "token_ids": token_ids, "amounts": amounts }).to_string().into_bytes(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(15),
+            ))
+    }
+
+    /// Callback of `mt_transfer_call`: returns the amounts the receiver didn't use (all of them if its call failed),
+    /// as long as the receiver still holds them. Returns the amounts that stayed with the receiver.
+    #[private]
+    pub fn mt_resolve_transfer(&mut self, previous_owner_ids: Vec<AccountId>, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>) -> Vec<U128> {
+        let unused: Vec<u128> = match env::promise_result_checked(0, 2_000) {
+            Ok(bytes) => serde_json::from_slice::<Vec<U128>>(&bytes)
+                .ok()
+                .filter(|v| v.len() == amounts.len())
+                .map(|v| v.iter().zip(amounts.iter()).map(|(u, a)| u.0.min(a.0)).collect())
+                .unwrap_or_else(|| amounts.iter().map(|a| a.0).collect()),
+            Err(_) => amounts.iter().map(|a| a.0).collect(),
+        };
+        let mut kept = vec![];
+        for (i, t) in token_ids.iter().enumerate() {
+            let back = unused[i].min(self.balance(t, &receiver_id));
+            if back > 0 {
+                let prev = &previous_owner_ids[i];
+                self.sub(t, &receiver_id, back);
+                self.add(t, prev, back);
+                if let Some(mut r) = self.robots.get(t).cloned() {
+                    r.owner_id = prev.clone();
+                    self.robots.insert(t.clone(), r);
+                    self.untrack(&receiver_id, t);
+                    self.track(prev, t);
+                }
+                event("nep245", "1.0.0", "mt_transfer", json!([{ "old_owner_id": receiver_id, "new_owner_id": prev, "token_ids": [t], "amounts": [U128(back)], "memo": "refund" }]));
+            }
+            kept.push(U128(amounts[i].0 - back));
+        }
+        kept
+    }
+
+    /// NEP-245 approvals: let `account_id` move these robots (owner only, 1 yoctoNEAR or more). With `msg`, the
+    /// approved account is told with `mt_on_approve(token_ids, amounts, owner_id, approval_ids, msg)`.
+    #[payable]
+    pub fn mt_approve(&mut self, token_ids: Vec<String>, amounts: Vec<U128>, account_id: AccountId, msg: Option<String>) -> Option<Promise> {
+        require!(env::attached_deposit() >= NearToken::from_yoctonear(1), "Requires at least 1 yoctoNEAR");
+        require!(token_ids.len() == amounts.len() && !token_ids.is_empty() && token_ids.len() <= 20, "Bad batch");
+        let owner = env::predecessor_account_id();
+        let mut ids = vec![];
+        for (t, a) in token_ids.iter().zip(amounts.iter()) {
+            require!(t != CREDITS, "Credits can't be approved");
+            require!(self.balance(t, &owner) >= a.0 && a.0 > 0, "Not your token");
+            let mut ap = self.approvals_of(t);
+            if ap["owner"].as_str() != Some(owner.as_str()) {
+                ap = json!({ "owner": owner, "approvals": {}, "next": 0 });
+            }
+            let id = ap["next"].as_u64().unwrap_or(0) + 1;
+            ap["next"] = json!(id);
+            ap["approvals"][account_id.as_str()] = json!(id);
+            require!(ap["approvals"].as_object().map(|o| o.len()).unwrap_or(0) <= 10, "At most 10 approvals per robot");
+            env::storage_write(format!("appr:{t}").as_bytes(), ap.to_string().as_bytes());
+            ids.push(id);
+        }
+        event("heat_index", "1.0.0", "mt_approve", json!([{ "owner_id": owner, "account_id": account_id, "token_ids": token_ids, "approval_ids": ids }]));
+        msg.map(|m| {
+            Promise::new(account_id).function_call(
+                "mt_on_approve".to_string(),
+                json!({ "token_ids": token_ids, "amounts": amounts, "owner_id": owner, "approval_ids": ids, "msg": m }).to_string().into_bytes(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(20),
+            )
+        })
+    }
+
+    /// Revoke one account's approval for these robots (owner only, exactly 1 yoctoNEAR).
+    #[payable]
+    pub fn mt_revoke(&mut self, token_ids: Vec<String>, account_id: AccountId) {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
+        let owner = env::predecessor_account_id();
+        for t in &token_ids {
+            let mut ap = self.approvals_of(t);
+            require!(ap["owner"].as_str() == Some(owner.as_str()), "Not your token");
+            if let Some(o) = ap["approvals"].as_object_mut() {
+                o.remove(account_id.as_str());
+            }
+            env::storage_write(format!("appr:{t}").as_bytes(), ap.to_string().as_bytes());
+        }
+    }
+
+    /// Revoke every approval for these robots (owner only, exactly 1 yoctoNEAR).
+    #[payable]
+    pub fn mt_revoke_all(&mut self, token_ids: Vec<String>) {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
+        let owner = env::predecessor_account_id();
+        for t in &token_ids {
+            require!(self.balance(t, &owner) > 0, "Not your token");
+            env::storage_remove(format!("appr:{t}").as_bytes());
+        }
+    }
+
+    /// Whether `approved_account_id` may move these robots (optionally: with exactly these approval ids).
+    pub fn mt_is_approved(&self, token_ids: Vec<String>, approved_account_id: AccountId, amounts: Vec<U128>, approval_ids: Option<Vec<u64>>) -> bool {
+        token_ids.iter().enumerate().all(|(i, t)| {
+            let ap = self.approvals_of(t);
+            let Some(owner) = ap["owner"].as_str() else { return false };
+            let Ok(owner) = owner.parse::<AccountId>() else { return false };
+            let id = ap["approvals"][approved_account_id.as_str()].as_u64();
+            id.is_some()
+                && self.balance(t, &owner) >= amounts.get(i).map(|a| a.0).unwrap_or(1)
+                && approval_ids.as_ref().map(|ids| ids.get(i).copied() == id).unwrap_or(true)
+        })
     }
 
     pub fn mt_balance_of(&self, account_id: AccountId, token_id: String) -> U128 {
@@ -1388,6 +1522,74 @@ mod tests {
         c.list_robot_for(bob.clone(), ids[1].clone(), U128(10));
         c.unlist_robot_for(bob.clone(), ids[1].clone());
         assert_eq!(c.mt_balance_of(bob, ids[1].clone()).0, 1);
+    }
+
+    fn ctx_pay(who: &str) {
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(who.parse().unwrap())
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .prepaid_gas(Gas::from_tgas(200))
+            .build());
+    }
+
+    #[test]
+    fn nep245_approvals_let_an_approved_account_move_a_robot_once() {
+        let (mut c, ids) = setup("alice.testnet");
+        ctx("carol.testnet");
+        c.register();
+        ctx_pay("alice.testnet");
+        c.mt_approve(vec![ids[0].clone()], vec![U128(1)], "market.testnet".parse().unwrap(), None);
+        assert!(c.mt_is_approved(vec![ids[0].clone()], "market.testnet".parse().unwrap(), vec![U128(1)], Some(vec![1])));
+        // the approved account moves it for alice
+        ctx_pay("market.testnet");
+        c.mt_transfer("carol.testnet".parse().unwrap(), ids[0].clone(), U128(1), Some(("alice.testnet".parse().unwrap(), 1)), None);
+        assert_eq!(c.mt_balance_of("carol.testnet".parse().unwrap(), ids[0].clone()).0, 1);
+        // the approval is gone with the change of hands
+        assert!(!c.mt_is_approved(vec![ids[0].clone()], "market.testnet".parse().unwrap(), vec![U128(1)], None));
+        // a stranger without approval can't
+        ctx_pay("mallory.testnet");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.mt_transfer("mallory.testnet".parse().unwrap(), ids[1].clone(), U128(1), Some(("alice.testnet".parse().unwrap(), 1)), None)
+        }));
+        assert!(r.is_err());
+        // credits are never transferable, approved or not
+        ctx_pay("alice.testnet");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.mt_approve(vec![CREDITS.into()], vec![U128(5)], "market.testnet".parse().unwrap(), None)));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn nep245_transfer_call_refunds_what_the_receiver_did_not_take() {
+        let (mut c, ids) = setup("alice.testnet");
+        let alice: AccountId = "alice.testnet".parse().unwrap();
+        let shop: AccountId = "shop.testnet".parse().unwrap();
+        ctx_pay("alice.testnet");
+        let _ = c.mt_transfer_call(shop.clone(), ids[0].clone(), U128(1), None, None, "list".into());
+        assert_eq!(c.mt_balance_of(shop.clone(), ids[0].clone()).0, 1);
+        // the receiver's call failed → the robot goes back
+        testing_env!(
+            VMContextBuilder::new().predecessor_account_id("game.testnet".parse().unwrap()).current_account_id("game.testnet".parse().unwrap()).build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![near_sdk::PromiseResult::Failed]
+        );
+        let kept = c.mt_resolve_transfer(vec![alice.clone()], shop.clone(), vec![ids[0].clone()], vec![U128(1)]);
+        assert_eq!(kept[0].0, 0);
+        assert_eq!(c.mt_balance_of(alice.clone(), ids[0].clone()).0, 1);
+        // the receiver took it (returned 0 unused) → it stays
+        ctx_pay("alice.testnet");
+        let _ = c.mt_transfer_call(shop.clone(), ids[1].clone(), U128(1), None, None, "list".into());
+        testing_env!(
+            VMContextBuilder::new().predecessor_account_id("game.testnet".parse().unwrap()).current_account_id("game.testnet".parse().unwrap()).build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![near_sdk::PromiseResult::Successful(b"[\"0\"]".to_vec())]
+        );
+        let kept = c.mt_resolve_transfer(vec![alice.clone()], shop.clone(), vec![ids[1].clone()], vec![U128(1)]);
+        assert_eq!(kept[0].0, 1);
+        assert_eq!(c.mt_balance_of(shop, ids[1].clone()).0, 1);
     }
 
     #[test]
