@@ -1164,7 +1164,12 @@ function brokerDayEnd(w: World) {
 function snapshot(w: World, rel: Record<string, number>) {
   const price = Object.fromEntries(MODELS.map((x) => [x.id, Math.round(refPrice(w, x.id))]));
   w.history.push({ tick: w.tick, day: dayOf(w), hour: w.hour, rel: { ...rel }, price });
-  if (w.history.length > 400) w.history.splice(0, w.history.length - 400);
+  // the whole history is kept (Analytics shows the last 7 days, or any season): hourly points for the last
+  // 14 days, older days compacted to their last hour — about 1 KB a day, so years fit in the save
+  const cutoff = dayOf(w) - 14;
+  if (w.history.length && w.history[0].day < cutoff && w.history.length > 14 * HOURS_PER_DAY) {
+    w.history = w.history.filter((h, i, all) => h.day >= cutoff || all[i + 1]?.day !== h.day);
+  }
   for (const x of MODELS) {
     const start = w.dayStartPrice[x.id];
     if (!start) continue;

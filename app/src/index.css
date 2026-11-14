@@ -5376,3 +5376,4 @@ p.tour-swap {
 /* phones: a stub asking to open the site on a computer (main.tsx) */
 .phone-stub { max-width: 92vw; margin: 18vh auto 0; text-align: center; zoom: 1; }
 .phone-stub p { font-size: 16px; line-height: 1.5; }
+.period-row { gap: 6px; margin: 4px 0 8px; flex-wrap: wrap; }

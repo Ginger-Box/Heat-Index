@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CLASSES, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
-import type { World } from '../engine/world';
+import { DAYS_PER_SEASON, type World } from '../engine/world';
 import { LINE_COLORS, LineChart } from '../ui/common';
 
 // a fixed colour per class, so a class keeps its colour whatever is shown
@@ -19,7 +19,14 @@ export function Analytics({ w }: { w: World }) {
   const [mode, setMode] = useState<'models' | 'classes'>('models');
   const [hl, setHl] = useState<string | null>(null);
   const [q, setQ] = useState('');
-  const hist = w.history;
+  // which stretch to show: the rolling last 7 days (default), one season, or everything (all is kept)
+  const [period, setPeriod] = useState<'week' | 'all' | number>('week');
+  const seasonOf = (day: number) => Math.floor((day - 1) / DAYS_PER_SEASON) + 1;
+  const seasons = [...new Set(w.history.map((h) => seasonOf(h.day)))];
+  const lastDay = w.history[w.history.length - 1]?.day ?? 1;
+  const hist = w.history.filter((h) =>
+    period === 'all' ? true : period === 'week' ? h.day > lastDay - DAYS_PER_SEASON : seasonOf(h.day) === period,
+  );
   // By default — the 6 models with the biggest swing
   const swing = (id: string) => {
     const xs = hist.map((h) => (metric === 'price' ? h.price[id] / MODELS.find((m) => m.id === id)!.basePrice : h.rel[id]));
@@ -84,13 +91,31 @@ export function Analytics({ w }: { w: World }) {
           </button>
         </div>
       </div>
+      <div className="row period-row">
+        <span className="muted">Period:</span>
+        <button data-sfx="toggle" className={`small ${period === 'week' ? 'primary' : ''}`} onClick={() => setPeriod('week')}>
+          Last 7 days
+        </button>
+        {seasons.map((n) => (
+          <button key={n} data-sfx="toggle" className={`small ${period === n ? 'primary' : ''}`} onClick={() => setPeriod(n)}>
+            Season {n}
+          </button>
+        ))}
+        {seasons.length > 1 && (
+          <button data-sfx="toggle" className={`small ${period === 'all' ? 'primary' : ''}`} onClick={() => setPeriod('all')}>
+            All
+          </button>
+        )}
+      </div>
       <p className="muted" style={{ marginTop: 0 }}>
-        Each point is one game hour. {hint} Hover a line or a name below to highlight it, click the chart to pin.
+        Each point is one game hour (older than two weeks: one per day). {hint} Hover a line or a name below to highlight it, click the chart to pin.
         {mode === 'models' ? ' Pick models below (up to 8).' : ''}
       </p>
       <LineChart
         series={mode === 'classes' ? classSeries : modelSeries}
-        labels={hist.map((h) => `day ${h.day} · ${String(8 + (h.hour % 12)).padStart(2, '0')}:00`)}
+        labels={hist.map(
+          (h) => `S${seasonOf(h.day)} · day ${((h.day - 1) % DAYS_PER_SEASON) + 1} · ${String(8 + (h.hour % 12)).padStart(2, '0')}:00`,
+        )}
         highlight={hl}
       />
       {mode === 'models' && (

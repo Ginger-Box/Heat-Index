@@ -27,9 +27,8 @@ initFx()
 installBridge()
 
 // Phones and small tablets: the arena (drag-to-attack, 5 slots, the market table) needs a computer screen
-const isPhone =
-  window.matchMedia('(max-width: 820px)').matches ||
-  (window.matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820)
+// (a touch screen that is small — a narrow desktop window still gets the game)
+const isPhone = window.matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
