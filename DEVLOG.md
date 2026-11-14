@@ -445,6 +445,20 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   requires the attested TEE address of the model (from NEAR AI's attestation report). Test with a real NEAR AI
   response + signature. `npm run verify` has two new claims (15 wallets, 3 TEE-verified decisions).
 
+### Security pass after the second independent review (Nov 14)
+- Contract v0.9 (code upgrade, no migration): online battles are opened on-chain (`open_battle_for`) and dealt from
+  a seed the contract draws from `env::random_seed`; `record_battle_for` refuses an `online:` battle without its
+  ticket or with another seed. Robots moved by `mt_transfer` / new `mt_batch_transfer` get a 1 CR purchase basis
+  (no sybil funnelling of starters). Header comment rewritten (it still described the old client-reported trust
+  model); `Cargo.toml` version 0.9.0. 32 tests.
+- The world server's key was replaced by one that can also open battles (unlimited allowance); the two older server
+  keys were deleted from the contract account (now: 1 full-access, relayer, world server). Brokers' decision keys
+  rotated (Kessler keeps its first key: its full-access key wasn't saved by an interrupted setup run).
+- Site security headers (`app/public/_headers`): CSP frame-ancestors/base-uri/object-src/form-action,
+  X-Frame-Options, nosniff, referrer and permissions policies, COOP allowing wallet popups.
+- Already fixed from the first review: `record_battle` without a battle, the buy-low/sell-high loop, README drift,
+  lint in CI, public AI decisions; from this one: broker/NPC NEAR accounts and TEE-verified decisions (above).
+
 ## Next
 - Card art.
 - README for judges, demo video.

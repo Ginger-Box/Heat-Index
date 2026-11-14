@@ -1,6 +1,6 @@
 [package]
 name = "heat-index-contract"
-version = "0.1.0"
+version = "0.9.0"
 edition = "2021"
 description = "HEAT INDEX on NEAR: credits and robots as NEP-245 multi tokens, trades and battle results on-chain"
 license = "MIT"

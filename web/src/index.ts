@@ -33,7 +33,7 @@ const GAME_KEY_ALLOWANCE = 120_000_000_000_000_000_000_000n; // 0.12 NEAR, as th
 const SITE_ORIGINS = ['https://heat-index-web.ginger-box.workers.dev', 'http://localhost:3000'];
 
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff' } });
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 

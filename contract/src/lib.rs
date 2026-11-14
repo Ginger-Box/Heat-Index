@@ -7,10 +7,14 @@
 //!   transaction that mints / burns tokens and emits NEP-245 events (`mt_mint`, `mt_burn`, `mt_transfer`)
 //!   plus a `heat_index` event with the game details — so the whole economy can be replayed from the chain.
 //!
-//! Trust model (hackathon version): the market and the battles are simulated in the client, so prices,
-//! rewards and wear are reported by the player's client and only sanity-checked here (bounded rewards,
-//! the robot must belong to the caller, credits can't go negative). The next step is a verifier that
-//! re-runs battles from their seed, so results can't be forged.
+//! Trust model: only the game server records moves (`*_for`, callable by this account alone); every value is
+//! still bounded by the rules kept here (model table, price ranges, wear, rewards, daily caps). Online battles are
+//! dealt from a seed this contract draws from NEAR's randomness (`open_battle_for`) — the server can't pick a
+//! favourable deal — and every battle carries the SHA-256 of its public action log, which anyone can replay
+//! (`npm run verify-battle <tx>`). The world's brokers and bot teams have their own accounts here, and the
+//! brokers' AI decisions are accepted only with NEAR AI Cloud's TEE signature (`record_broker_decision`).
+//! NEP-245 subset: balances, tokens, enumeration, `mt_transfer` / `mt_batch_transfer` (no approvals, no
+//! `mt_transfer_call`); credits can't be transferred.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
@@ -530,7 +534,37 @@ impl Contract {
     pub fn record_battle_for(&mut self, player: AccountId, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: String) {
         self.server_only();
         require!(result != 1 || !wear.is_empty(), "A win must list the robots that fought");
+        // an online battle must have been opened on-chain, and it is recorded with the seed the contract drew
+        let ticket_key = format!("ticket:{player}");
+        if opponent.starts_with("online:") {
+            let t: serde_json::Value = env::storage_read(ticket_key.as_bytes())
+                .and_then(|v| serde_json::from_slice(&v).ok())
+                .unwrap_or_else(|| env::panic_str("This online battle was never opened on-chain"));
+            require!(t["seed"].as_u64() == Some(seed), "The battle wasn't dealt from the seed drawn on-chain");
+            env::storage_remove(ticket_key.as_bytes());
+        }
         self.do_record_battle(player, opponent, result, reward, seed, wear, Some(replay))
+    }
+
+    /// The game server only: open an online battle. The contract draws the deal's seed from NEAR's randomness
+    /// (`env::random_seed`, set by the validators), so the server can't shop for a good deal; the battle must then be
+    /// recorded with exactly this seed. Returns the seed.
+    pub fn open_battle_for(&mut self, player: AccountId, opponent: String) -> u64 {
+        self.server_only();
+        require!(self.players.get(&player).is_some(), "Register first");
+        let r = env::random_seed();
+        let seed = (u32::from_le_bytes([r[0], r[1], r[2], r[3]]) & 0x7fff_ffff) as u64;
+        env::storage_write(
+            format!("ticket:{player}").as_bytes(),
+            json!({ "seed": seed, "opponent": short(&opponent), "at_ms": env::block_timestamp_ms() }).to_string().as_bytes(),
+        );
+        event("heat_index", "1.0.0", "battle_opened", json!([{ "account_id": player, "opponent": short(&opponent), "seed": seed }]));
+        seed
+    }
+
+    /// The open online battle of a player (its on-chain seed), if any.
+    pub fn open_battle_of(&self, account_id: AccountId) -> Option<serde_json::Value> {
+        env::storage_read(format!("ticket:{account_id}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok())
     }
 
     fn server_only(&self) {
@@ -833,12 +867,52 @@ impl Contract {
             self.robots.insert(token_id.clone(), r);
             self.untrack(&from, &token_id);
             self.track(&receiver_id, &token_id);
+            // anti-sybil: a gifted robot can't be cashed in — its purchase basis becomes 1 CR, so a broker pays at
+            // most GAIN_MAX_PCT of that (fresh accounts can't funnel their starter robots into one account for credits)
+            self.paid.insert(token_id.clone(), 1);
         }
         event(
             "nep245",
             "1.0.0",
             "mt_transfer",
             json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo.as_deref().map(short) }]),
+        );
+    }
+
+    /// NEP-245 batch transfer: the same rules as `mt_transfer`, for several tokens at once (1 yoctoNEAR).
+    #[payable]
+    pub fn mt_batch_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        token_ids: Vec<String>,
+        amounts: Vec<U128>,
+        approvals: Option<Vec<Option<(AccountId, u64)>>>,
+        memo: Option<String>,
+    ) {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires exactly 1 yoctoNEAR");
+        require!(approvals.is_none(), "Approvals are not supported");
+        require!(token_ids.len() == amounts.len() && !token_ids.is_empty() && token_ids.len() <= 50, "Bad batch");
+        let from = env::predecessor_account_id();
+        require!(from != receiver_id, "Sender and receiver must differ");
+        require!(self.players.get(&receiver_id).is_some(), "The receiver must be a registered player");
+        for (token_id, amount) in token_ids.iter().zip(amounts.iter()) {
+            require!(amount.0 > 0, "Amount must be positive");
+            require!(token_id != CREDITS, "Credits can't be transferred");
+            self.sub(token_id, &from, amount.0);
+            self.add(token_id, &receiver_id, amount.0);
+            if let Some(mut r) = self.robots.get(token_id).cloned() {
+                r.owner_id = receiver_id.clone();
+                self.robots.insert(token_id.clone(), r);
+                self.untrack(&from, token_id);
+                self.track(&receiver_id, token_id);
+                self.paid.insert(token_id.clone(), 1);
+            }
+        }
+        event(
+            "nep245",
+            "1.0.0",
+            "mt_transfer",
+            json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": token_ids, "amounts": amounts, "memo": memo.as_deref().map(short) }]),
         );
     }
 
@@ -1082,6 +1156,49 @@ mod tests {
         ctx(who);
         let ids = c.register();
         (c, ids)
+    }
+
+    #[test]
+    fn online_battles_use_the_seed_drawn_on_chain() {
+        let (mut c, ids) = setup("alice.testnet");
+        let alice: AccountId = "alice.testnet".parse().unwrap();
+        let hash = "a".repeat(64);
+        ctx("game.testnet");
+        // never opened → refused
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut c2 = Contract::new("game.testnet".parse().unwrap());
+            c2.record_battle_for(alice.clone(), "online:Bob".into(), 0, U128(0), 5, vec![], hash.clone())
+        }));
+        assert!(r.is_err());
+        let seed = c.open_battle_for(alice.clone(), "online:Bob".into());
+        assert_eq!(c.open_battle_of(alice.clone()).unwrap()["seed"].as_u64(), Some(seed));
+        // another seed → refused
+        let wrong = (seed + 1) & 0x7fff_ffff;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.record_battle_for(alice.clone(), "online:Bob".into(), 0, U128(0), wrong, vec![], hash.clone())
+        }));
+        assert!(r.is_err());
+        ctx_at("game.testnet", 60_000);
+        c.record_battle_for(alice.clone(), "online:Bob".into(), 1, U128(10), seed, vec![Wear { token_id: ids[0].clone(), durability: 5 }], hash.clone());
+        assert!(c.open_battle_of(alice).is_none());
+    }
+
+    #[test]
+    fn a_gifted_robot_cannot_be_cashed_in() {
+        let (mut c, _) = setup("bob.testnet");
+        ctx("alice.testnet");
+        let ids = c.register();
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id("alice.testnet".parse().unwrap())
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .build());
+        c.mt_transfer("bob.testnet".parse().unwrap(), ids[0].clone(), U128(1), None, None);
+        assert_eq!(c.paid_for(ids[0].clone()), Some(U128(1)));
+        ctx("game.testnet");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.sell_robot_for("bob.testnet".parse().unwrap(), ids[0].clone(), U128(20), "kessler".into())
+        }));
+        assert!(r.is_err());
     }
 
     #[test]

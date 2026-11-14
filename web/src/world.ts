@@ -522,7 +522,16 @@ export class SharedWorld extends DurableObject<Env> {
     if (err) return json({ error: `Battle deck not ready: ${err}` });
     const opp = pickPvpOpponent(w, undefined, me);
     if (!opp || opp.id === me) return json({ error: 'No opponent available right now' });
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 2 ** 31;
+    // the deal's seed is drawn by the contract from NEAR's randomness (open_battle_for), not by this server; the
+    // battle can only be recorded with that seed
+    let seed: number;
+    try {
+      const out = await this.chainCall('open_battle_for', { player: me, opponent: `online:${opp.name}`.slice(0, 64) });
+      seed = Number(out.value);
+      if (!Number.isFinite(seed)) throw new Error('no seed');
+    } catch (e) {
+      return json({ error: `Couldn't open the battle on NEAR, try again (${e instanceof Error ? e.message.slice(0, 80) : e})` });
+    }
     const st = createBattle(mine, teamOf(w, opp), seed);
     const s: PvpSession = { st, oppId: opp.id, startedAt: Date.now() };
     await this.ctx.storage.put(`pvp:${me}`, s);
