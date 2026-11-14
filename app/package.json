@@ -13,6 +13,7 @@
     "build:web": "vite build --base=/ --outDir ../web/public --emptyOutDir",
     "test": "node --import tsx --test tests/*.test.ts",
     "verify": "tsx scripts/verify.ts",
+    "verify-world": "tsx scripts/verify-world.ts",
     "e2e-signed": "tsx scripts/e2e-signed.ts",
     "verify-battle": "tsx scripts/verify-battle.ts"
   },

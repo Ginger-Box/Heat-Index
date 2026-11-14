@@ -503,6 +503,17 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - `scripts/e2e-signed.ts`: live check with a test account — enrol, signed buy on-chain, under-signed and unsigned
   moves refused.
 
+### The world's journal and hourly commitments (Nov 14)
+- `app/src/engine/journal.ts`: `applyEntry` — the only way the shared world changes on the server (tick, op, join,
+  dev, policy, fallback, aiTx, thinkReset, chainId, adopted, pvp, forfeit); entries that read the date carry it.
+  Deck-only moves stay out (decks are secret); the published snapshot strips players' decks.
+- Relevance now counts only the bot teams' decks (players' decks are secret; players still move relevance through
+  their battles) — found because a replay from the stripped snapshot diverged; the journal test now gives the
+  player a deck and fails without the fix.
+- Server: journal persisted with the world; hourly `commitWorld` → KV `wsnap:N` / `wjournal:N` (public at
+  `/api/world-log/N/{snapshot,journal}`) + contract `commit_world(epoch, state, journal, prev)` (append-only,
+  chained). Contract 38 tests. `npm run verify-world`: hour 3 re-derived from the public record on testnet.
+
 ## Next
 - Card art.
 - README for judges, demo video.

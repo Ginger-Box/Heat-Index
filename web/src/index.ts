@@ -211,6 +211,13 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname.startsWith('/api/battles')) return battles(req, env, url.pathname);
+    // the shared world's hourly snapshots and journals (their SHA-256 are committed on NEAR: commit_world)
+    const wl = url.pathname.match(/^\/api\/world-log\/(\d+)\/(snapshot|journal)$/);
+    if (wl) {
+      const text = await env.BATTLES.get(`${wl[2] === 'snapshot' ? 'wsnap' : 'wjournal'}:${wl[1]}`);
+      if (!text) return new Response('No such epoch', { status: 404, headers: cors(req.headers.get('origin')) });
+      return new Response(text, { headers: { ...cors(req.headers.get('origin')), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' } });
+    }
     if (url.pathname.startsWith('/api/world/')) {
       const origin = req.headers.get('origin');
       const h = { ...cors(origin), 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };

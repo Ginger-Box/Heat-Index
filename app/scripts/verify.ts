@@ -86,7 +86,7 @@ await check('the contract account has one full-access key; its other keys can on
   for (const k of fn) {
     const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
     // no key may record a battle the contract didn't replay (record_battle_for is the old, server-reported path)
-    const allowed = ['create_player_account', 'signed_move', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_verified_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot', 'list_robot_for', 'unlist_robot_for', 'buy_listing_for'];
+    const allowed = ['create_player_account', 'signed_move', 'commit_world', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_verified_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot', 'list_robot_for', 'unlist_robot_for', 'buy_listing_for'];
     ok(p.receiver_id === C && p.method_names.every((m) => allowed.includes(m)), `a function-call key can do more: ${p.method_names}`);
   }
   return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: moves, contract-replayed battles, the market and the world wallets — no unverified battles)`;

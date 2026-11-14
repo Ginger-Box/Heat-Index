@@ -932,6 +932,39 @@ impl Contract {
         );
     }
 
+    // ---------------- the world's hourly commitments ----------------
+
+    /// The game server only: commit hour `epoch` of the shared world — the SHA-256 of the published snapshot
+    /// (/api/world-log/<epoch>/snapshot, players' decks stripped) and of the journal that led to it from the previous
+    /// snapshot. Append-only: epochs go 0, 1, 2… and each names the previous state, so history can't be rewritten.
+    /// Anyone can replay journal N on snapshot N-1 with the game's engine and must get snapshot N
+    /// (`npm run verify-world`).
+    pub fn commit_world(&mut self, epoch: u64, state_sha256: String, journal_sha256: String, prev_sha256: String) {
+        self.server_only();
+        let is_hex = |h: &str| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit());
+        require!(is_hex(&state_sha256) && is_hex(&journal_sha256), "Hashes must be SHA-256 hex");
+        let next: u64 = env::storage_read(b"wc_next").and_then(|v| String::from_utf8(v).ok()).and_then(|x| x.parse().ok()).unwrap_or(0);
+        require!(epoch == next, "Commitments go in order");
+        if epoch > 0 {
+            let prev: serde_json::Value = env::storage_read(format!("wc:{}", epoch - 1).as_bytes()).and_then(|v| serde_json::from_slice(&v).ok()).unwrap();
+            require!(prev["state"].as_str() == Some(prev_sha256.as_str()), "prev_sha256 isn't the last committed state");
+        }
+        let rec = json!({ "state": state_sha256, "journal": journal_sha256, "prev": prev_sha256, "at_ms": env::block_timestamp_ms() });
+        env::storage_write(format!("wc:{epoch}").as_bytes(), rec.to_string().as_bytes());
+        env::storage_write(b"wc_next", (epoch + 1).to_string().as_bytes());
+        event("heat_index", "1.0.0", "world_commit", json!([{ "epoch": epoch, "state": state_sha256, "journal": journal_sha256 }]));
+    }
+
+    /// One hourly commitment of the shared world (or none).
+    pub fn world_commit(&self, epoch: u64) -> Option<serde_json::Value> {
+        env::storage_read(format!("wc:{epoch}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok())
+    }
+
+    /// How many commitments there are (the next epoch).
+    pub fn world_epochs(&self) -> u64 {
+        env::storage_read(b"wc_next").and_then(|v| String::from_utf8(v).ok()).and_then(|x| x.parse().ok()).unwrap_or(0)
+    }
+
     // ---------------- the player market: robots listed by their owners, at their own price ----------------
     //
     // A player (or a bot team) lists a robot at a price they choose: the token goes into escrow (owned by this
@@ -1804,6 +1837,23 @@ mod tests {
         // and without a signature the server can't move a player's assets at all
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.buy_robot_for(alice.clone(), "volt".into(), U128(110), 10, "kessler".into())));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn world_commitments_are_append_only_and_chained() {
+        let (mut c, _) = setup("alice.testnet");
+        ctx("game.testnet");
+        let (h0, h1, j) = ("0".repeat(64), "1".repeat(64), "a".repeat(64));
+        c.commit_world(0, h0.clone(), j.clone(), String::new());
+        // out of order or with another previous state → refused
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.commit_world(2, h1.clone(), j.clone(), h0.clone()))).is_err());
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.commit_world(1, h1.clone(), j.clone(), h1.clone()))).is_err());
+        c.commit_world(1, h1.clone(), j.clone(), h0.clone());
+        assert_eq!(c.world_epochs(), 2);
+        assert_eq!(c.world_commit(1).unwrap()["prev"], h0);
+        // only the server commits
+        ctx("mallory.testnet");
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.commit_world(2, h0.clone(), j.clone(), h1.clone()))).is_err());
     }
 
     #[test]

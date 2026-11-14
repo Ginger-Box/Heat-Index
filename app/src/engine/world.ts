@@ -303,7 +303,9 @@ export const teamOf = (w: World, m: Manager): OwnedRobot[] =>
 
 export function pickCounts(w: World): Record<string, number> {
   const c: Record<string, number> = Object.fromEntries(MODELS.map((x) => [x.id, 0]));
-  for (const m of w.managers) for (const r of teamOf(w, m)) c[r.modelId]++;
+  // the bot teams' decks only: players' battle decks are secret (Online is blind) and stay out of the published,
+  // replayable world — players still move relevance through their battles' results
+  for (const m of w.managers) if (!isHuman(m)) for (const r of teamOf(w, m)) c[r.modelId]++;
   return c;
 }
 

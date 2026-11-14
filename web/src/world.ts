@@ -43,6 +43,7 @@ import {
   type World,
 } from '../../app/src/engine/world';
 import { WORLD_WALLETS, brokerAccount, npcAccount } from '../../app/src/engine/wallets';
+import { DECK_OPS, applyEntry, applyOp, publicWorldText, type JournalEntry } from '../../app/src/engine/journal';
 import { maxDurability, model as robotModel } from '../../app/src/engine/robots';
 import { battleLogOf, logText, replayBattle, sha256Hex, type BattleLog } from '../../app/src/engine/replay';
 import { applyAction, createBattle, type Action, type BattleEvent, type BattleState } from '../../app/src/engine/battle';
@@ -149,6 +150,21 @@ export class SharedWorld extends DurableObject<Env> {
   private lastCreditSync = 0;
   /** the latest world-wallet error (for /public) */
   private walletError = '';
+  /** every change to the world since the last hourly commitment (engine/journal.ts) */
+  private journal: JournalEntry[] = [];
+  private jmeta = { epoch: 0, lastCommitMs: 0, lastStateHash: '' };
+  private commitError = '';
+
+  /** Every change to the world goes through here: applied with the engine's applyEntry and journaled, so anyone
+   *  can replay the hour from the published snapshot (scripts/verify-world.ts). */
+  private apply(e: JournalEntry): string | null {
+    const err = applyEntry(this.w!, e);
+    if (!err) {
+      this.journal.push(e);
+      this.dirty = true;
+    }
+    return err;
+  }
 
   /** load the world (or create it on the very first request) */
   private async world(): Promise<World> {
@@ -175,8 +191,17 @@ export class SharedWorld extends DurableObject<Env> {
       this.dirty = true;
       await this.save();
     }
-    if (this.w) markDevs(this.w);
+    // the journal since the last commitment
+    const jm = await this.ctx.storage.get<{ epoch: number; lastCommitMs: number; lastStateHash: string; chunks: number }>('jmeta');
+    if (jm) {
+      this.jmeta = { epoch: jm.epoch, lastCommitMs: jm.lastCommitMs, lastStateHash: jm.lastStateHash };
+      const parts = await this.ctx.storage.get<string>(Array.from({ length: jm.chunks }, (_, i) => `j${i}`));
+      const text = Array.from({ length: jm.chunks }, (_, i) => parts.get(`j${i}`) ?? '').join('');
+      this.journal = text ? (JSON.parse(text) as JournalEntry[]) : [];
+    }
     if (this.w) this.hookWallets(this.w);
+    // the developer accounts' DEV tag, as a journaled change
+    if (this.w && this.w.managers.some((m) => DEV_ACCOUNTS.includes(m.id) && !m.dev)) this.apply({ t: 'dev', ids: DEV_ACCOUNTS });
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
     return this.w;
   }
@@ -188,6 +213,10 @@ export class SharedWorld extends DurableObject<Env> {
     const chunks = Math.max(1, Math.ceil(text.length / CHUNK));
     const entries: Record<string, unknown> = { meta: { startMs: this.startMs, chunks, version: this.version } };
     for (let i = 0; i < chunks; i++) entries[`w${i}`] = text.slice(i * CHUNK, (i + 1) * CHUNK);
+    const jtext = JSON.stringify(this.journal);
+    const jchunks = Math.max(1, Math.ceil(jtext.length / CHUNK));
+    entries.jmeta = { ...this.jmeta, chunks: jchunks };
+    for (let i = 0; i < jchunks; i++) entries[`j${i}`] = jtext.slice(i * CHUNK, (i + 1) * CHUNK);
     await this.ctx.storage.put(entries);
     this.cache = null; // the public copy (decks stripped) is rebuilt on the next state request
     this.dirty = false;
@@ -197,13 +226,11 @@ export class SharedWorld extends DurableObject<Env> {
   async alarm() {
     const w = await this.world();
     const due = Math.floor((Date.now() - this.startMs) / msPerMatch(w));
-    for (let n = 0; w.tick < due && n < 30; n++) {
-      playNpcMatch(w);
-      this.dirty = true;
-    }
+    for (let n = 0; w.tick < due && n < 30; n++) this.apply({ t: 'tick', now: Date.now() });
     await this.brokerMinds(w);
     await this.sweepPvp(w);
     await this.syncWallets(w);
+    await this.commitWorld(w);
     await this.save();
     await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
   }
@@ -217,6 +244,16 @@ export class SharedWorld extends DurableObject<Env> {
       if (url.pathname.endsWith('/pvp/start')) return await this.pvpStart(req);
       if (url.pathname.endsWith('/pvp/act')) return await this.pvpAct(req);
       if (url.pathname.endsWith('/public')) return await this.publicState();
+      if (url.pathname.endsWith('/commit')) {
+        // demo/debug: commit the world now instead of at the top of the hour (owner token required)
+        const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'commit')}`;
+        if (!ok) return json({ error: 'Forbidden' }, 403);
+        const w = await this.world();
+        this.jmeta.lastCommitMs = 0;
+        await this.commitWorld(w);
+        await this.save();
+        return json({ epoch: this.jmeta.epoch, lastStateHash: this.jmeta.lastStateHash, error: this.commitError || null });
+      }
       if (url.pathname.endsWith('/think')) {
         const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'think')}`;
         return ok ? await this.think() : json({ error: 'Forbidden' }, 403);
@@ -272,44 +309,28 @@ export class SharedWorld extends DurableObject<Env> {
           }
           if (!out) {
             // no key works (no credits, revoked, an outage): the broker trades by its rules until the AI answers
-            fallBackToRules(w, b);
-            this.dirty = true;
+            this.apply({ t: 'fallback', broker: b.id });
             return;
           }
           const text = (out.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
           const p = parsePolicy(b, text);
           if (!p) {
             this.mindError = `unparsable answer: ${text.slice(0, 160)}`;
-            if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) {
-              fallBackToRules(w, b);
-              this.dirty = true;
-            }
+            if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) this.apply({ t: 'fallback', broker: b.id });
           }
           if (p) {
-            applyPolicy(w, b, p, { model: BROKER_MODEL, chatId: out.id });
+            this.apply({ t: 'policy', broker: b.id, p, meta: { model: BROKER_MODEL, chatId: out.id } });
             // …and the broker records it on its own NEAR account; the contract checks NEAR AI's TEE signature
             if (out.id && b.ai) {
-              const ai = b.ai;
               this.recordBrokerDecision(b.id, usedKey, raw, out.id)
-                .then((hash) => {
-                  ai.tx = hash;
-                  ai.verifyError = undefined;
-                  this.dirty = true;
-                })
-                .catch((e) => {
-                  ai.verifyError = (e instanceof Error ? e.message : String(e)).slice(0, 160);
-                  this.dirty = true;
-                });
+                .then((hash) => this.apply({ t: 'aiTx', broker: b.id, tx: hash }))
+                .catch((e) => this.apply({ t: 'aiTx', broker: b.id, err: (e instanceof Error ? e.message : String(e)).slice(0, 160) }));
             }
-            this.dirty = true;
           }
         } catch (e) {
           // the model is unreachable (timeout, network): a fresh policy is kept, a stale one gives way to the rules
           this.mindError = e instanceof Error ? e.message : String(e);
-          if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) {
-            fallBackToRules(w, b);
-            this.dirty = true;
-          }
+          if (!b.ai || w.hour - b.ai.at >= 2 * MIND_EVERY_HOURS) this.apply({ t: 'fallback', broker: b.id });
         }
       }),
     );
@@ -319,7 +340,7 @@ export class SharedWorld extends DurableObject<Env> {
   async think(): Promise<Response> {
     const w = await this.world();
     this.tried.clear();
-    for (const b of w.brokers) if (b.ai) b.ai.at = -Infinity;
+    this.apply({ t: 'thinkReset' });
     await this.brokerMinds(w);
     await this.save();
     return json({
@@ -358,12 +379,13 @@ export class SharedWorld extends DurableObject<Env> {
       const credits = Number(await view<string>('mt_balance_of', { account_id: accountId, token_id: 'cr' }));
       const league = await view<{ div: number; beaten: string[]; crowns: number }>('league_of', { account_id: accountId });
       const nm = String(name || accountId.split('.')[0]).slice(0, 24);
-      addHuman(w, accountId, nm);
-      markDevs(w);
-      restorePlayerFromChain(
-        w,
+      // what the chain said goes into the journal with the join (the verifier doesn't need the chain at that moment)
+      this.apply({
+        t: 'join',
         accountId,
-        {
+        name: nm,
+        devs: DEV_ACCOUNTS,
+        chain: {
           credits,
           league,
           robots: tokens.map((t) => ({
@@ -374,9 +396,7 @@ export class SharedWorld extends DurableObject<Env> {
             wins: t.record?.wins,
           })),
         },
-        accountId,
-      );
-      this.dirty = true;
+      });
       await this.save();
     }
     const exp = Date.now() + TOKEN_TTL_MS;
@@ -430,6 +450,7 @@ export class SharedWorld extends DurableObject<Env> {
       // every broker and bot team is a NEAR account; their robots are tokens there, their moves are recorded there
       worldWallets: WORLD_WALLETS.map((x) => ({ ...x, adopted: !!w.walletsAdopted?.[x.account] })),
       walletQueue: this.walletTasks.length,
+      worldLog: { epoch: this.jmeta.epoch, lastCommitMs: this.jmeta.lastCommitMs, lastStateHash: this.jmeta.lastStateHash, journalNow: this.journal.length, error: this.commitError || undefined },
       walletError: this.walletError || undefined,
       clock: { hour: w.hour, day: Math.floor(w.hour / hoursPerDay(w)) + 1, season: w.season },
     });
@@ -447,63 +468,25 @@ export class SharedWorld extends DurableObject<Env> {
     const before = JSON.stringify(w);
     const ledgerFrom = w.ledger.length;
     const mine0 = new Map(robotsOf(w, me).map((r) => [r.uid, { ...r }]));
-    switch (name) {
-      case 'buy':
-        err = buy(w, me, a[0], a[1]);
-        break;
-      case 'sell':
-        err = sell(w, me, a[0], a[1] ?? undefined);
-        break;
-      case 'repair':
-        err = repair(w, me, a[0]);
-        break;
-      case 'invest':
-        err = invest(w, me, a[0], Number(a[1]));
-        break;
-      case 'divest':
-        err = divest(w, me, a[0], Number(a[1] ?? 1));
-        break;
-      case 'claimLoaner':
-        err = claimLoaner(w, me);
-        break;
-      case 'recycle':
-        err = recycle(w, me, a[0]);
-        break;
-      case 'setDeck':
-        err = setDeck(w, me, Number(a[0]), a[1]);
-        break;
-      case 'selectDeck':
-        err = selectDeck(w, me, Number(a[0]));
-        break;
-      case 'renameDeck':
-        err = renameDeck(w, me, Number(a[0]), String(a[1]));
-        break;
-      case 'setTeam':
-        err = setTeam(w, me, a[0]);
-        break;
-      case 'list':
-        // only a robot that is a token on NEAR can be listed (the contract escrows the token)
-        err = w.robots[String(a[0])]?.chainId ? listRobot(w, me, String(a[0]), Number(a[1])) : "This robot isn't on NEAR yet";
-        break;
-      case 'unlist':
-        err = unlistRobot(w, me, String(a[0]));
-        break;
-      case 'buyListing':
-        err = w.robots[String(a[0])]?.chainId ? buyListing(w, me, String(a[0])) : 'This listing is not on NEAR';
-        break;
-      case 'match':
-        // online (ranked) battles run on the server (pvpStart / pvpAct) — the browser never sees the hidden cards
-        err = a[2] === 'ranked' ? 'Online battles run on the server' : this.match(w, me, String(a[0]), a[1] as BattleLog, 'league');
-        break;
-      default:
-        return json({ error: `Unknown move ${name}` }, 400);
-    }
+    const KNOWN = ['buy', 'sell', 'repair', 'invest', 'divest', 'claimLoaner', 'recycle', 'list', 'unlist', 'buyListing', 'match', ...DECK_OPS];
+    if (!KNOWN.includes(name)) return json({ error: `Unknown move ${name}` }, 400);
+    // checks only the server makes (the chain, the battle's legality), then the move itself as a journal entry
+    if (name === 'list' && !w.robots[String(a[0])]?.chainId) err = "This robot isn't on NEAR yet";
+    else if (name === 'buyListing' && !w.robots[String(a[0])]?.chainId) err = 'This listing is not on NEAR';
+    // online (ranked) battles run on the server (pvpStart / pvpAct) — the browser never sees the hidden cards
+    else if (name === 'match') err = a[2] === 'ranked' ? 'Online battles run on the server' : this.match(w, me, String(a[0]), a[1] as BattleLog, 'league');
+    else err = null;
+    const jl = this.journal.length;
+    if (!err) err = DECK_OPS.includes(name) ? applyOp(w, me, name, a) : this.apply({ t: 'op', me, name, args: a, now: Date.now() });
+    if (!err && name === 'match') this.lastBattle.set(me, Date.now());
     let tx: { label: string; hash?: string } | null = null;
     if (!err) {
       try {
         tx = await this.mirror(w, me, name, a, ledgerFrom, mine0, sig);
       } catch (e) {
         this.w = JSON.parse(before) as World;
+        this.journal.length = Math.min(this.journal.length, jl); // the move didn't happen
+        this.hookWallets(this.w);
         return json({ error: `NEAR refused the move: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`, version: this.version });
       }
       this.dirty = true;
@@ -520,7 +503,7 @@ export class SharedWorld extends DurableObject<Env> {
 
   /** an online battle started and never finished counts as a loss */
   private async forfeit(w: World, me: string, s: PvpSession) {
-    if (w.managers.some((m) => m.id === me)) forfeitRanked(w, me, s.oppId);
+    if (w.managers.some((m) => m.id === me)) this.apply({ t: 'forfeit', me, oppId: s.oppId, now: Date.now() });
     await this.ctx.storage.delete(`pvp:${me}`);
     this.dirty = true;
   }
@@ -606,7 +589,7 @@ export class SharedWorld extends DurableObject<Env> {
       // the battle is over: it counts (ELO, W/D/L, wear, reward) and is recorded on NEAR with its log
       const ledgerFrom = w.ledger.length;
       const mine0 = new Map(robotsOf(w, me).map((r) => [r.uid, { ...r }]));
-      applyMatch(w, me, s.oppId, st, 'ranked');
+      this.apply({ t: 'pvp', me, oppId: s.oppId, log: battleLogOf(st)!, now: Date.now() });
       const reward = w.ledger.slice(ledgerFrom).filter((x) => x.kind === 'reward' && x.to === me && !x.note).reduce((t, x) => t + x.amount, 0);
       let tx: { label: string; hash?: string } | null = null;
       let txError: string | undefined;
@@ -622,6 +605,31 @@ export class SharedWorld extends DurableObject<Env> {
       result = { reward, tx, txError };
     } else await this.ctx.storage.put(`pvp:${me}`, s);
     return json({ steps, result, version: this.version });
+  }
+
+  // ---------- the hourly commitment: snapshot + journal published, their hashes on NEAR ----------
+
+  /** Once an hour: publish the world (players' decks stripped) and the journal that led to it, and commit their
+   *  SHA-256 on-chain (commit_world). The verifier replays journal N on snapshot N-1 and must reach snapshot N. */
+  private async commitWorld(w: World) {
+    if (Date.now() - this.jmeta.lastCommitMs < 3_600_000 || !this.env.SERVER_KEY) return;
+    const n = this.journal.length;
+    const snap = publicWorldText(w);
+    const jtext = JSON.stringify(this.journal.slice(0, n));
+    const [stateHash, journalHash] = await Promise.all([sha256Hex(snap), sha256Hex(jtext)]);
+    const epoch = this.jmeta.epoch;
+    try {
+      await this.env.BATTLES.put(`wsnap:${epoch}`, snap);
+      await this.env.BATTLES.put(`wjournal:${epoch}`, jtext);
+      await this.chainCall('commit_world', { epoch, state_sha256: stateHash, journal_sha256: journalHash, prev_sha256: this.jmeta.lastStateHash });
+      // entries that arrived while this was being written belong to the next hour
+      this.journal = this.journal.slice(n);
+      this.jmeta = { epoch: epoch + 1, lastCommitMs: Date.now(), lastStateHash: stateHash };
+      this.commitError = '';
+      this.dirty = true;
+    } catch (e) {
+      this.commitError = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+    }
   }
 
   // ---------- the world's own wallets: every bot team and broker is a NEAR account ----------
@@ -708,12 +716,11 @@ export class SharedWorld extends DurableObject<Env> {
             robots: robots.map((r) => ({ model_id: r.modelId, durability: Math.max(0, Math.min(maxDurability(r.modelId), r.durability)) })),
           });
           const ids = (out.value as string[]) ?? [];
-          robots.forEach((r, i) => (r.chainId = ids[i]));
-          w.walletsAdopted[x.account] = true;
-          this.dirty = true;
+          robots.forEach((r, i) => this.apply({ t: 'chainId', uid: r.uid, id: ids[i] }));
+          this.apply({ t: 'adopted', account: x.account });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          if (msg.includes('Already registered')) w.walletsAdopted[x.account] = true;
+          if (msg.includes('Already registered')) this.apply({ t: 'adopted', account: x.account });
           this.walletError = `adopt ${x.account}: ${msg.slice(0, 160)}`;
         }
         if (Date.now() - started > 20_000) return;
@@ -751,13 +758,12 @@ export class SharedWorld extends DurableObject<Env> {
         broker: task.broker,
       });
       const r = w.robots[task.uid];
-      if (r) r.chainId = String(out.value);
+      if (r) this.apply({ t: 'chainId', uid: task.uid, id: String(out.value) });
       // sold again before its purchase reached the chain: the token goes now
       if (r && r.owner !== w.managers.find((m) => npcAccount(m.name) === task.account)?.id) {
         await this.chainCall('drop_world_robot', { account: task.account, token_id: String(out.value) }).catch(() => {});
-        r.chainId = undefined;
+        this.apply({ t: 'chainId', uid: task.uid });
       }
-      this.dirty = true;
       return;
     }
     if (task.t === 'sell') {
@@ -863,7 +869,7 @@ export class SharedWorld extends DurableObject<Env> {
       const r = e?.uid ? w.robots[e.uid] : undefined;
       if (!e || !r) return null;
       const out = await relay({ price: String(e.amount), durability: Math.max(1, Math.min(maxDurability(r.modelId), r.durability)) });
-      r.chainId = String(out.value);
+      this.apply({ t: 'chainId', uid: r.uid, id: String(out.value) });
       return { label: `Buy ${robotName(r.modelId)} · ${e.amount} CR (signed by you)`, hash: out.hash };
     }
     if (name === 'list' || name === 'unlist' || name === 'buyListing') {
@@ -947,11 +953,10 @@ export class SharedWorld extends DurableObject<Env> {
       if ((r.dur ?? 0) !== own.durability) return 'Durability does not match';
     }
     if (teamError(log.input.a.map((r) => mine.get(r.uid)!))) return 'Not a legal deck';
-    const { st, error } = replayBattle(log);
+    const { error } = replayBattle(log);
     if (error) return `The battle does not replay: ${error}`;
-    applyMatch(w, me, oppId, st, mode);
-    this.lastBattle.set(me, now);
-    getManager(w, me); // (keeps the manager hot)
-    return null;
+    void now;
+    void mode;
+    return null; // valid: the move itself is applied as a journal entry (engine/journal.ts applyOp 'match')
   }
 }
