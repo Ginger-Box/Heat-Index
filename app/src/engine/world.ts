@@ -510,8 +510,10 @@ export function sell(w: World, managerId: string, uid: string, brokerId?: string
     playerHooks.sell?.(r, deal.price, deal.broker.id);
   }
   if (!isHuman(m)) worldHooks.npcSell?.(m.id, uid, r.chainId, deal.price, deal.broker.id);
+  const token = r.chainId;
   r.chainId = undefined; // the token is burned on-chain; the broker's copy is off-chain stock
-  shareOp(managerId, 'sell', [uid, brokerId]);
+  // (the token id goes along so the player's browser can sign exactly this sale)
+  shareOp(managerId, 'sell', [uid, brokerId ?? deal.broker.id, token ?? null]);
   return null;
 }
 

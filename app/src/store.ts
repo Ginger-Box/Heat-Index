@@ -5,7 +5,8 @@ import { sfx } from './audio';
 import { KeyPair } from 'near-api-js';
 import type { Action, BattleEvent, BattleState } from './engine/battle';
 import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, playerHooks, type World } from './engine/world';
-import { addServerTx, chainSession } from './near/chain';
+import { addServerTx, chainCall, chainSession, view } from './near/chain';
+import { logText, sha256Hex, type BattleLog } from './engine/replay';
 import { PUBLIC_ORIGIN } from './near/config';
 
 const KEY = 'neon-pit-world-v5'; // v5: decks of 10–15 robots, 5 board slots (v4: new economy)
@@ -119,15 +120,91 @@ async function pull(force: boolean) {
   notify(true);
 }
 
-/** Send one of the player's moves to the shared world (playerHooks.op — the engine calls it for every move). */
+// ---------- signed moves: the player's own key authorises every move recorded for them on NEAR ----------
+
+let moveSeq = 0;
+/** Signs a move with this browser's game key (contract: signed_move checks it — the server only relays it). */
+export function signMove(op: Record<string, unknown>): { message: string; signature: string; publicKey: string } | null {
+  const s = chainSession();
+  if (!s) return null;
+  const kp = KeyPair.fromString(s.gameKey as `ed25519:${string}`);
+  const at = Date.now();
+  const message = JSON.stringify({ v: 1, account: s.accountId, nonce: at * 1000 + (moveSeq++ % 1000), at, ...op });
+  const sig = kp.sign(new TextEncoder().encode(message)).signature;
+  return { message, signature: [...sig].map((b) => b.toString(16).padStart(2, '0')).join(''), publicKey: kp.getPublicKey().toString() };
+}
+
+/** This device's key must be enrolled once (it calls `register`, the one method a game key may call). */
+let enrolled: Promise<void> | null = null;
+function ensureEnrolled(): Promise<void> {
+  const s = chainSession();
+  if (!s) return Promise.resolve();
+  enrolled ??= (async () => {
+    const pub = KeyPair.fromString(s.gameKey as `ed25519:${string}`).getPublicKey().toString();
+    const keys = await view<string[]>('signing_keys_of', { account_id: s.accountId }).catch(() => [] as string[]);
+    if (!keys.includes(pub)) await chainCall('Enrol this device for signed moves', 'register', {});
+  })().catch(() => {
+    enrolled = null;
+  });
+  return enrolled;
+}
+
+/** What the player agrees to for a move (bounds the server can't exceed), read from the local world right after it. */
+async function moveOf(name: string, args: unknown[]): Promise<Record<string, unknown> | null> {
+  const w = world;
+  if (!w) return null;
+  const tail = [...w.ledger].reverse();
+  const a = args as string[];
+  switch (name) {
+    case 'buy': {
+      const e = tail.find((x) => x.kind === 'buy' && x.from === 'player');
+      return e ? { op: 'buy', model: a[1], broker: a[0], max_price: String(Math.ceil(e.amount * 1.05) + 1) } : null;
+    }
+    case 'sell': {
+      const e = tail.find((x) => (x.kind === 'sell' || x.kind === 'scrap') && x.to === 'player');
+      return e && a[2] ? { op: 'sell', token: a[2], broker: e.from, min_price: String(Math.floor(e.amount * 0.95)) } : null;
+    }
+    case 'repair': {
+      const e = tail.find((x) => x.kind === 'repair' && x.from === 'player');
+      const r = w.robots[a[0]];
+      return e && r?.chainId ? { op: 'repair', token: r.chainId, max_cost: String(Math.ceil(e.amount * 1.05) + 1) } : null;
+    }
+    case 'list':
+      return w.robots[a[0]]?.chainId ? { op: 'list', token: w.robots[a[0]].chainId, price: String(Math.round(Number(args[1]))) } : null;
+    case 'unlist':
+      return w.robots[a[0]]?.chainId ? { op: 'unlist', token: w.robots[a[0]].chainId } : null;
+    case 'buyListing': {
+      const r = w.robots[a[0]];
+      return r?.chainId ? { op: 'buy_listing', token: r.chainId, max_price: String(r.paid ?? 0) } : null;
+    }
+    case 'match': {
+      if (args[2] === 'ranked') return null;
+      const opp = w.managers.find((m) => m.id === a[0]);
+      return { op: 'battle', log_sha256: await sha256Hex(logText(args[1] as BattleLog)), opponent: opp?.name ?? a[0] };
+    }
+    default:
+      return null;
+  }
+}
+
+/** Send one of the player's moves to the shared world (playerHooks.op — the engine calls it for every move).
+ *  Moves go in order; each chain-recorded one carries the player's signature. */
+let opQueue: Promise<unknown> = Promise.resolve();
 function sendOp(name: string, args: unknown[]) {
   if (!shared) return;
   shared.pending++;
   const token = shared.token;
-  void fetch(`${WORLD_API}/op`, {
+  const move = moveOf(name, args); // read the local world now, before the next move changes it
+  opQueue = opQueue.then(() => sendOne(name, args, token, move));
+}
+async function sendOne(name: string, args: unknown[], token: string, movePromise: Promise<Record<string, unknown> | null>) {
+  const move = await movePromise.catch(() => null);
+  if (move) await ensureEnrolled();
+  const sig = move ? signMove(move) : null;
+  return fetch(`${WORLD_API}/op`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name, args }),
+    body: JSON.stringify({ name, args, sig }),
   })
     .then((r) => r.json())
     .then((out: { error?: string | null; tx?: { label: string; hash?: string } | null }) => {
@@ -158,8 +235,11 @@ async function pvpCall<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok || out.error) throw new Error(out.error ?? `Online battle: ${res.status}`);
   return out;
 }
-export const pvpStart = () =>
-  pvpCall<{ view: BattleState; oppId: string; opp: { name: string; elo: number; human: boolean } }>('start', {});
+export const pvpStart = async () => {
+  // the player consents to the online battle with their signature; the contract then draws the deal's seed
+  await ensureEnrolled();
+  return pvpCall<{ view: BattleState; oppId: string; opp: { name: string; elo: number; human: boolean } }>('start', { sig: signMove({ op: 'open_battle' }) });
+};
 export const pvpAct = (action: Action) =>
   pvpCall<{
     steps: { action: Action; ev: BattleEvent[]; view: BattleState }[];

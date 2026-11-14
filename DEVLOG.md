@@ -490,6 +490,19 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   refunded the robot (tx 44K5nuZN…).
 - Market → Player market: search (robot, class, seller) and class chips.
 
+### Players sign their own moves (Nov 14)
+- Contract: `signed_move(player, message, signature, public_key, …)` — ed25519 (`env::ed25519_verify`) over the exact
+  JSON the browser signed `{v, account, nonce, at, op, …}`; keys enrolled per player (`register` by an already
+  registered account links the key that signed it; new email accounts get their game key at creation); nonce must
+  grow, message ≤ 1 h old; ops buy / sell / repair / list / unlist / buy_listing / battle (log hash) / open_battle,
+  each bounded by what was signed. `*_for` and `open_battle_for` refuse players (world wallets only);
+  `record_verified_battle_for` accepts a player only for an online battle (its ticket was opened by a signed move).
+  37 tests (one signs with ed25519-dalek).
+- Client: `signMove` (game key), `ensureEnrolled`, moves queued in order with their signature; Online start signs
+  `open_battle`. Server: `mirror` relays `signed_move`. New server key (signed_move + world wallets), old one deleted.
+- `scripts/e2e-signed.ts`: live check with a test account — enrol, signed buy on-chain, under-signed and unsigned
+  moves refused.
+
 ## Next
 - Card art.
 - README for judges, demo video.

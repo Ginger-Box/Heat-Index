@@ -66,6 +66,13 @@ interface Env {
   BROKER_KEYS?: string;
 }
 
+/** a player's move as their browser signed it (contract: signed_move) */
+interface SignedMove {
+  message: string;
+  signature: string;
+  publicKey: string;
+}
+
 /** a bot team's or broker's move waiting to be recorded on its NEAR account */
 type WalletTask =
   | { t: 'buy'; account: string; uid: string; modelId: string; durability: number; price: number; broker: string }
@@ -124,7 +131,7 @@ async function hmacHex(secret: string, text: string) {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /** The game developer's own accounts: tagged DEV in the Ratings and left out of the season prizes. */
-const DEV_ACCOUNTS = ['ginger.heat-index-game.testnet'];
+const DEV_ACCOUNTS = ['ginger.heat-index-game.testnet', 'tester.heat-index-game.testnet'];
 function markDevs(w: World) {
   for (const m of w.managers) if (DEV_ACCOUNTS.includes(m.id)) m.dev = true;
 }
@@ -431,7 +438,7 @@ export class SharedWorld extends DurableObject<Env> {
   private async op(req: Request) {
     const me = await this.player(req);
     if (!me) return json({ error: 'Please log in again' }, 401);
-    const { name, args } = (await req.json()) as { name: string; args: unknown[] };
+    const { name, args, sig } = (await req.json()) as { name: string; args: unknown[]; sig?: SignedMove };
     const w = await this.world();
     if (!w.managers.some((m) => m.id === me)) return json({ error: 'Not in the world yet' }, 400);
     const a = args as any[];
@@ -494,7 +501,7 @@ export class SharedWorld extends DurableObject<Env> {
     let tx: { label: string; hash?: string } | null = null;
     if (!err) {
       try {
-        tx = await this.mirror(w, me, name, a, ledgerFrom, mine0);
+        tx = await this.mirror(w, me, name, a, ledgerFrom, mine0, sig);
       } catch (e) {
         this.w = JSON.parse(before) as World;
         return json({ error: `NEAR refused the move: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`, version: this.version });
@@ -540,7 +547,15 @@ export class SharedWorld extends DurableObject<Env> {
     // battle can only be recorded with that seed
     let seed: number;
     try {
-      const out = await this.chainCall('open_battle_for', { player: me, opponent: `online:${opp.name}`.slice(0, 64) });
+      const body = (await req.clone().json().catch(() => ({}))) as { sig?: SignedMove };
+      if (!body.sig) throw new Error('reload the page: online battles are opened with your signature');
+      const out = await this.chainCall('signed_move', {
+        player: me,
+        message: body.sig.message,
+        signature: body.sig.signature,
+        public_key: body.sig.publicKey,
+        opponent: `online:${opp.name}`.slice(0, 64),
+      });
       seed = Number(out.value);
       if (!Number.isFinite(seed)) throw new Error('no seed');
     } catch (e) {
@@ -835,57 +850,45 @@ export class SharedWorld extends DurableObject<Env> {
   }
 
   /** what a move changed for this player → the matching contract call */
-  private async mirror(w: World, me: string, name: string, a: any[], ledgerFrom: number, mine0: Map<string, any>) {
+  private async mirror(w: World, me: string, name: string, a: any[], ledgerFrom: number, mine0: Map<string, any>, sig?: SignedMove) {
     const newLedger = w.ledger.slice(ledgerFrom);
     const robotName = (id: string) => id[0].toUpperCase() + id.slice(1);
+    // the player's own signature authorises every move recorded for them; the server only relays it (and pays gas)
+    const relay = (extra: Record<string, unknown>, gas?: bigint) => {
+      if (!sig) throw new Error('Reload the page: your moves are now signed by your own key');
+      return this.chainCall('signed_move', { player: me, message: sig.message, signature: sig.signature, public_key: sig.publicKey, ...extra }, gas);
+    };
     if (name === 'buy') {
       const e = newLedger.find((x) => x.kind === 'buy' && x.from === me);
       const r = e?.uid ? w.robots[e.uid] : undefined;
       if (!e || !r) return null;
-      const out = await this.chainCall('buy_robot_for', {
-        player: me,
-        model_id: r.modelId,
-        price: String(e.amount),
-        durability: Math.max(1, Math.min(16, r.durability)),
-        broker: e.to,
-      });
+      const out = await relay({ price: String(e.amount), durability: Math.max(1, Math.min(maxDurability(r.modelId), r.durability)) });
       r.chainId = String(out.value);
-      return { label: `Buy ${robotName(r.modelId)} · ${e.amount} CR`, hash: out.hash };
+      return { label: `Buy ${robotName(r.modelId)} · ${e.amount} CR (signed by you)`, hash: out.hash };
     }
     if (name === 'list' || name === 'unlist' || name === 'buyListing') {
       const r = w.robots[String(a[0])];
       if (!r?.chainId) return null;
       const label = robotName(r.modelId);
-      if (name === 'list') {
-        const out = await this.chainCall('list_robot_for', { player: me, token_id: r.chainId, price: String(Math.round(Number(a[1]))) });
-        return { label: `List ${label} · ${Math.round(Number(a[1]))} CR`, hash: out.hash };
-      }
-      if (name === 'unlist') {
-        const out = await this.chainCall('unlist_robot_for', { player: me, token_id: r.chainId });
-        return { label: `Withdraw ${label}`, hash: out.hash };
-      }
-      const out = await this.chainCall('buy_listing_for', { buyer: me, token_id: r.chainId });
-      return { label: `Buy ${label} from a player · ${r.paid} CR`, hash: out.hash };
+      const out = await relay({});
+      if (name === 'list') return { label: `List ${label} · ${Math.round(Number(a[1]))} CR (signed by you)`, hash: out.hash };
+      if (name === 'unlist') return { label: `Withdraw ${label} (signed by you)`, hash: out.hash };
+      return { label: `Buy ${label} from a player · ${r.paid} CR (signed by you)`, hash: out.hash };
     }
     if (name === 'sell') {
       const before = mine0.get(String(a[0]));
       const e = newLedger.find((x) => (x.kind === 'sell' || x.kind === 'scrap') && x.to === me);
       if (!before?.chainId || !e) return null;
-      const out = await this.chainCall('sell_robot_for', { player: me, token_id: before.chainId, price: String(e.amount), broker: e.from });
-      return { label: `Sell ${robotName(before.modelId)} · ${e.amount} CR`, hash: out.hash };
+      const out = await relay({ price: String(e.amount) });
+      return { label: `Sell ${robotName(before.modelId)} · ${e.amount} CR (signed by you)`, hash: out.hash };
     }
     if (name === 'repair') {
       const before = mine0.get(String(a[0]));
       const r = w.robots[String(a[0])];
       const e = newLedger.find((x) => x.kind === 'repair' && x.from === me);
       if (!before?.chainId || !r || !e) return null;
-      const out = await this.chainCall('repair_robot_for', {
-        player: me,
-        token_id: before.chainId,
-        cost: String(e.amount),
-        durability: Math.min(16, r.durability),
-      });
-      return { label: `Repair ${robotName(r.modelId)} · ${e.amount} CR`, hash: out.hash };
+      const out = await relay({ price: String(e.amount), durability: Math.min(maxDurability(r.modelId), r.durability) });
+      return { label: `Repair ${robotName(r.modelId)} · ${e.amount} CR (signed by you)`, hash: out.hash };
     }
     if (name === 'match') {
       const log = a[1] as BattleLog;
@@ -901,9 +904,12 @@ export class SharedWorld extends DurableObject<Env> {
       const result = res === null ? 2 : res === 0 ? 1 : 0;
       // online battles are marked so the contract never counts them toward the league
       const opponent = a[2] === 'ranked' ? `online:${opp?.name ?? String(a[0])}`.slice(0, 64) : (opp?.name ?? String(a[0]));
-      // the contract replays the log itself and decides the result and the wear — the only way a battle is recorded
-      // (the server's key can't call the old, server-reported record_battle_for any more)
-      const out = await this.chainCall('record_verified_battle_for', { player: me, side: 0, opponent, reward: String(reward), log: text }, 300_000_000_000_000n);
+      // the contract replays the log itself and decides the result and the wear. A league battle carries the
+      // player's signature over the log's hash; an online one was opened with the player's signature (its ticket)
+      const out =
+        a[2] === 'ranked'
+          ? await this.chainCall('record_verified_battle_for', { player: me, side: 0, opponent, reward: String(reward), log: text }, 300_000_000_000_000n)
+          : await relay({ log: text, reward: String(reward) }, 300_000_000_000_000n);
       void wear;
       void replay;
       return {

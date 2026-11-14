@@ -362,6 +362,7 @@ impl Contract {
         );
         let key_str = String::from(&owner_key);
         require!(self.owner_keys.get(&key_str).is_none(), "This login already has an account");
+        let game_key_str = String::from(&game_key);
         let hour = env::block_timestamp_ms() / 3_600_000;
         if hour != self.hour_bucket {
             self.hour_bucket = hour;
@@ -385,17 +386,20 @@ impl Contract {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(Gas::from_tgas(30))
-                    .on_player_account(account_id, key_str),
+                    .on_player_account(account_id, key_str, Some(game_key_str)),
             )
     }
 
     /// Callback: if the account was created, remember it for this login and register the player.
     #[private]
-    pub fn on_player_account(&mut self, account_id: AccountId, owner_key: String) -> Option<AccountId> {
+    pub fn on_player_account(&mut self, account_id: AccountId, owner_key: String, game_key: Option<String>) -> Option<AccountId> {
         if !matches!(env::promise_result_checked(0, 64), Ok(_)) {
             return None; // e.g. the name was taken — nothing to undo
         }
         self.owner_keys.insert(owner_key, account_id.clone());
+        if let Some(k) = game_key {
+            self.add_signer_key(&account_id, k);
+        }
         if self.players.get(&account_id).is_none() {
             self.register_account(&account_id);
         }
@@ -478,7 +482,14 @@ impl Contract {
     /// Join the arena: mints the starting credits and the starter robots to the caller (once).
     pub fn register(&mut self) -> Vec<String> {
         let who = env::predecessor_account_id();
-        require!(self.players.get(&who).is_none(), "Already registered");
+        // already registered: this call links the key that signed it as one of the player's move-signing keys
+        // (the browser's game key can only call `register`, so this is how a device enrols for signed moves)
+        let signer = String::from(&env::signer_account_pk());
+        if self.players.get(&who).is_some() {
+            self.add_signer_key(&who, signer);
+            return vec![];
+        }
+        self.add_signer_key(&who, signer);
         let hour = env::block_timestamp_ms() / 3_600_000;
         if hour != self.register_bucket {
             self.register_bucket = hour;
@@ -516,18 +527,21 @@ impl Contract {
     /// The game server only: a purchase at the shared world's broker price.
     pub fn buy_robot_for(&mut self, player: AccountId, model_id: String, price: U128, durability: u32, broker: String) -> String {
         self.server_only();
+        self.world_wallet_only(&player);
         self.do_buy_robot(player, model_id, price, durability, broker)
     }
 
     /// The game server only: a sale at the shared world's broker bid.
     pub fn sell_robot_for(&mut self, player: AccountId, token_id: String, price: U128, broker: String) {
         self.server_only();
+        self.world_wallet_only(&player);
         self.do_sell_robot(player, token_id, price, broker)
     }
 
     /// The game server only: a repair at the shared world's cheapest workshop.
     pub fn repair_robot_for(&mut self, player: AccountId, token_id: String, cost: U128, durability: u32) {
         self.server_only();
+        self.world_wallet_only(&player);
         self.do_repair_robot(player, token_id, cost, durability)
     }
 
@@ -535,6 +549,7 @@ impl Contract {
     /// required, and a win must name the robots that fought.
     pub fn record_battle_for(&mut self, player: AccountId, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: String) {
         self.server_only();
+        self.world_wallet_only(&player);
         require!(result != 1 || !wear.is_empty(), "A win must list the robots that fought");
         self.use_ticket(&player, &opponent, seed);
         self.do_record_battle(player, opponent, result, reward, seed, wear, Some(replay))
@@ -545,6 +560,11 @@ impl Contract {
     /// recorded with exactly this seed. Returns the seed.
     pub fn open_battle_for(&mut self, player: AccountId, opponent: String) -> u64 {
         self.server_only();
+        self.world_wallet_only(&player);
+        self.do_open_battle(player, opponent)
+    }
+
+    fn do_open_battle(&mut self, player: AccountId, opponent: String) -> u64 {
         require!(self.players.get(&player).is_some(), "Register first");
         let r = env::random_seed();
         let seed = (u32::from_le_bytes([r[0], r[1], r[2], r[3]]) & 0x7fff_ffff) as u64;
@@ -580,6 +600,13 @@ impl Contract {
     /// the reward (still capped). The log's SHA-256 is stored as the battle's replay hash.
     pub fn record_verified_battle_for(&mut self, player: AccountId, side: u8, opponent: String, reward: U128, log: String) {
         self.server_only();
+        // a player's battle is either an online one (opened with the player's signature: the ticket) or comes
+        // through signed_move with the log hash the player signed
+        require!(self.is_world_wallet(&player) || opponent.starts_with("online:"), "A player's battle needs the player's signature");
+        self.do_verified_battle(player, side, opponent, reward, log);
+    }
+
+    fn do_verified_battle(&mut self, player: AccountId, side: u8, opponent: String, reward: U128, log: String) {
         require!(side <= 1, "side is 0 or 1");
         require!(log.len() <= 60_000, "Log too big");
         let parsed: battle::BattleLog = serde_json::from_str(&log).unwrap_or_else(|_| env::panic_str("Bad battle log"));
@@ -613,6 +640,133 @@ impl Contract {
         let hash = hex(&env::sha256(log.as_bytes()));
         event("heat_index", "1.0.0", "battle_verified", json!([{ "account_id": player, "side": side, "result": result, "replay": hash, "actions": parsed.actions.len() }]));
         self.do_record_battle(player, opponent, result, reward, seed, wear, Some(hash));
+    }
+
+    fn is_world_wallet(&self, a: &AccountId) -> bool {
+        env::storage_has_key(format!("ww:{a}").as_bytes())
+    }
+    /// The server-relayed `*_for` methods move only the world's own wallets (bot teams); a player's moves need the
+    /// player's signature (`signed_move`).
+    fn world_wallet_only(&self, a: &AccountId) {
+        require!(self.is_world_wallet(a), "A player's move needs the player's signature (signed_move)");
+    }
+
+    fn signer_keys(&self, a: &AccountId) -> Vec<String> {
+        env::storage_read(format!("sk:{a}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok()).unwrap_or_default()
+    }
+    fn add_signer_key(&mut self, a: &AccountId, key: String) {
+        let mut ks = self.signer_keys(a);
+        if ks.contains(&key) {
+            return;
+        }
+        ks.push(key);
+        if ks.len() > 10 {
+            ks.remove(0); // the oldest device drops out
+        }
+        env::storage_write(format!("sk:{a}").as_bytes(), json!(ks).to_string().as_bytes());
+    }
+
+    /// The keys that may sign a player's moves (their devices' game keys, enrolled through `register`).
+    pub fn signing_keys_of(&self, account_id: AccountId) -> Vec<String> {
+        self.signer_keys(&account_id)
+    }
+
+    /// A player's move, signed by the player and relayed by the game server. `message` is the exact text the
+    /// player's key signed — JSON `{ "v": 1, "account", "nonce", "at" (ms), "op", … }`; `signature` is its ed25519
+    /// signature (hex) by `public_key`, one of the player's enrolled keys. The contract checks the signature, that the
+    /// nonce is new and the message fresh, and that what happens is what the player signed:
+    /// * `buy` {model, broker, max_price} — `price` ≤ max_price
+    /// * `sell` {token, broker, min_price} — `price` ≥ min_price
+    /// * `repair` {token, max_cost} — `price` (the cost) ≤ max_cost, up to `durability`
+    /// * `list` {token, price}, `unlist` {token}, `buy_listing` {token, max_price}
+    /// * `battle` {log_sha256, opponent} — `log` hashes to what the player signed; the contract replays it
+    /// * `open_battle` {} — consent to an online battle (the contract draws the seed; `opponent` from the server)
+    pub fn signed_move(
+        &mut self,
+        player: AccountId,
+        message: String,
+        signature: String,
+        public_key: String,
+        price: Option<U128>,
+        durability: Option<u32>,
+        log: Option<String>,
+        reward: Option<U128>,
+        opponent: Option<String>,
+    ) -> serde_json::Value {
+        self.server_only();
+        require!(message.len() <= 600, "Message too long");
+        require!(self.signer_keys(&player).contains(&public_key), "This key isn't enrolled for the player's moves");
+        let pk: PublicKey = public_key.parse().unwrap_or_else(|_| env::panic_str("Bad public key"));
+        let pkb = pk.as_bytes();
+        require!(pkb.len() == 33 && pkb[0] == 0, "An ed25519 key is required");
+        let mut pk32 = [0u8; 32];
+        pk32.copy_from_slice(&pkb[1..33]);
+        let sig = unhex(&signature);
+        require!(sig.len() == 64, "Bad signature");
+        let mut sig64 = [0u8; 64];
+        sig64.copy_from_slice(&sig);
+        require!(env::ed25519_verify(&sig64, message.as_bytes(), &pk32), "The player's signature doesn't match");
+        let m: serde_json::Value = serde_json::from_str(&message).unwrap_or_else(|_| env::panic_str("Bad message"));
+        require!(m["v"] == 1 && m["account"].as_str() == Some(player.as_str()), "The message is for another account");
+        // replay protection: a fresh, increasing nonce, and the message is at most an hour old
+        let nonce = m["nonce"].as_u64().unwrap_or_else(|| env::panic_str("No nonce"));
+        let nk = format!("nonce:{player}");
+        let last: u64 = env::storage_read(nk.as_bytes()).and_then(|v| String::from_utf8(v).ok()).and_then(|x| x.parse().ok()).unwrap_or(0);
+        require!(nonce > last, "This move was already used");
+        env::storage_write(nk.as_bytes(), nonce.to_string().as_bytes());
+        let at = m["at"].as_u64().unwrap_or(0);
+        let now = env::block_timestamp_ms();
+        require!(at + 3_600_000 >= now && at <= now + 600_000, "The signed move expired");
+        let s = |k: &str| m[k].as_str().map(|x| x.to_string()).unwrap_or_else(|| env::panic_str(&format!("No {k}")));
+        let n = |k: &str| -> u128 {
+            m[k].as_str().and_then(|x| x.parse().ok()).or_else(|| m[k].as_u64().map(|x| x as u128)).unwrap_or_else(|| env::panic_str(&format!("No {k}")))
+        };
+        let p = || price.map(|x| x.0).unwrap_or_else(|| env::panic_str("No price"));
+        let op = s("op");
+        event("heat_index", "1.0.0", "signed_move", json!([{ "account_id": player, "op": op, "nonce": nonce, "key": public_key }]));
+        match op.as_str() {
+            "buy" => {
+                require!(p() <= n("max_price"), "Price is above what the player signed");
+                let id = self.do_buy_robot(player, s("model"), U128(p()), durability.unwrap_or_else(|| env::panic_str("No durability")), s("broker"));
+                json!(id)
+            }
+            "sell" => {
+                require!(p() >= n("min_price"), "Price is below what the player signed");
+                self.do_sell_robot(player, s("token"), U128(p()), s("broker"));
+                json!(null)
+            }
+            "repair" => {
+                require!(p() <= n("max_cost"), "Repair costs more than the player signed");
+                self.do_repair_robot(player, s("token"), U128(p()), durability.unwrap_or_else(|| env::panic_str("No durability")));
+                json!(null)
+            }
+            "list" => {
+                self.do_list(player, s("token"), U128(n("price")));
+                json!(null)
+            }
+            "unlist" => {
+                self.do_unlist(player, s("token"));
+                json!(null)
+            }
+            "buy_listing" => {
+                self.do_buy_listing(player, s("token"), n("max_price"));
+                json!(null)
+            }
+            "battle" => {
+                let log = log.unwrap_or_else(|| env::panic_str("No log"));
+                require!(hex(&env::sha256(log.as_bytes())) == s("log_sha256"), "The log isn't the one the player signed");
+                let opp = s("opponent");
+                require!(!opp.starts_with("online:"), "Online battles are opened with open_battle");
+                self.do_verified_battle(player, 0, opp, reward.unwrap_or(U128(0)), log);
+                json!(null)
+            }
+            "open_battle" => {
+                let opp = opponent.unwrap_or_else(|| env::panic_str("No opponent"));
+                require!(opp.starts_with("online:"), "Not an online battle");
+                json!(self.do_open_battle(player, opp))
+            }
+            _ => env::panic_str("Unknown move"),
+        }
     }
 
     fn server_only(&self) {
@@ -802,9 +956,14 @@ impl Contract {
         env::storage_write(b"listings", json!(ids).to_string().as_bytes());
     }
 
-    /// The game server only: `player` lists a robot for `price` credits (the token is escrowed).
+    /// The game server only, for the world's wallets (players list through signed_move).
     pub fn list_robot_for(&mut self, player: AccountId, token_id: String, price: U128) {
         self.server_only();
+        self.world_wallet_only(&player);
+        self.do_list(player, token_id, price)
+    }
+
+    fn do_list(&mut self, player: AccountId, token_id: String, price: U128) {
         let mut r = self.robots.get(&token_id).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
         require!(r.owner_id == player, "Not your robot");
         require!(r.durability > 0, "A broken robot can't be listed");
@@ -844,20 +1003,32 @@ impl Contract {
         self.track(to, token_id);
     }
 
-    /// The game server only: the seller withdraws a listing (the robot comes back).
+    /// The game server only, for the world's wallets: the seller withdraws a listing (the robot comes back).
     pub fn unlist_robot_for(&mut self, player: AccountId, token_id: String) {
         self.server_only();
+        self.world_wallet_only(&player);
+        self.do_unlist(player, token_id)
+    }
+
+    fn do_unlist(&mut self, player: AccountId, token_id: String) {
         let (seller, _) = self.take_listing(&token_id);
         require!(seller == player, "Not your listing");
         self.release(&token_id, &seller);
         event("heat_index", "1.0.0", "unlisted", json!([{ "account_id": player, "token_id": token_id }]));
     }
 
-    /// The game server only: `buyer` buys a listed robot at its price — credits to the seller (5% fee burned).
+    /// The game server only, for the world's wallets (bot teams shop the player market).
     pub fn buy_listing_for(&mut self, buyer: AccountId, token_id: String) {
         self.server_only();
+        self.world_wallet_only(&buyer);
+        self.do_buy_listing(buyer, token_id, u128::MAX)
+    }
+
+    /// `buyer` buys a listed robot at its price (≤ max_price) — credits to the seller (5% fee burned).
+    fn do_buy_listing(&mut self, buyer: AccountId, token_id: String, max_price: u128) {
         require!(self.players.get(&buyer).is_some(), "Register first");
         let (seller, price) = self.take_listing(&token_id);
+        require!(price <= max_price, "The listing costs more than the player signed");
         require!(seller != buyer, "That's your own listing");
         // the seller's profit counts toward the daily cap (no funnelling credits through the market)
         let paid = self.paid.get(&token_id).copied().unwrap_or_else(|| base_price(&self.robots.get(&token_id).unwrap().model_id));
@@ -1480,6 +1651,7 @@ mod tests {
         let alice: AccountId = "alice.testnet".parse().unwrap();
         let hash = "a".repeat(64);
         ctx("game.testnet");
+        world_wallet("alice.testnet");
         // never opened → refused
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut c2 = Contract::new("game.testnet".parse().unwrap());
@@ -1505,6 +1677,8 @@ mod tests {
         ctx("alice.testnet");
         c.register();
         ctx("game.testnet");
+        world_wallet("bob.testnet");
+        world_wallet("alice.testnet");
         let bob: AccountId = "bob.testnet".parse().unwrap();
         let alice: AccountId = "alice.testnet".parse().unwrap();
         // a Spark (base 30): the cap is ~2.4× base at full wear and 2.5× what was paid
@@ -1522,6 +1696,11 @@ mod tests {
         c.list_robot_for(bob.clone(), ids[1].clone(), U128(10));
         c.unlist_robot_for(bob.clone(), ids[1].clone());
         assert_eq!(c.mt_balance_of(bob, ids[1].clone()).0, 1);
+    }
+
+    /// these rule tests drive the server-relayed `*_for` methods, which move only the world's wallets
+    fn world_wallet(who: &str) {
+        env::storage_write(format!("ww:{who}").as_bytes(), br#"{"kind":"npc","name":"t"}"#);
     }
 
     fn ctx_pay(who: &str) {
@@ -1590,6 +1769,41 @@ mod tests {
         let kept = c.mt_resolve_transfer(vec![alice.clone()], shop.clone(), vec![ids[1].clone()], vec![U128(1)]);
         assert_eq!(kept[0].0, 1);
         assert_eq!(c.mt_balance_of(shop, ids[1].clone()).0, 1);
+    }
+
+    #[test]
+    fn signed_moves_do_only_what_the_player_signed() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let pk = PublicKey::from_parts(near_sdk::CurveType::ED25519, sk.verifying_key().to_bytes().to_vec()).unwrap();
+        let pk_str = String::from(&pk);
+        let (mut c, _) = setup("alice.testnet");
+        let alice: AccountId = "alice.testnet".parse().unwrap();
+        // the device's key enrols through register (the only method a game key may call)
+        testing_env!(VMContextBuilder::new().predecessor_account_id(alice.clone()).signer_account_pk(pk.clone()).build());
+        c.register();
+        assert!(c.signing_keys_of(alice.clone()).contains(&pk_str));
+        let t = 5_000_000u64;
+        let sign = |msg: &str| ed25519_dalek::Signature::to_bytes(&sk.sign(msg.as_bytes())).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let buy = |nonce: u64, max: u64| format!(r#"{{"v":1,"account":"alice.testnet","nonce":{nonce},"at":{t},"op":"buy","model":"volt","broker":"kessler","max_price":"{max}"}}"#);
+        ctx_at("game.testnet", t);
+        let m1 = buy(1, 120);
+        let token = c.signed_move(alice.clone(), m1.clone(), sign(&m1), pk_str.clone(), Some(U128(110)), Some(10), None, None, None);
+        assert!(token.as_str().unwrap().starts_with("robot:volt:"));
+        let fails = |c: &mut Contract, msg: &str, sig: String, price: u128| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.signed_move(alice.clone(), msg.to_string(), sig, pk_str.clone(), Some(U128(price)), Some(10), None, None, None))).is_err()
+        };
+        // the same signed move can't be replayed
+        assert!(fails(&mut c, &m1, sign(&m1), 110));
+        // the server can't charge more than the player signed
+        let m2 = buy(2, 120);
+        assert!(fails(&mut c, &m2, sign(&m2), 130));
+        // a tampered message breaks the signature
+        let m3 = buy(3, 120);
+        assert!(fails(&mut c, &buy(3, 500), sign(&m3), 400));
+        // and without a signature the server can't move a player's assets at all
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.buy_robot_for(alice.clone(), "volt".into(), U128(110), 10, "kessler".into())));
+        assert!(r.is_err());
     }
 
     #[test]
@@ -1896,6 +2110,7 @@ mod tests {
     fn even_the_server_cannot_record_a_win_without_robots() {
         let (mut c, _) = setup("zed.testnet");
         as_server();
+        world_wallet("zed.testnet");
         c.record_battle_for("zed.testnet".parse().unwrap(), "npc".into(), 1, U128(50), 1, vec![], "ab".repeat(32));
     }
 
@@ -1904,6 +2119,7 @@ mod tests {
         let (mut c, ids) = setup("amy.testnet");
         let amy: AccountId = "amy.testnet".parse().unwrap();
         as_server();
+        world_wallet("amy.testnet");
         let t = c.buy_robot_for(amy.clone(), "volt".into(), U128(110), 10, "kessler".into());
         c.record_battle_for(amy.clone(), "Glitch".into(), 1, U128(40), 7, vec![Wear { token_id: ids[0].clone(), durability: 5 }], "cd".repeat(32));
         c.repair_robot_for(amy.clone(), ids[0].clone(), U128(10), 6);
@@ -1917,6 +2133,7 @@ mod tests {
     fn a_battle_needs_a_real_replay_hash() {
         let (mut c, ids) = setup("bea.testnet");
         as_server();
+        world_wallet("bea.testnet");
         c.record_battle_for("bea.testnet".parse().unwrap(), "npc".into(), 1, U128(40), 7, vec![Wear { token_id: ids[0].clone(), durability: 5 }], "nope".into());
     }
 
