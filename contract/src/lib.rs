@@ -16,6 +16,8 @@
 //! NEP-245 subset: balances, tokens, enumeration, `mt_transfer` / `mt_batch_transfer` (no approvals, no
 //! `mt_transfer_call`); credits can't be transferred.
 
+pub mod battle;
+
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::{IterableSet, LookupMap};
@@ -534,15 +536,7 @@ impl Contract {
     pub fn record_battle_for(&mut self, player: AccountId, opponent: String, result: u8, reward: U128, seed: u64, wear: Vec<Wear>, replay: String) {
         self.server_only();
         require!(result != 1 || !wear.is_empty(), "A win must list the robots that fought");
-        // an online battle must have been opened on-chain, and it is recorded with the seed the contract drew
-        let ticket_key = format!("ticket:{player}");
-        if opponent.starts_with("online:") {
-            let t: serde_json::Value = env::storage_read(ticket_key.as_bytes())
-                .and_then(|v| serde_json::from_slice(&v).ok())
-                .unwrap_or_else(|| env::panic_str("This online battle was never opened on-chain"));
-            require!(t["seed"].as_u64() == Some(seed), "The battle wasn't dealt from the seed drawn on-chain");
-            env::storage_remove(ticket_key.as_bytes());
-        }
+        self.use_ticket(&player, &opponent, seed);
         self.do_record_battle(player, opponent, result, reward, seed, wear, Some(replay))
     }
 
@@ -565,6 +559,60 @@ impl Contract {
     /// The open online battle of a player (its on-chain seed), if any.
     pub fn open_battle_of(&self, account_id: AccountId) -> Option<serde_json::Value> {
         env::storage_read(format!("ticket:{account_id}").as_bytes()).and_then(|v| serde_json::from_slice(&v).ok())
+    }
+
+    /// an online battle must have been opened on-chain, and it is recorded with the seed the contract drew
+    fn use_ticket(&mut self, player: &AccountId, opponent: &str, seed: u64) {
+        let ticket_key = format!("ticket:{player}");
+        if opponent.starts_with("online:") {
+            let t: serde_json::Value = env::storage_read(ticket_key.as_bytes())
+                .and_then(|v| serde_json::from_slice(&v).ok())
+                .unwrap_or_else(|| env::panic_str("This online battle was never opened on-chain"));
+            require!(t["seed"].as_u64() == Some(seed), "The battle wasn't dealt from the seed drawn on-chain");
+            env::storage_remove(ticket_key.as_bytes());
+        }
+    }
+
+    /// The game server only: a battle the CONTRACT replays. `log` is the battle's full action log (seed, both decks,
+    /// every action — the text published at /api/battles/<sha256>); the contract re-runs it with its own copy of the
+    /// rules (`battle.rs`), rejects any illegal move or unfinished battle, and decides the result for `side` (0 / 1)
+    /// and each of the player's robots' wear itself — from the durability it has on-chain. The server only supplies
+    /// the reward (still capped). The log's SHA-256 is stored as the battle's replay hash.
+    pub fn record_verified_battle_for(&mut self, player: AccountId, side: u8, opponent: String, reward: U128, log: String) {
+        self.server_only();
+        require!(side <= 1, "side is 0 or 1");
+        require!(log.len() <= 60_000, "Log too big");
+        let parsed: battle::BattleLog = serde_json::from_str(&log).unwrap_or_else(|_| env::panic_str("Bad battle log"));
+        let b = battle::replay(&parsed).unwrap_or_else(|e| env::panic_str(&format!("The battle doesn't replay: {e}")));
+        let result: u8 = match b.winner.unwrap() {
+            None => 2,
+            Some(w) if w == side as usize => 1,
+            _ => 0,
+        };
+        let seed = parsed.input.seed;
+        self.use_ticket(&player, &opponent, seed);
+        // players wear lightly (destroyed / overheated only); the world's bot teams by the full rule
+        let light = !env::storage_has_key(format!("ww:{player}").as_bytes());
+        let team = if side == 0 { &parsed.input.a } else { &parsed.input.b };
+        let mut wear = vec![];
+        for r in team {
+            let Some(tid) = &r.token_id else { continue };
+            let robot = self.robots.get(tid).cloned().unwrap_or_else(|| env::panic_str("No such robot"));
+            require!(robot.owner_id == player, "Not your robot");
+            require!(robot.model_id == r.model_id, "The log's robot is another model than its token");
+            if light {
+                // the veteran HP bonus in the log can't exceed the rank the robot has on-chain
+                let rank = vet_rank(self.records.get(tid).map(|x| x.wins).unwrap_or(0));
+                require!(vet_rank(r.vw.unwrap_or(0)) <= rank, "The log claims a higher veteran rank than the token has");
+            }
+            let max_d = max_durability(&robot.model_id);
+            let now = robot.durability.min(max_d);
+            wear.push(Wear { token_id: tid.clone(), durability: now.saturating_sub(b.wear_loss(&r.uid, light)) });
+        }
+        require!(result != 1 || !wear.is_empty(), "A win must list the robots that fought");
+        let hash = hex(&env::sha256(log.as_bytes()));
+        event("heat_index", "1.0.0", "battle_verified", json!([{ "account_id": player, "side": side, "result": result, "replay": hash, "actions": parsed.actions.len() }]));
+        self.do_record_battle(player, opponent, result, reward, seed, wear, Some(hash));
     }
 
     fn server_only(&self) {
@@ -1156,6 +1204,22 @@ mod tests {
         ctx(who);
         let ids = c.register();
         (c, ids)
+    }
+
+    #[test]
+    fn the_rust_rules_replay_the_games_battles_exactly() {
+        let fx: Vec<serde_json::Value> = serde_json::from_str(include_str!("../fixtures/battles.json")).unwrap();
+        assert!(fx.len() >= 30);
+        for (n, f) in fx.iter().enumerate() {
+            let log: battle::BattleLog = serde_json::from_str(f["log"].as_str().unwrap()).unwrap();
+            let b = battle::replay(&log).unwrap_or_else(|e| panic!("battle {n}: {e}"));
+            let want = f["winner"].as_u64().map(|x| x as usize);
+            assert_eq!(b.winner, Some(want), "battle {n}: winner");
+            for (uid, w) in f["wear"].as_object().unwrap() {
+                assert_eq!(b.wear_loss(uid, true) as u64, w[0].as_u64().unwrap(), "battle {n}: light wear of {uid}");
+                assert_eq!(b.wear_loss(uid, false) as u64, w[1].as_u64().unwrap(), "battle {n}: wear of {uid}");
+            }
+        }
     }
 
     #[test]

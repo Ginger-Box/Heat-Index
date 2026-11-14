@@ -21,6 +21,13 @@ function privy() {
   return { client, ready };
 }
 
+/** The current Privy login's access token (for the self-custody hand-over), or null when it has expired. */
+export async function privyAccessToken(): Promise<string | null> {
+  const { client, ready } = privy();
+  await ready;
+  return client.getAccessToken();
+}
+
 export default function PrivyEmail({ name, onDone, onError }: Props) {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');

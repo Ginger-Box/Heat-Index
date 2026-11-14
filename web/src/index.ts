@@ -98,10 +98,17 @@ async function login(req: Request, env: Env): Promise<Response> {
   if (existing) {
     // returning player (another device, or a cleared browser): add this browser's game key to their account
     const acc = new Account(existing, provider, owner.toString() as `ed25519:${string}`);
-    await acc.signAndSendTransaction({
-      receiverId: existing,
-      actions: [actions.addFunctionCallAccessKey(gameKey, CONTRACT_ID, GAME_METHODS, GAME_KEY_ALLOWANCE)],
-    });
+    try {
+      await acc.signAndSendTransaction({
+        receiverId: existing,
+        actions: [actions.addFunctionCallAccessKey(gameKey, CONTRACT_ID, GAME_METHODS, GAME_KEY_ALLOWANCE)],
+      });
+    } catch (e) {
+      // the player took custody of the account: this server holds no key to it any more
+      if (/does not exist|AccessKeyNotFound|InvalidAccessKey/i.test(e instanceof Error ? e.message : String(e)))
+        return json({ error: `${existing} is self-custodied: you hold its key now. Sign in with "Connect NEAR wallet" (import your key into a NEAR wallet).` }, 409);
+      throw e;
+    }
     return json({ accountId: existing, returning: true });
   }
 
@@ -126,6 +133,37 @@ async function login(req: Request, env: Env): Promise<Response> {
   });
   if (!accountId) return json({ error: 'The account was not created — please try again' }, 500);
   return json({ accountId, returning: false });
+}
+
+/**
+ * Self-custody: the player takes their account over. Their browser made a new key (and showed it to them); this adds
+ * it as a full-access key and deletes the key this server derives from their email login — from then on only the
+ * player can act for the account (the server can't, and email login no longer opens it: they sign in with a wallet).
+ */
+async function custody(req: Request, env: Env): Promise<Response> {
+  if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
+  const origin = req.headers.get('origin') ?? '';
+  if (!SITE_ORIGINS.includes(origin) || !(req.headers.get('content-type') ?? '').startsWith('application/json'))
+    return json({ error: 'Forbidden' }, 403);
+  const token = (req.headers.get('authorization') ?? '').replace(/^Bearer /, '');
+  const userId = token && (await privyUser(token, env.PRIVY_APP_ID));
+  if (!userId) return json({ error: 'The email login could not be verified — please sign in again' }, 401);
+  const body = (await req.json().catch(() => ({}))) as { newKey?: string };
+  let newKey: PublicKey;
+  try {
+    newKey = PublicKey.fromString(String(body.newKey));
+  } catch {
+    return json({ error: 'Bad key' }, 400);
+  }
+  const provider = new JsonRpcProvider({ url: RPC_URL });
+  const owner = await ownerKeyOf(userId, env.OWNER_SECRET);
+  const ownerPub = owner.getPublicKey();
+  const accountId = (await provider.callFunction({ contractId: CONTRACT_ID, method: 'account_for_owner_key', args: { owner_key: ownerPub.toString() } })) as string | null;
+  if (!accountId) return json({ error: 'No account for this login' }, 404);
+  const acc = new Account(accountId, provider, owner.toString() as `ed25519:${string}`);
+  // one transaction: the player's key in, the server's key out
+  await acc.signAndSendTransaction({ receiverId: accountId, actions: [actions.addFullAccessKey(newKey), actions.deleteKey(ownerPub)] });
+  return json({ accountId, selfCustody: true });
 }
 
 const MAX_LOG = 256 * 1024;
@@ -182,6 +220,13 @@ export default {
       const out = new Response(res.body, res);
       for (const [k, v] of Object.entries(h)) out.headers.set(k, v);
       return out;
+    }
+    if (url.pathname === '/api/privy/custody') {
+      try {
+        return await custody(req, env);
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message.slice(0, 300) : 'Failed' }, 500);
+      }
     }
     if (url.pathname === '/api/privy/login') {
       try {

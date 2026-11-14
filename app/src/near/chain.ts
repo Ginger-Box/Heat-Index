@@ -22,6 +22,8 @@ export interface ChainSession {
   /** secret of the limited game key (function calls to the game contract only) */
   gameKey: string;
   via: 'email' | 'wallet';
+  /** the player took custody of the account (their own full-access key; the server's key is gone) */
+  selfCustody?: boolean;
 }
 export interface ChainTx {
   id: number;
@@ -165,6 +167,24 @@ export async function finishPrivyLogin(accessToken: string, playerName: string):
   if (!res.ok || !out.accountId) throw new Error(out.error ?? 'Could not create the account');
   saveSession({ accountId: out.accountId, gameKey: game.toString(), via: 'email' });
   return out.accountId;
+}
+
+/** Self-custody, step 1: a new full-access key, made in this browser — shown to the player before anything changes. */
+export function newCustodyKey(): { secret: string; publicKey: string } {
+  const kp = KeyPair.fromRandom('ed25519');
+  return { secret: kp.toString(), publicKey: kp.getPublicKey().toString() };
+}
+
+/** Self-custody, step 2: the Worker adds the player's key to the account and deletes the server-derived one. */
+export async function takeCustody(accessToken: string, publicKey: string): Promise<void> {
+  const res = await fetch('/api/privy/custody', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ newKey: publicKey }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(out.error ?? 'Could not hand over the account');
+  if (session) saveSession({ ...session, selfCustody: true });
 }
 
 export async function nearAuthClient() {

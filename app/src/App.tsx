@@ -15,7 +15,7 @@ import { Hangar } from './screens/Hangar';
 import { Market } from './screens/Market';
 import { Ratings } from './screens/Ratings';
 import { actBackground, getPlayerName, isShared, lastServerNote, resetGame, sharedInfo, startGame, startShared, useWorld } from './store';
-import { chainSession, emailLoginPending, resumeEmailLogin, signOutChain } from './near/chain';
+import { chainSession, emailLoginKind, emailLoginPending, newCustodyKey, resumeEmailLogin, signOutChain, takeCustody } from './near/chain';
 import { Boot } from './ui/Boot';
 import { tvSound } from './audio';
 import type { World } from './engine/world';
@@ -360,6 +360,7 @@ function SettingsMenu({
               <FastForwardIcon /> Play
             </button>
           </div>}
+          {isShared() && chainSession()?.via === 'email' && emailLoginKind() === 'privy' && <CustodyRow />}
           <div className="set-row">
             <div>
               <b>{isShared() ? 'Log out' : 'Start over'}</b>
@@ -387,6 +388,80 @@ function SettingsMenu({
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Email accounts on the public site: take full custody — the player's own key in, the server's key out. */
+function CustodyRow() {
+  const s = chainSession();
+  const [key, setKey] = useState<{ secret: string; publicKey: string } | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!s) return null;
+  if (s.selfCustody)
+    return (
+      <div className="set-row">
+        <div>
+          <b>🔑 Self-custodied</b>
+          <div className="muted">Only your key controls {s.accountId}. Next time, sign in with “Connect NEAR wallet” (import your key into a NEAR wallet).</div>
+        </div>
+      </div>
+    );
+  const download = () => {
+    const blob = new Blob([`HEAT INDEX — NEAR account ${s.accountId}\nFull-access private key (keep it secret, import it into a NEAR wallet):\n${key!.secret}\n`], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${s.accountId}.key.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return (
+    <div className="set-row custody">
+      <div>
+        <b>🔑 Own your account</b>
+        <div className="muted">
+          Email login keeps a key to {s.accountId} on our server. Take it over: your browser makes a new key, you save it,
+          and the server's key is deleted — after that only you can act for the account.
+        </div>
+        {key && (
+          <div className="custody-key">
+            <textarea readOnly value={key.secret} rows={2} onFocus={(e) => e.target.select()} />
+            <button onClick={download}>Download key</button>
+            <label>
+              <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} /> I saved this key — without it the account is lost
+            </label>
+          </div>
+        )}
+        {msg && <div className="muted">{msg}</div>}
+      </div>
+      {!key ? (
+        <button onClick={() => setKey(newCustodyKey())}>Show my new key</button>
+      ) : (
+        <button
+          className="danger"
+          disabled={!saved || busy}
+          onClick={async () => {
+            setBusy(true);
+            setMsg(null);
+            try {
+              const { privyAccessToken } = await import('./ui/PrivyEmail');
+              const token = await privyAccessToken();
+              if (!token) throw new Error('Your email login expired — log out and sign in again first');
+              await takeCustody(token, key.publicKey);
+              setMsg('Done: the account is yours alone.');
+              setKey(null);
+            } catch (e) {
+              setMsg(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Handing over…' : 'Take custody'}
+        </button>
       )}
     </div>
   );

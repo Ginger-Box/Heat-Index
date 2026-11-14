@@ -85,7 +85,7 @@ await check('the contract account has one full-access key; its other keys can on
   ok(full.length === 1, `${full.length} full-access keys`);
   for (const k of fn) {
     const p = (k.access_key.permission as { FunctionCall: { receiver_id: string; method_names: string[] } }).FunctionCall;
-    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot'];
+    const allowed = ['create_player_account', 'buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for', 'record_verified_battle_for', 'open_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot'];
     ok(p.receiver_id === C && p.method_names.every((m) => allowed.includes(m)), `a function-call key can do more: ${p.method_names}`);
   }
   return `${full.length} full-access, ${fn.length} limited (the site relayer: create_player_account; the world server: *_for moves and the world wallets)`;

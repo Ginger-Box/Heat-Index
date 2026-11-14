@@ -459,6 +459,19 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Already fixed from the first review: `record_battle` without a battle, the buy-low/sell-high loop, README drift,
   lint in CI, public AI decisions; from this one: broker/NPC NEAR accounts and TEE-verified decisions (above).
 
+### The contract replays battles; self-custody for email accounts (Nov 14)
+- `contract/src/battle.rs`: the «Overheat» rules ported 1:1 to Rust (mulberry32 deal, stable-sort tie breaks, the
+  float scoring of automatic repair/shock targets, veteran HP). `record_verified_battle_for(player, side, opponent,
+  reward, log)` replays the log, refuses illegal moves / unfinished battles, decides the result and the wear from
+  the on-chain durability, checks every robot in the log is the player's token of that model (and its veteran rank),
+  and stores the log's SHA-256. The server records players' and bots' battles through it (300 Tgas; the old path is
+  only a fallback if the replay can't run). Differential test: 37 battles from the TS engine
+  (`app/scripts/export-battles.ts` → `contract/fixtures/battles.json`), same winners and wear. 33 contract tests.
+- Self-custody: Settings → *Own your account* (email accounts on the public site). The browser makes a full-access
+  key and shows it (download / "I saved it"), then `/api/privy/custody` adds it and deletes the server-derived key in
+  one transaction. Email login then answers that the account is self-custodied (sign in with a wallet).
+- Server key rotated again (+ `record_verified_battle_for`), the previous one deleted.
+
 ## Next
 - Card art.
 - README for judges, demo video.

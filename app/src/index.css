@@ -5477,3 +5477,7 @@ p.tour-swap {
 }
 
 .broker-chain { margin-top: 4px; font-size: 11px; }
+
+.custody-key { display: grid; gap: 6px; margin-top: 8px; }
+.custody-key textarea { width: 100%; font-family: var(--font-mono, monospace); font-size: 11px; background: #050409; color: var(--yellow); border: 2px solid var(--line); padding: 6px; resize: none; }
+.custody-key label { font-size: 12px; display: flex; gap: 6px; align-items: center; }

@@ -68,7 +68,7 @@ type WalletTask =
   | { t: 'buy'; account: string; uid: string; modelId: string; durability: number; price: number; broker: string }
   | { t: 'sell'; account: string; uid: string; chainId?: string; price: number; broker: string }
   | { t: 'repair'; account: string; uid: string; cost: number; durability: number }
-  | { t: 'battle'; account: string; opponent: string; result: number; reward: number; seed: number; replay: string; wear: { uid: string; durability: number }[] };
+  | { t: 'battle'; account: string; side: number; log: string; opponent: string; result: number; reward: number; seed: number; replay: string; wear: { uid: string; durability: number }[] };
 
 interface PvpSession {
   st: BattleState;
@@ -636,6 +636,8 @@ export class SharedWorld extends DurableObject<Env> {
           this.walletTasks.push({
             t: 'battle',
             account,
+            side: s,
+            log: text,
             // the opponent's NEAR account — not a league name, so the contract never counts it toward the Pit League
             opponent: (opp && npcAccount(opp.name)) ?? opp?.name ?? 'npc',
             result: st.winner === null ? 2 : st.winner === s ? 1 : 0,
@@ -752,15 +754,27 @@ export class SharedWorld extends DurableObject<Env> {
       .filter((r) => r.chainId && r.durability > 0 && w.managers.find((m) => m.id === r.owner && npcAccount(m.name) === task.account))
       .reduce((t, r) => t + robotModel(r.modelId).basePrice, 0);
     const reward = Math.max(0, Math.min(task.reward, 400, Math.floor((value * 25) / 100)));
-    await this.chainCall('record_battle_for', {
-      player: task.account,
-      opponent: task.opponent.slice(0, 64),
-      result: task.result,
-      reward: String(reward),
-      seed: task.seed,
-      wear,
-      replay: task.replay,
-    });
+    // the contract replays the bots' battle too and decides the result and the wear on its own
+    try {
+      await this.chainCall(
+        'record_verified_battle_for',
+        { player: task.account, side: task.side, opponent: task.opponent.slice(0, 64), reward: String(reward), log: task.log },
+        300_000_000_000_000n,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Exceeded the prepaid gas|doesn't replay|Bad battle log/.test(msg)) throw e;
+      this.walletError = `bot battle fell back: ${msg.slice(0, 120)}`;
+      await this.chainCall('record_battle_for', {
+        player: task.account,
+        opponent: task.opponent.slice(0, 64),
+        result: task.result,
+        reward: String(reward),
+        seed: task.seed,
+        wear,
+        replay: task.replay,
+      });
+    }
   }
 
   /** a broker records its AI decision on its own NEAR account; the contract checks the NEAR AI TEE signature */
@@ -796,11 +810,11 @@ export class SharedWorld extends DurableObject<Env> {
   private chainQueue: Promise<unknown> = Promise.resolve();
 
   /** one transaction at a time (one key, ordered nonces) */
-  private chainCall(method: string, args: Record<string, unknown>): Promise<{ hash: string; value: unknown }> {
+  private chainCall(method: string, args: Record<string, unknown>, gas = 60_000_000_000_000n): Promise<{ hash: string; value: unknown }> {
     const run = async () => {
       if (!this.env.SERVER_KEY) throw new Error('the server has no NEAR key');
       const acc = new Account(CONTRACT_ID, new JsonRpcProvider({ url: RPC_URL }), this.env.SERVER_KEY as `ed25519:${string}`);
-      const r = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas: 60_000_000_000_000n });
+      const r = await acc.callFunctionRaw({ contractId: CONTRACT_ID, methodName: method, args, gas });
       const st = r.status as { SuccessValue?: string; Failure?: unknown };
       if (st && typeof st === 'object' && 'Failure' in st) throw new Error(JSON.stringify(st.Failure).slice(0, 200));
       const raw = st?.SuccessValue ? atob(st.SuccessValue) : '';
@@ -861,16 +875,19 @@ export class SharedWorld extends DurableObject<Env> {
       const opp = w.managers.find((m) => m.id === String(a[0]));
       const res = replayBattle(log).st.winner;
       const result = res === null ? 2 : res === 0 ? 1 : 0;
-      const out = await this.chainCall('record_battle_for', {
-        player: me,
-        // online battles are marked so the contract never counts them toward the league
-        opponent: a[2] === 'ranked' ? `online:${opp?.name ?? String(a[0])}`.slice(0, 64) : (opp?.name ?? String(a[0])),
-        result,
-        reward: String(reward),
-        seed: log.input.seed >>> 0,
-        wear,
-        replay,
-      });
+      // online battles are marked so the contract never counts them toward the league
+      const opponent = a[2] === 'ranked' ? `online:${opp?.name ?? String(a[0])}`.slice(0, 64) : (opp?.name ?? String(a[0]));
+      // the contract replays the log itself and decides the result and the wear (record_verified_battle_for);
+      // the older, server-reported path is only a fallback if the on-chain replay can't run
+      let out: { hash: string; value: unknown };
+      try {
+        out = await this.chainCall('record_verified_battle_for', { player: me, side: 0, opponent, reward: String(reward), log: text }, 300_000_000_000_000n);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/Exceeded the prepaid gas|doesn't replay|Bad battle log/.test(msg)) throw e;
+        this.walletError = `verified record fell back: ${msg.slice(0, 120)}`;
+        out = await this.chainCall('record_battle_for', { player: me, opponent, result, reward: String(reward), seed: log.input.seed >>> 0, wear, replay });
+      }
       return {
         label: `${a[2] === 'ranked' ? 'Online battle' : 'Battle'} vs ${opp?.name}: ${['loss', 'win', 'draw'][result]} · +${reward} CR`,
         hash: out.hash,
