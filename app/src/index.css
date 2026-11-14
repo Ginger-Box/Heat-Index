@@ -5448,3 +5448,7 @@ p.tour-swap {
 .profile-models .tag { display: inline-flex; align-items: center; gap: 4px; }
 .team-link { cursor: pointer; }
 .team-link:hover { text-decoration: underline; color: var(--cyan); }
+
+.profile-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 40px; }
+.profile-head h2 { margin: 0 10px 0 0; }
+.profile-head .tag { margin-left: 0; font-size: 11px; padding: 1px 6px; }

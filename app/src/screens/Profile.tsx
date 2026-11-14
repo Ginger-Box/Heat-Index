@@ -49,11 +49,11 @@ export function Profile({ w, id, onClose }: { w: World; id: string; onClose: () 
         <button className="profile-close" onClick={onClose} title="Close (Esc)">
           ✕
         </button>
-        <h2 style={{ marginBottom: 4 }}>
-          {m.name}
+        <div className="profile-head">
+          <h2>{m.name}</h2>
           {m.dev && <span className="tag dev-tag">DEV</span>}
           {id === PLAYER_ID ? <span className="tag you-tag">YOU</span> : human ? <span className="tag human-tag">PLAYER</span> : <span className="tag bot-tag">BOT</span>}
-        </h2>
+        </div>
         <p className="muted" style={{ marginTop: 0 }}>
           {human ? (
             id === PLAYER_ID ? (
