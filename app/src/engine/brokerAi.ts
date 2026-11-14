@@ -103,17 +103,54 @@ export const RULE_STYLE: Record<string, { spread: number; react: number; targetS
   scrap: { spread: 0.1, react: 0.35, targetStock: 1 },
 };
 
-/** The LLM can't be reached (keys out of credits, an outage): the broker goes back to its rules until it answers again. */
+/** Life happens: while a broker's mind is out (the LLM is unreachable) the market hears a story instead, and the
+ *  broker's rules bend a little with it (always inside its POLICY_BOUNDS). */
+export const MOODS: Record<string, { text: string; spread?: number; react?: number; stock?: number }[]> = {
+  kessler: [
+    { text: "Kessler's head trader flew home — his father is in hospital. The desk follows the manual and plays it safe.", spread: 0.03, react: -0.05 },
+    { text: "Kessler's board froze every strategy after a sleepless quarterly review. Nobody signs anything bold.", react: -0.1, stock: -1 },
+    { text: "Kessler's CEO is on burnout leave. The interns run the floor, and prices get a little loose.", spread: -0.04, react: 0.08 },
+  ],
+  soroka: [
+    { text: "Magpie hasn't slept in three days — she's sure a raid is coming. She hoards less and sells fast.", spread: -0.02, react: 0.15, stock: -1 },
+    { text: "Magpie's little brother got mixed up with the wrong crew. She's distracted and charges more to cover his debts.", spread: 0.03, react: -0.1 },
+    { text: "Magpie split up with her fence. Heartbroken, she ignores the hype for a while.", react: -0.2 },
+  ],
+  scrap: [
+    { text: "Junkman's old dog is sick. He spends his days at the vet and leaves the yard to his nephew.", spread: 0.02, react: -0.1 },
+    { text: "Junkman's back gave out hauling a Dozer chassis. He barely moves, so his prices barely move either.", react: -0.13 },
+    { text: "It's the anniversary of the yard fire, and Junkman is in a dark mood: gruff, slow and pricier.", spread: 0.04, react: -0.15 },
+  ],
+};
+
+/** The LLM can't be reached (keys out of credits, an outage): the broker goes back to its rules — bent by what is
+ *  going on in its life — until the AI answers again. */
 export function fallBackToRules(w: World, b: Broker) {
   if (!b.ai && b.mindOff !== undefined) return;
-  Object.assign(b.style, RULE_STYLE[b.id] ?? {});
+  const rule = RULE_STYLE[b.id];
+  const bounds = POLICY_BOUNDS[b.id];
+  const moods = MOODS[b.id] ?? [];
+  // which story: changes from one outage to the next, the same for everyone in the shared world
+  const mood = moods.length ? moods[[...`${b.id}:${w.hour}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % moods.length] : undefined;
+  if (rule) {
+    const fit = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, v));
+    Object.assign(b.style, {
+      spread: bounds ? Math.round(fit(rule.spread + (mood?.spread ?? 0), bounds.spread) * 1000) / 1000 : rule.spread,
+      react: bounds ? Math.round(fit(rule.react + (mood?.react ?? 0), bounds.react) * 1000) / 1000 : rule.react,
+      targetStock: bounds ? fit(rule.targetStock + (mood?.stock ?? 0), bounds.stock) : rule.targetStock,
+    });
+  }
   b.ai = undefined;
   b.mindOff = w.hour;
-  w.events.push({ tick: w.tick, day: Math.floor(w.hour / hoursPerDay(w)) + 1, kind: 'broker', text: `⚙ ${b.name}'s AI is unavailable — it trades by its rules for now.` });
+  b.mood = mood?.text;
+  w.events.push({ tick: w.tick, day: Math.floor(w.hour / hoursPerDay(w)) + 1, kind: 'broker', text: `⚙ ${mood?.text ?? `${b.name} trades by its rules for now.`}` });
 }
 
 export function applyPolicy(w: World, b: Broker, p: BrokerPolicy, meta: { model: string; chatId?: string }) {
+  if (b.mindOff !== undefined)
+    w.events.push({ tick: w.tick, day: Math.floor(w.hour / hoursPerDay(w)) + 1, kind: 'broker', text: `🧠 ${b.name} is back at the desk, clear-headed.` });
   b.mindOff = undefined;
+  b.mood = undefined;
   b.style.spread = p.spread;
   b.style.react = p.react;
   b.style.targetStock = p.targetStock;

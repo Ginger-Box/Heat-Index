@@ -45,11 +45,19 @@ test('a broker whose AI is unavailable falls back to its rules, and returns to t
   fallBackToRules(w, b);
   assert.equal(b.ai, undefined);
   assert.equal(b.mindOff, w.hour);
-  assert.deepEqual({ spread: b.style.spread, react: b.style.react, targetStock: b.style.targetStock }, RULE_STYLE.kessler);
+  // the rules, bent by a mood — still inside the bounds
+  const { POLICY_BOUNDS, MOODS } = await import('../src/engine/brokerAi');
+  const bd = POLICY_BOUNDS.kessler;
+  assert.ok(MOODS.kessler.some((m) => m.text === b.mood));
+  assert.ok(b.style.spread >= bd.spread[0] && b.style.spread <= bd.spread[1]);
+  assert.ok(b.style.react >= bd.react[0] && b.style.react <= bd.react[1]);
+  assert.ok(b.style.targetStock >= bd.stock[0] && b.style.targetStock <= bd.stock[1]);
+  assert.ok(Math.abs(b.style.spread - RULE_STYLE.kessler.spread) <= 0.05);
   const events = w.events.length;
   fallBackToRules(w, b); // already on the rules: no repeated news
   assert.equal(w.events.length, events);
   applyPolicy(w, b, { spread: 0.12, react: 0.1, targetStock: 2, focus: [], dump: [], remark: '' }, { model: 'm' });
   assert.equal(b.mindOff, undefined);
+  assert.equal(b.mood, undefined);
   assert.equal(b.style.spread, 0.12);
 });

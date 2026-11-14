@@ -126,6 +126,8 @@ export interface Broker {
   restockedToday?: Record<string, number>;
   /** the LLM was unreachable (no key works, no credits): since this game hour the broker runs on its rules */
   mindOff?: number;
+  /** while on its rules: what is going on with the broker (a story reason that also bends its behaviour a little) */
+  mood?: string;
   /** the broker's latest decision by its LLM mind (shared world, engine/brokerAi.ts) */
   ai?: {
     at: number;
