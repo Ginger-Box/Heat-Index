@@ -5430,3 +5430,7 @@ p.tour-swap {
   box-shadow: 0 0 6px var(--green);
   animation: hud-led 1.3s steps(1) infinite;
 }
+
+/* Online: a blind opponent search */
+.online-finder { min-width: 280px; max-width: 360px; }
+.online-finder .find-btn { margin-top: 10px; padding: 14px 22px; font-size: 16px; width: 100%; }

@@ -370,6 +370,36 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
     : getManager(w, oppId);
   const oppDiv = DIVISIONS[opp.div ?? 0];
 
+  /** Start a battle against this opponent's battle deck. */
+  const startFight = (id: string) => {
+    const foe = getManager(w, id);
+    const seed = (w.tick * 7919 + w.hour * 104729 + Date.now()) % 2 ** 31;
+    const st = createBattle(myTeam, teamOf(w, foe), seed);
+    const durBefore = Object.fromEntries(myTeam.map((r) => [r.uid, r.durability]));
+    const rankBefore = Object.fromEntries(myTeam.map((r) => [r.uid, vetRank(r)]));
+    setOppId(id);
+    setFight({ oppId: id, st, durBefore, eloBefore: me.elo, rankBefore });
+    setView(st);
+    setCaption('Your turn');
+    setResult(null);
+    setHandSel(null);
+    setPending(null);
+    setFloats([]);
+    setFx({});
+    setBanner({ text: online ? `VS ${foe.name.toUpperCase()}` : 'YOUR TURN', kind: 'mine', id: Date.now() });
+    sfx('turn-start');
+  };
+  const [searching, setSearching] = useState(false);
+  /** Online: a blind search — the opponent and their deck are revealed only on the battlefield. */
+  const findOpponent = () => {
+    setSearching(true);
+    sfx('ui-open');
+    setTimeout(() => {
+      setSearching(false);
+      startFight(pickPvpOpponent(w).id);
+    }, 1400);
+  };
+
   // training: start the scripted fight right away (robots made just for it, not from your Hangar)
   useEffect(() => {
     if (!tutorial || fight || tutEnd !== undefined) return;
@@ -458,6 +488,28 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
             </>
           )}
           <div className="row" style={{ alignItems: 'flex-start', gap: 24 }}>
+            {online ? (
+              <div className="online-finder">
+                <h3>Ranked battle</h3>
+                <div className="muted">
+                  Your ELO <b>{me.elo}</b> · {me.wins}/{me.draws}/{me.losses} (W/D/L, online only)
+                </div>
+                <p className="muted">
+                  You won't know who you face — or their deck — until the battle starts. Players come first; players
+                  still on the starter deck are skipped.
+                </p>
+                <button className="primary find-btn" disabled={!!teamErr || searching} onClick={findOpponent}>
+                  {searching ? (
+                    <>
+                      SEARCHING<span className="blink">_</span>
+                    </>
+                  ) : (
+                    '⚔ Find opponent'
+                  )}
+                </button>
+                {teamErr && <div className="error">Battle deck not ready: {teamErr}. Pick another deck or go to the Hangar.</div>}
+              </div>
+            ) : (
             <div>
               <h3>Opponent</h3>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
@@ -505,28 +557,14 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
                 <button
                   className="primary"
                   disabled={!!teamErr || !!teamError(teamOf(w, opp))}
-                  onClick={() => {
-                    const seed = (w.tick * 7919 + w.hour * 104729 + Date.now()) % 2 ** 31;
-                    const st = createBattle(myTeam, teamOf(w, opp), seed);
-                    const durBefore = Object.fromEntries(myTeam.map((r) => [r.uid, r.durability]));
-                    const rankBefore = Object.fromEntries(myTeam.map((r) => [r.uid, vetRank(r)]));
-                    setFight({ oppId, st, durBefore, eloBefore: me.elo, rankBefore });
-                    setView(st);
-                    setCaption('Your turn');
-                    setResult(null);
-                    setHandSel(null);
-                    setPending(null);
-                    setFloats([]);
-                    setFx({});
-                    setBanner({ text: 'YOUR TURN', kind: 'mine', id: Date.now() });
-                    sfx('turn-start');
-                  }}
+                  onClick={() => startFight(oppId)}
                 >
                   ⚔ Fight
                 </button>
               </div>
               {teamErr && <div className="error">Battle deck not ready: {teamErr}. Pick another deck or go to the Hangar.</div>}
             </div>
+            )}
             <div style={{ flex: 1 }}>
               <h3>Your teams</h3>
               {ensureDecks(me).map((d, di) => (

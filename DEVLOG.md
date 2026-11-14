@@ -414,6 +414,12 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   the contract never counts it toward the league. The players' old mixed records were reset once.
 - Season prizes for the top 3 ELO: 300/200/100 → 600/350/200 CR. 19 engine tests.
 
+### Online: blind matchmaking (Nov 14)
+- The Online tab no longer shows the opponent: "Find opponent" searches and the battle starts at once — the
+  opponent and their deck are revealed only on the battlefield, so nobody can prepare a counter-deck.
+- Matchmaking skips players whose battle deck is still the untouched starter deck (signed up and left), so
+  newcomers don't keep meeting the same starter deck; with no one else left, a bot deck is the opponent.
+
 ## Next
 - Card art.
 - README for judges, demo video.

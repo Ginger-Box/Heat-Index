@@ -871,6 +871,13 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState, 
   if (a.id === PLAYER_ID) shareOp(PLAYER_ID, 'match', [b.id, battleLogOf(st), mode]);
 }
 
+/** Is this manager's battle deck still exactly the starter deck everyone gets? */
+export function isStarterDeck(w: World, m: Manager): boolean {
+  const deck = teamOf(w, m).map((r) => r.modelId).sort();
+  const start = [...STARTER_TEAM].sort();
+  return deck.length === start.length && deck.every((id, i) => id === start[i]);
+}
+
 /**
  * Online (ranked) opponent: another player's battle deck, played by the AI under their name. Players come first —
  * nearest by ELO; a bot deck only about one battle in ten, or when there's nobody else.
@@ -879,7 +886,11 @@ export function pickPvpOpponent(w: World, exclude?: string, managerId = PLAYER_I
   const me = getManager(w, managerId);
   const near = (pool: Manager[]) =>
     [...pool].sort((x, y) => Math.abs(x.elo - me.elo) - Math.abs(y.elo - me.elo)).slice(0, 3);
-  const players = w.managers.filter((m) => isHuman(m) && m.id !== me.id && m.id !== exclude && !teamError(teamOf(w, m)));
+  // players who never touched the starter deck (signed up and left) are skipped — otherwise newcomers would keep
+  // meeting the same starter deck
+  const players = w.managers.filter(
+    (m) => isHuman(m) && m.id !== me.id && m.id !== exclude && !teamError(teamOf(w, m)) && !isStarterDeck(w, m),
+  );
   const bots = w.managers.filter((m) => !isHuman(m) && m.id !== exclude && !teamError(teamOf(w, m)));
   const pool = players.length && Math.random() >= 0.1 ? near(players) : near(bots.length ? bots : players);
   return pool[Math.floor(Math.random() * pool.length)] ?? me;

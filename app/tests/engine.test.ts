@@ -298,6 +298,12 @@ test('league battles leave ELO and W/D/L alone; online battles move both; an abs
   const bob = addHuman(w, 'bob.testnet', 'Bob');
   restorePlayerFromChain(w, 'bob.testnet', { credits: 500, robots: MODELS.slice(0, 12).map((x, i) => ({ tokenId: `t${i}`, modelId: x.id, durability: x.maxDur })) }, 'bob.testnet');
   assert.equal(pickPvpOpponent(w).human || pickPvpOpponent(w).human || pickPvpOpponent(w).human, true, 'players come first');
+  // a player who signed up and left (still the starter deck) is never picked
+  const { STARTER_TEAM, isStarterDeck } = await import('../src/engine/world');
+  addHuman(w, 'idle.testnet', 'Idle');
+  restorePlayerFromChain(w, 'idle.testnet', { credits: 1000, robots: STARTER_TEAM.map((id, i) => ({ tokenId: `s${i}`, modelId: id, durability: model(id).maxDur })) }, 'idle.testnet');
+  assert.ok(isStarterDeck(w, getManager(w, 'idle.testnet')));
+  for (let i = 0; i < 40; i++) assert.notEqual(pickPvpOpponent(w).id, 'idle.testnet');
   const bobDur = robotsOf(w, 'bob.testnet').map((r) => r.durability);
   const st2 = simulateBattle(teamOf(w, me), teamOf(w, bob), 9, [{ careful: 0.5 }, { careful: 0.5 }]);
   applyMatch(w, PLAYER_ID, 'bob.testnet', st2, 'ranked');

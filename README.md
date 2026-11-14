@@ -127,9 +127,9 @@ action log's SHA-256 is required with each result and the log is public, so anyo
 ## Two ways to play
 
 - **Champion** — build a deck of 10–15 robots. **Arena** is the Pit League (PvE): climb the divisions against the bot
-  teams for credits and prizes — it doesn't touch your ELO. **Online** is ranked: you fight **another player's battle
-  deck, played by the AI under their name** (a bot deck only about one battle in ten, or when nobody else is
-  around); only these battles move ELO and W/D/L in the Ratings, and the top 3 ELO at the season's end get
+  teams for credits and prizes — it doesn't touch your ELO. **Online** is ranked: you press **Find opponent** and fight
+  **another player's battle deck, played by the AI under their name** — revealed only when the battle starts (players still on the starter deck are skipped; a bot deck only about one battle in ten, or when
+  nobody else is around); only these battles move ELO and W/D/L in the Ratings, and the top 3 ELO at the season's end get
   600 / 350 / 200 CR. The bots keep fighting each other in the background, so the ladder is never empty. Push your
   robots hard and pay for repairs, or play carefully and save money.
 - **Magnate** — trade robots on the Market, read the BUY / SELL signal (actual relevance vs what brokers price in),
