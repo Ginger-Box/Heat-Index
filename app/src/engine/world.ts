@@ -606,6 +606,9 @@ const BANKRUPT_BELOW = 60;
 /** Which part of a broker's daily profit is paid as dividends (split by shares) */
 export const DIVIDEND_SHARE = 0.8;
 const SCRAP_YARD_CAP = 12;
+/** the scrap dealer refurbishes at most this many robots an hour, paying this share of a normal repair */
+const JUNK_REPAIRS_PER_HOUR = 1;
+const JUNK_REPAIR_COST = 1.5;
 const REOPEN_AT = 250;
 
 function elo(a: Manager, b: Manager, score: number) {
@@ -977,8 +980,14 @@ function brokerHour(w: World, rel: Record<string, number>) {
       const broken = robotsOf(w, b.id).filter((r) => r.durability <= 0);
       // Extra scrap is melted down — the robot leaves the world
       for (const r of broken.splice(0, Math.max(0, broken.length - SCRAP_YARD_CAP))) delete w.robots[r.uid];
-      for (const r of broken.slice(0, 4)) {
-        const cost = Math.round(repairCost(brokerFair(w, b, r.modelId), r) * 0.6);
+      // Refurbishing: a few a day, only models it is short of, at a real workshop's cost — otherwise cheap scrap
+      // turned into cheap stock made it the cheapest seller of everything and it got rich off everyone.
+      let fixed = 0;
+      for (const r of broken) {
+        if (fixed >= JUNK_REPAIRS_PER_HOUR) break;
+        if (brokerStock(w, b, r.modelId).length >= b.style.targetStock + 1) continue;
+        const cost = Math.round(repairCost(brokerFair(w, b, r.modelId), r) * JUNK_REPAIR_COST);
+        fixed++;
         if (b.credits - cost < BANKRUPT_BELOW + 40) break;
         b.credits -= cost;
         r.durability = maxDurability(r.modelId);

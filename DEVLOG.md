@@ -233,6 +233,15 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   the upper leagues' costlier decks make bigger battle purses. NPC purse rate 2.5% → 1.5%, and the league stipend
   now only tops up a team below 400 CR: NPC money now grows slowly (avg ~290 → 570–710 CR over a week).
 
+### Broker balance: the Junkman (Nov 14)
+- Playtests showed the scrap dealer always far ahead. `scripts/brokers.ts` (4 worlds × 7 days, equity change):
+  Kessler −168, Magpie −1143, **Junkman +14 559**. Cause: it bought scrap at 15% of the price, refurbished up to 4 an
+  hour at 60% of a normal repair, and the big refurbished stock pushed its prices to the floor — so it became the
+  cheapest seller of everything (150 sales a week) on a cost basis of ~33%.
+- Now it refurbishes 1 robot an hour, only models it is short of, at 1.5× a normal repair (a real workshop's cost).
+  After: Kessler +355, Magpie +130, Junkman +663 — all three in the black, none closes; NPC cash grows slowly
+  (avg ~310 → ~550 over a week); the league's division strengths unchanged.
+
 ## Next
 - Card art.
 - README for judges, demo video.
