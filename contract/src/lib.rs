@@ -70,6 +70,17 @@ const LEAGUE: [(&str, u8); 12] = [
 ];
 const LEAGUE_PRIZE: [u128; 4] = [150, 300, 500, 1_000];
 const CROWN_DEFENSE_PRIZE: u128 = 300;
+/// Battle rewards + league prizes an account can receive per day (UTC). The client reports results, so this is the
+/// ceiling on what a scripted client can mint; an honest player rarely reaches it. Over the cap, the reward is cut.
+const DAILY_PURSE_MAX: u128 = 3_000;
+/// Direct `register` calls (wallet players) per hour — each new player costs the contract storage.
+const REGISTERS_PER_HOUR: u32 = 60;
+/// Free-text arguments (opponent, broker, memo) are cut to this length in logs.
+const MAX_TEXT: usize = 64;
+
+fn short(s: &str) -> String {
+    s.chars().take(MAX_TEXT).collect()
+}
 
 fn vet_rank(wins: u32) -> usize {
     VET_WINS.iter().filter(|&&w| wins >= w).count()
@@ -105,6 +116,7 @@ enum Key {
     Gains,
     VetDay,
     League,
+    PurseDay,
 }
 
 /// New player accounts get this much NEAR for gas, and the game key may spend up to GAME_KEY_ALLOWANCE of it.
@@ -208,11 +220,15 @@ pub struct Contract {
     vet_day: LookupMap<String, DayCount>,
     /// account -> its Pit League progress
     league: LookupMap<AccountId, League>,
+    /// account -> battle rewards + league prizes received today
+    purse_day: LookupMap<AccountId, DayCount>,
+    register_bucket: u64,
+    registered_this_hour: u32,
 }
 
-/// State layout of v0.4 (before the anti-arbitrage limits and the on-chain league) — used once by `migrate`.
+/// State layout of v0.5 (before the daily purse cap) — used once by `migrate`.
 #[near(serializers = [borsh])]
-struct ContractV4 {
+struct ContractV5 {
     owner_id: AccountId,
     balances: LookupMap<String, u128>,
     supply: LookupMap<String, u128>,
@@ -227,6 +243,10 @@ struct ContractV4 {
     created_this_hour: u32,
     last_battle: LookupMap<AccountId, u64>,
     records: LookupMap<String, Record>,
+    paid: LookupMap<String, u128>,
+    gains: LookupMap<AccountId, DayCount>,
+    vet_day: LookupMap<String, DayCount>,
+    league: LookupMap<AccountId, League>,
 }
 
 fn bal_key(token_id: &str, account: &AccountId) -> String {
@@ -263,14 +283,17 @@ impl Contract {
             gains: LookupMap::new(Key::Gains),
             vet_day: LookupMap::new(Key::VetDay),
             league: LookupMap::new(Key::League),
+            purse_day: LookupMap::new(Key::PurseDay),
+            register_bucket: 0,
+            registered_this_hour: 0,
         }
     }
 
-    /// One-off upgrade from v0.4: keeps everything, adds purchase prices, daily limits and the on-chain league.
+    /// One-off upgrade from v0.5: keeps everything, adds the daily purse cap and the register rate limit.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: ContractV4 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.4 state"));
+        let old: ContractV5 = env::state_read().unwrap_or_else(|| env::panic_str("No v0.5 state"));
         Self {
             owner_id: old.owner_id,
             balances: old.balances,
@@ -286,10 +309,13 @@ impl Contract {
             created_this_hour: old.created_this_hour,
             last_battle: old.last_battle,
             records: old.records,
-            paid: LookupMap::new(Key::Paid),
-            gains: LookupMap::new(Key::Gains),
-            vet_day: LookupMap::new(Key::VetDay),
-            league: LookupMap::new(Key::League),
+            paid: old.paid,
+            gains: old.gains,
+            vet_day: old.vet_day,
+            league: old.league,
+            purse_day: LookupMap::new(Key::PurseDay),
+            register_bucket: 0,
+            registered_this_hour: 0,
         }
     }
 
@@ -302,6 +328,8 @@ impl Contract {
     /// Called through a public, function-call-only "sponsor" key of this contract; the contract pays the
     /// account's NEAR, and creation is rate-limited per hour.
     pub fn create_player_account(&mut self, name: String, owner_key: PublicKey, game_key: PublicKey) -> Promise {
+        // only the game's own relayer (signing as this contract account) may spend the contract's NEAR on new accounts
+        require!(env::predecessor_account_id() == env::current_account_id(), "Only the game's relayer can create accounts");
         require!(
             name.len() >= 2
                 && name.len() <= 24
@@ -368,6 +396,13 @@ impl Contract {
     pub fn register(&mut self) -> Vec<String> {
         let who = env::predecessor_account_id();
         require!(self.players.get(&who).is_none(), "Already registered");
+        let hour = env::block_timestamp_ms() / 3_600_000;
+        if hour != self.register_bucket {
+            self.register_bucket = hour;
+            self.registered_this_hour = 0;
+        }
+        require!(self.registered_this_hour < REGISTERS_PER_HOUR, "Too many new players this hour, try later");
+        self.registered_this_hour += 1;
         self.register_account(&who)
     }
 
@@ -416,6 +451,7 @@ impl Contract {
         let vet = VET_PRICE_PCT[self.records.get(&token_id).map(|x| x.rank as usize).unwrap_or(0)];
         let limit = base_price(&r.model_id) * SELL_MAX_PCT * vet * (15 * max_d + 85 * d) / (100 * 100 * 100 * max_d) + 1;
         require!(price.0 <= limit, "Price is above what any broker would pay for this robot");
+        require!(price.0 >= 1, "A broker pays at least 1 CR");
         // anti-arbitrage: at most GAIN_MAX_PCT of the purchase price (× veteran bonus), and a daily profit cap
         let paid = self.paid.get(&token_id).copied().unwrap_or_else(|| base_price(&r.model_id));
         require!(price.0 * 100 * 100 <= paid * GAIN_MAX_PCT * vet + 100 * 100, "Price is too far above what you paid for this robot");
@@ -463,6 +499,10 @@ impl Contract {
         let who = self.player();
         require!(result <= 2, "Bad result");
         require!(wear.len() <= 15, "A deck has at most 15 robots");
+        let mut ids: Vec<&String> = wear.iter().map(|w| &w.token_id).collect();
+        ids.sort();
+        ids.dedup();
+        require!(ids.len() == wear.len(), "A robot can be listed only once");
         let now = env::block_timestamp_ms();
         if let Some(last) = self.last_battle.get(&who) {
             require!(now >= last + BATTLE_COOLDOWN_MS, "One battle per 30 seconds");
@@ -471,7 +511,13 @@ impl Contract {
         let value: u128 = self
             .owned
             .get(&who)
-            .map(|set| set.iter().filter_map(|t| self.robots.get(t)).map(|r| base_price(&r.model_id)).sum())
+            .map(|set| {
+                set.iter()
+                    .filter_map(|t| self.robots.get(t))
+                    .filter(|r| r.durability > 0)
+                    .map(|r| base_price(&r.model_id))
+                    .sum()
+            })
             .unwrap_or(0);
         require!(reward.0 <= MAX_REWARD && reward.0 * 100 <= value * REWARD_MAX_PCT, "Reward out of range");
         for w in &wear {
@@ -503,8 +549,9 @@ impl Contract {
             rec.rank = rank;
             self.records.insert(w.token_id.clone(), rec);
         }
-        if reward.0 > 0 {
-            self.mint_credits(&who, reward.0, "battle reward");
+        let paid_reward = self.take_purse(&who, reward.0);
+        if paid_reward > 0 {
+            self.mint_credits(&who, paid_reward, "battle reward");
         }
         if result == 1 {
             self.league_win(&who, &opponent);
@@ -523,7 +570,7 @@ impl Contract {
             "1.0.0",
             "battle",
             json!([{
-                "account_id": who, "opponent": opponent, "result": result, "reward": reward, "seed": seed,
+                "account_id": who, "opponent": short(&opponent), "result": result, "reward": U128(paid_reward), "seed": seed,
                 "wear": wear.iter().map(|w| json!({ "token_id": w.token_id, "durability": w.durability })).collect::<Vec<_>>()
             }]),
         );
@@ -546,6 +593,9 @@ impl Contract {
         let from = env::predecessor_account_id();
         require!(from != receiver_id, "Sender and receiver must differ");
         require!(amount.0 > 0, "Amount must be positive");
+        // credits are earned in the arena, not moved between accounts (stops sybil farms feeding one account)
+        require!(token_id != CREDITS, "Credits can't be transferred");
+        require!(self.players.get(&receiver_id).is_some(), "The receiver must be a registered player");
         self.sub(&token_id, &from, amount.0);
         self.add(&token_id, &receiver_id, amount.0);
         if let Some(mut r) = self.robots.get(&token_id).cloned() {
@@ -558,7 +608,7 @@ impl Contract {
             "nep245",
             "1.0.0",
             "mt_transfer",
-            json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo }]),
+            json!([{ "old_owner_id": from, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo.as_deref().map(short) }]),
         );
     }
 
@@ -725,6 +775,25 @@ impl Contract {
         }
     }
 
+    /// Takes up to `amount` from the account's daily purse (DAILY_PURSE_MAX); returns what may be paid.
+    fn take_purse(&mut self, who: &AccountId, amount: u128) -> u128 {
+        let day = env::block_timestamp_ms() / DAY_MS;
+        let mut d = self.purse_day.get(who).cloned().unwrap_or_default();
+        if d.day != day {
+            d = DayCount { day, amount: 0 };
+        }
+        let pay = amount.min(DAILY_PURSE_MAX.saturating_sub(d.amount));
+        d.amount += pay;
+        self.purse_day.insert(who.clone(), d);
+        pay
+    }
+
+    /// Battle rewards + league prizes the account has received today (the game shows the remaining daily purse).
+    pub fn purse_today(&self, account_id: AccountId) -> U128 {
+        let day = env::block_timestamp_ms() / DAY_MS;
+        U128(self.purse_day.get(&account_id).filter(|d| d.day == day).map(|d| d.amount).unwrap_or(0))
+    }
+
     /// A recorded win over a team of the player's division counts toward the climb; beating all of them pays the
     /// division prize (minted here, so the game's credits and the chain's stay equal) and moves the player up.
     fn league_win(&mut self, who: &AccountId, opponent: &str) {
@@ -738,7 +807,10 @@ impl Contract {
         if !left {
             let last = (LEAGUE_PRIZE.len() - 1) as u8;
             let prize = if l.div == last && l.crowns > 0 { CROWN_DEFENSE_PRIZE } else { LEAGUE_PRIZE[l.div as usize] };
-            self.mint_credits(who, prize, "league prize");
+            let prize = self.take_purse(who, prize);
+            if prize > 0 {
+                self.mint_credits(who, prize, "league prize");
+            }
             event("heat_index", "1.0.0", "league", json!([{ "account_id": who, "division": l.div, "prize": U128(prize) }]));
             if l.div < last {
                 l.div += 1;
@@ -759,7 +831,7 @@ impl Contract {
             "heat_index",
             "1.0.0",
             "trade",
-            json!([{ "account_id": who, "kind": kind, "token_id": token_id, "amount": U128(amount), "counterparty": counterparty }]),
+            json!([{ "account_id": who, "kind": kind, "token_id": token_id, "amount": U128(amount), "counterparty": short(counterparty) }]),
         );
     }
 }
@@ -933,6 +1005,64 @@ mod tests {
         ctx_at("ola.testnet", 200_000);
         c.record_battle("Protocol Omega".into(), 1, U128(10), 9, vec![]);
         assert_eq!(c.league_of("ola.testnet".parse().unwrap()).beaten.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the game's relayer")]
+    fn factory_is_relayer_only() {
+        let (mut c, _) = setup("pat.testnet");
+        let k: PublicKey = "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap();
+        c.create_player_account("evil".into(), k.clone(), k);
+    }
+
+    #[test]
+    fn battle_purse_is_capped_per_day() {
+        let (mut c, _) = setup("quinn.testnet");
+        let q: AccountId = "quinn.testnet".parse().unwrap();
+        c.buy_robot("titan".into(), U128(400), 16, "kessler".into()); // working robots' value 750 + 560
+        let before = c.mt_balance_of(q.clone(), CREDITS.into()).0;
+        // 12 battles × 300 = 3600 asked, but at most 3000 a day is paid (unknown opponent: no league prize)
+        for i in 0..12u64 {
+            ctx_at("quinn.testnet", 1_000 + i * 31_000);
+            c.record_battle("npc".into(), 1, U128(300), i, vec![]);
+        }
+        assert_eq!(c.mt_balance_of(q.clone(), CREDITS.into()).0 - before, 3_000);
+        assert_eq!(c.purse_today(q.clone()).0, 3_000);
+        // the next day the purse is full again
+        ctx_at("quinn.testnet", DAY_MS + 1_000);
+        c.record_battle("npc".into(), 1, U128(300), 99, vec![]);
+        assert_eq!(c.mt_balance_of(q, CREDITS.into()).0 - before, 3_300);
+    }
+
+    #[test]
+    #[should_panic(expected = "listed only once")]
+    fn wear_cannot_repeat_a_robot() {
+        let (mut c, ids) = setup("ray.testnet");
+        c.record_battle("npc".into(), 1, U128(10), 1, vec![Wear { token_id: ids[0].clone(), durability: 5 }, Wear { token_id: ids[0].clone(), durability: 5 }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Credits can't be transferred")]
+    fn credits_are_not_transferable() {
+        let (mut c, _) = setup("sam.testnet");
+        ctx("tom.testnet");
+        c.register();
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id("sam.testnet".parse().unwrap())
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .build());
+        c.mt_transfer("tom.testnet".parse().unwrap(), CREDITS.into(), U128(100), None, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "registered player")]
+    fn robots_only_go_to_players() {
+        let (mut c, ids) = setup("uma.testnet");
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id("uma.testnet".parse().unwrap())
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .build());
+        c.mt_transfer("nobody.testnet".parse().unwrap(), ids[0].clone(), U128(1), None, None);
     }
 
     #[test]

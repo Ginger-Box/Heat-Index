@@ -9,3 +9,6 @@ art-prompts.md
 # promo video workspace and jury reports (local only)
 promo/
 jury/
+
+# local security audit reports
+audit/

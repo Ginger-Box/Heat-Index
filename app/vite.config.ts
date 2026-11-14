@@ -23,6 +23,14 @@ function nearRelayer(): Plugin {
           res.statusCode = 405
           return res.end()
         }
+        // only the game itself: same origin and a JSON body (a JSON content type forces a CORS preflight, which
+        // another site's page can't pass) — so a web page open in the same browser can't drive this relayer
+        const origin = req.headers.origin ?? ''
+        const okOrigin = /^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin)
+        if (!okOrigin || !String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+          res.statusCode = 403
+          return res.end()
+        }
         let body = ''
         req.on('data', (c) => (body += c))
         req.on('end', async () => {

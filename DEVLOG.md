@@ -269,6 +269,29 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   Junkman 15, Magpie 10; bankruptcies only for Magpie (6 of 36 worlds) — the black market that trades everything is
   the one that gambles. Magpie's smuggler discount at the Factory is now 4% (was 10%), the Junkman's upkeep 45 CR.
 
+### Security audit and fixes (Nov 14)
+- A separate session ran a security audit with Cloudflare's `security-audit` skill (contract, NEAR client, dev
+  relayer, git history, dependencies): 2 high, 2 medium, 4 low, no secrets in the repo or its history.
+- **Contract v0.6** (state migration, 20 unit tests):
+  - *H1* — the account factory could be called by anyone, draining 0.15 NEAR per call and blocking email sign-ups:
+    now only the game's relayer (the contract account itself) may create accounts. Checked live: a call from
+    another account is rejected.
+  - *H2* — battle rewards and league prizes had no daily limit (a scripted client could mint ~500k CR a day): a
+    daily purse of 3000 CR per account for rewards + prizes (over it, the payout is cut, the battle still counts);
+    the reward cap counts only working robots.
+  - *M1* — sybil accounts could feed one account: credits are no longer transferable, robots go only to registered
+    players, direct registrations are rate-limited (60 an hour).
+  - *L2/L4* — a sale must pay at least 1 CR; a robot can be listed only once in a battle; free-text fields are cut
+    to 64 characters in events.
+- **The game mirrors the purse cap** (the reward shows "capped · N CR left today"), and the reward is bounded by a
+  quarter of your working robots' value, as on-chain.
+- **Dev relayer** (*M2*): accepts only same-origin JSON requests, so a web page open in the same browser can't make it
+  create accounts or unlink a login.
+- The contract account has a single full-access key (the old public sponsor key was already removed).
+- Dependencies: removed the unused `vitest` (both critical advisories), `npm audit fix` for dev tooling; left: 7
+  moderate / 14 low in dev tools and `elliptic` inside the NEAR SDKs (no upstream fix).
+- Not done before the deadline: a running per-account robot value (L1), revoking the game key on sign-out, a CSP.
+
 ## Next
 - Card art.
 - README for judges, demo video.

@@ -170,6 +170,10 @@ export interface World {
   league?: LeagueState;
   /** the player's realised trading profit today (UTC day number) — capped like on NEAR */
   gainDay?: { day: number; amount: number };
+  /** the player's battle rewards + league prizes today (UTC day) — capped like on NEAR */
+  purseDay?: { day: number; amount: number };
+  /** the last battle's reward to the player, and whether a limit cut it */
+  lastPlayerReward?: { reward: number; capped: boolean };
   /** the Factory is on strike (no restocking) until this game hour */
   strikeUntil?: number;
 }
@@ -683,10 +687,16 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
       ms.games++;
       if (res === 1) ms.wins++;
     }
-    const reward =
-      m.id === PLAYER_ID
-        ? playerReward(teamValue[s], teamValue[1 - s], res, sides[1 - s])
-        : battleReward(teamValue[s], teamValue[1 - s], res, ECON.purseRate);
+    let reward: number;
+    if (m.id === PLAYER_ID) {
+      // the same bounds the NEAR contract applies: ≤ 25% of your working robots' base value, and the daily purse
+      const full = playerReward(teamValue[s], teamValue[1 - s], res, sides[1 - s]);
+      const owned = robotsOf(w, PLAYER_ID)
+        .filter((r) => r.durability > 0 && !r.loaner)
+        .reduce((x, r) => x + model(r.modelId).basePrice, 0);
+      reward = takePurse(w, Math.min(full, Math.floor(owned * 0.25)));
+      w.lastPlayerReward = { reward, capped: reward < full };
+    } else reward = battleReward(teamValue[s], teamValue[1 - s], res, ECON.purseRate);
     m.credits += reward;
     if (m.id === PLAYER_ID) playerHooks.match?.(st, sides[1 - s].id, res === 1 ? 1 : res === 0 ? 0 : 2, reward);
     ledger(w, { kind: 'reward', from: 'arena', to: m.id, amount: reward });
@@ -728,6 +738,23 @@ export function playerReward(mine: number, theirs: number, res: number, opp: Man
   return Math.min(400, Math.round(battleReward(mine, theirs, res, ECON.playerPurseRate) * DIVISIONS[opp.div ?? 0].purse));
 }
 
+/**
+ * The daily purse: battle rewards + league prizes a player can receive per day (UTC) — the NEAR contract caps the
+ * same (DAILY_PURSE_MAX), because results are reported by the client. An honest player rarely reaches it.
+ */
+export const DAILY_PURSE_MAX = 3000;
+export function purseLeft(w: World): number {
+  const day = Math.floor(Date.now() / 86_400_000);
+  return DAILY_PURSE_MAX - (w.purseDay?.day === day ? w.purseDay.amount : 0);
+}
+function takePurse(w: World, amount: number): number {
+  const day = Math.floor(Date.now() / 86_400_000);
+  const used = w.purseDay?.day === day ? w.purseDay.amount : 0;
+  const pay = Math.max(0, Math.min(amount, DAILY_PURSE_MAX - used));
+  w.purseDay = { day, amount: used + pay };
+  return pay;
+}
+
 export const leagueOf = (w: World): LeagueState => (w.league ??= { div: 0, beaten: [], crowns: 0 });
 export const divisionTeams = (w: World, div: number) => w.managers.filter((m) => m.id !== PLAYER_ID && (m.div ?? 0) === div);
 
@@ -739,7 +766,7 @@ function leagueWin(w: World, opp: Manager) {
   const teams = divisionTeams(w, L.div);
   if (!teams.every((t) => L.beaten.includes(t.id))) return;
   const d = DIVISIONS[L.div];
-  const prize = divisionPrize(L.div, L.crowns);
+  const prize = takePurse(w, divisionPrize(L.div, L.crowns));
   getManager(w, PLAYER_ID).credits += prize;
   ledger(w, { kind: 'reward', from: 'arena', to: PLAYER_ID, amount: prize, note: `${d.name} won` });
   if (L.div < DIVISIONS.length - 1) {

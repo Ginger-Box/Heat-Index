@@ -43,6 +43,8 @@ import {
   divisionTeams,
   leagueOf,
   playerReward,
+  purseLeft,
+  DAILY_PURSE_MAX,
   sideTeamValues,
   type Manager,
   teamOf,
@@ -1377,7 +1379,9 @@ function ResultPanel({
   const me = getManager(w, PLAYER_ID);
   const res = st.winner === null ? 'Draw' : st.winner === 0 ? 'Victory!' : 'Defeat';
   const values = sideTeamValues(st);
-  const reward = playerReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0, getManager(w, oppId));
+  const reward =
+    w.lastPlayerReward?.reward ??
+    playerReward(values[0], values[1], st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0, getManager(w, oppId));
   const uids = Object.keys(durBefore);
   return (
     <div className="panel" style={{ borderColor: st.winner === 0 ? 'var(--green)' : 'var(--line)' }}>
@@ -1392,7 +1396,14 @@ function ResultPanel({
         </div>
       )}
       <p>
-        Core: {st.sides[0].core} : {st.sides[1].core} · Reward <span className="cr">+{reward} CR</span> · ELO {eloBefore} →{' '}
+        Core: {st.sides[0].core} : {st.sides[1].core} · Reward <span className="cr">+{reward} CR</span>
+        {w.lastPlayerReward?.capped && (
+          <span className="muted" title={`Battle rewards and league prizes are capped at ${DAILY_PURSE_MAX} CR a day and at a quarter of your working robots' value — the same limits the NEAR contract checks.`}>
+            {' '}
+            (capped · {purseLeft(w)} CR left today)
+          </span>
+        )}{' '}
+        · ELO {eloBefore} →{' '}
         <b>{me.elo}</b>
       </p>
       {promo && (
