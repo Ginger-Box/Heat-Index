@@ -871,6 +871,18 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState, 
   if (a.id === PLAYER_ID) shareOp(PLAYER_ID, 'match', [b.id, battleLogOf(st), mode]);
 }
 
+/** An online battle that was started and abandoned counts as a loss (no wear, no reward). */
+export function forfeitRanked(w: World, managerId: string, oppId: string) {
+  const me = getManager(w, managerId);
+  const opp = w.managers.find((m) => m.id === oppId);
+  me.losses++;
+  if (opp) {
+    opp.wins++;
+    elo(me, opp, 0);
+  }
+  if (managerId === PLAYER_ID) log(w, 'match', `Online battle vs ${opp?.name ?? 'an opponent'} abandoned: counted as a loss`);
+}
+
 /** Is this manager's battle deck still exactly the starter deck everyone gets? */
 export function isStarterDeck(w: World, m: Manager): boolean {
   const deck = teamOf(w, m).map((r) => r.modelId).sort();

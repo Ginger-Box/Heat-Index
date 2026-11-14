@@ -130,7 +130,11 @@ action log's SHA-256 is required with each result and the log is public, so anyo
   teams for credits and prizes — it doesn't touch your ELO. **Online** is ranked: you press **Find opponent** and fight
   **another player's battle deck, played by the AI under their name** — revealed only when the battle starts (players still on the starter deck are skipped; a bot deck only about one battle in ten, or when
   nobody else is around); only these battles move ELO and W/D/L in the Ratings, and the top 3 ELO at the season's end get
-  600 / 350 / 200 CR. The bots keep fighting each other in the background, so the ladder is never empty. Push your
+  600 / 350 / 200 CR. **Online battles run on the server**: it picks the opponent, deals the cards from its own random
+  seed and plays the opponent's turns, and the browser only ever receives what is on the table — the opponent's hand
+  and deck stay on the server (`engine/hidden.ts`, tested on every move of 20 battles), and other players' decks are
+  stripped from the shared world state. Leaving a battle, or not finishing it within 30 minutes, counts as a loss.
+  The bots keep fighting each other in the background, so the ladder is never empty. Push your
   robots hard and pay for repairs, or play carefully and save money.
 - **Magnate** — trade robots on the Market, read the BUY / SELL signal (actual relevance vs what brokers price in),
   and invest in AI brokers for a share of their profit.

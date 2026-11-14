@@ -420,6 +420,17 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
 - Matchmaking skips players whose battle deck is still the untouched starter deck (signed up and left), so
   newcomers don't keep meeting the same starter deck; with no one else left, a bot deck is the opponent.
 
+### Online: server-run battles, no hidden information in the browser (Nov 14)
+- Logged-in online battles now run in the shared world's Durable Object (`/api/world/pvp/start`, `/pvp/act`): the
+  server chooses the opponent, draws a crypto-random seed, checks every move, and plays the opponent's turns with the
+  battle AI. The browser gets redacted views — the opponent's hand and deck become `?h0…`/`?d0…` placeholders,
+  their models, wear and HP bonuses are removed, the seed, RNG state, input and log are dropped, and the opponent's
+  draws arrive without a uid. A test plays 20 AI battles and checks that no view or event names a hidden robot.
+- The shared world state no longer contains other players' battle decks (`team`/`decks` are stripped; your own come
+  in a separate `me` field). The client can't send a ranked 'match' op any more — only the server ends online battles.
+- Rage-quit closed: starting a new search or 30 minutes without a move forfeits the open battle (a loss, ELO moves).
+- Guests (no login) keep local battles against bot decks.
+
 ## Next
 - Card art.
 - README for judges, demo video.

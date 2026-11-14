@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useReducer } from 'react';
 import { sfx } from './audio';
 import { KeyPair } from 'near-api-js';
+import type { Action, BattleEvent, BattleState } from './engine/battle';
 import { BROKER_RANGE, BROKER_TAGLINE, createWorld, ensureDecks, migrateLeague, playerHooks, type World } from './engine/world';
 import { addServerTx, chainSession } from './near/chain';
 import { PUBLIC_ORIGIN } from './near/config';
@@ -102,10 +103,18 @@ async function pull(force: boolean) {
     return;
   }
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `World server: ${res.status}`);
-  const out = (await res.json()) as { version: number; startMs: number; world: World };
+  const out = (await res.json()) as {
+    version: number;
+    startMs: number;
+    world: World;
+    me?: { team: string[]; decks?: World['managers'][number]['decks']; activeDeck?: number };
+  };
   if (!shared || (!force && shared.pending > 0)) return;
   shared.version = out.version;
   shared.startMs = out.startMs;
+  // other players' decks never come to the browser (Online is blind); our own come separately
+  const me = out.world.managers.find((m) => m.id === 'player');
+  if (me && out.me) Object.assign(me, out.me);
   world = migrate(out.world);
   notify(true);
 }
@@ -135,6 +144,33 @@ function sendOp(name: string, args: unknown[]) {
 playerHooks.op = (name, args) => {
   if (mode === 'shared') sendOp(name, args);
 };
+
+// ---------- online battles (run by the shared world's server) ----------
+
+async function pvpCall<T>(path: string, body: unknown): Promise<T> {
+  if (!shared) throw new Error('Log in to play online');
+  const res = await fetch(`${WORLD_API}/pvp/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${shared.token}` },
+    body: JSON.stringify(body),
+  });
+  const out = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok || out.error) throw new Error(out.error ?? `Online battle: ${res.status}`);
+  return out;
+}
+export const pvpStart = () =>
+  pvpCall<{ view: BattleState; oppId: string; opp: { name: string; elo: number; human: boolean } }>('start', {});
+export const pvpAct = (action: Action) =>
+  pvpCall<{
+    steps: { action: Action; ev: BattleEvent[]; view: BattleState }[];
+    result: { reward: number; tx: { label: string; hash?: string } | null; txError?: string } | null;
+  }>('act', { action });
+/** after an online battle: show the chain record and fetch the world the server just updated */
+export async function pvpFinished(tx: { label: string; hash?: string } | null, txError?: string) {
+  if (tx) addServerTx(tx.label, tx.hash);
+  else if (txError) addServerTx('Online battle', undefined, txError);
+  await pull(true).catch(() => {});
+}
 
 function leaveShared() {
   if (shared?.poll) clearInterval(shared.poll);

@@ -15,6 +15,9 @@ import {
   hoursPerDay,
   matchesPerHour,
   addHuman,
+  forfeitRanked,
+  pickPvpOpponent,
+  teamOf,
   applyMatch,
   buy,
   claimLoaner,
@@ -35,7 +38,10 @@ import {
   setTeam,
   type World,
 } from '../../app/src/engine/world';
-import { logText, replayBattle, sha256Hex, type BattleLog } from '../../app/src/engine/replay';
+import { battleLogOf, logText, replayBattle, sha256Hex, type BattleLog } from '../../app/src/engine/replay';
+import { applyAction, createBattle, type Action, type BattleEvent, type BattleState } from '../../app/src/engine/battle';
+import { planTurn } from '../../app/src/engine/ai';
+import { redactBattle, redactEvents } from '../../app/src/engine/hidden';
 import { applyPolicy, brokerPrompt, parsePolicy } from '../../app/src/engine/brokerAi';
 import { teamError } from '../../app/src/engine/team';
 import { vetRank } from '../../app/src/engine/veteran';
@@ -51,6 +57,14 @@ interface Env {
   NEARAI_KEY?: string;
   NEARAI_KEY_2?: string;
 }
+
+interface PvpSession {
+  st: BattleState;
+  oppId: string;
+  startedAt: number;
+}
+/** an online battle left this long counts as a loss */
+const PVP_ABANDON_MS = 30 * 60_000;
 
 /** the cheapest DeepSeek on NEAR AI Cloud, verifiable (runs in a TEE); called without reasoning */
 const BROKER_MODEL = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
@@ -138,7 +152,7 @@ export class SharedWorld extends DurableObject<Env> {
     const entries: Record<string, unknown> = { meta: { startMs: this.startMs, chunks, version: this.version } };
     for (let i = 0; i < chunks; i++) entries[`w${i}`] = text.slice(i * CHUNK, (i + 1) * CHUNK);
     await this.ctx.storage.put(entries);
-    this.cache = { version: this.version, text };
+    this.cache = null; // the public copy (decks stripped) is rebuilt on the next state request
     this.dirty = false;
   }
 
@@ -151,6 +165,7 @@ export class SharedWorld extends DurableObject<Env> {
       this.dirty = true;
     }
     await this.brokerMinds(w);
+    await this.sweepPvp(w);
     await this.save();
     await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
   }
@@ -161,6 +176,8 @@ export class SharedWorld extends DurableObject<Env> {
       if (url.pathname.endsWith('/auth')) return await this.auth(req);
       if (url.pathname.endsWith('/state')) return await this.state(req);
       if (url.pathname.endsWith('/op')) return await this.op(req);
+      if (url.pathname.endsWith('/pvp/start')) return await this.pvpStart(req);
+      if (url.pathname.endsWith('/pvp/act')) return await this.pvpAct(req);
       if (url.pathname.endsWith('/public')) return await this.publicState();
       if (url.pathname.endsWith('/think')) {
         const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'think')}`;
@@ -313,11 +330,18 @@ export class SharedWorld extends DurableObject<Env> {
     const w = await this.world();
     // the world was restarted since this login: the client logs in again and rejoins from the chain
     if (!w.managers.some((m) => m.id === me)) return json({ error: 'Please log in again' }, 401);
-    if (!this.cache || this.cache.version !== this.version) this.cache = { version: this.version, text: JSON.stringify(w) };
+    if (!this.cache || this.cache.version !== this.version) {
+      // players' battle decks are secret (Online opponents are found blind): the shared copy has none of them
+      const pub = JSON.parse(JSON.stringify(w)) as World;
+      for (const m of pub.managers) if (isHuman(m)) Object.assign(m, { team: [], decks: undefined, activeDeck: undefined });
+      this.cache = { version: this.version, text: JSON.stringify(pub) };
+    }
     const since = Number(new URL(req.url).searchParams.get('since') ?? -1);
     if (since === this.version) return new Response(null, { status: 204 });
     const text = this.cache.text.split(JSON.stringify(me)).join('"player"');
-    return new Response(`{"version":${this.version},"startMs":${this.startMs},"world":${text}}`, {
+    const mine = getManager(w, me);
+    const own = JSON.stringify({ team: mine.team, decks: mine.decks, activeDeck: mine.activeDeck }).split(JSON.stringify(me)).join('"player"');
+    return new Response(`{"version":${this.version},"startMs":${this.startMs},"me":${own},"world":${text}}`, {
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -382,7 +406,8 @@ export class SharedWorld extends DurableObject<Env> {
         err = setTeam(w, me, a[0]);
         break;
       case 'match':
-        err = this.match(w, me, String(a[0]), a[1] as BattleLog, a[2] === 'ranked' ? 'ranked' : 'league');
+        // online (ranked) battles run on the server (pvpStart / pvpAct) — the browser never sees the hidden cards
+        err = a[2] === 'ranked' ? 'Online battles run on the server' : this.match(w, me, String(a[0]), a[1] as BattleLog, 'league');
         break;
       default:
         return json({ error: `Unknown move ${name}` }, 400);
@@ -399,6 +424,101 @@ export class SharedWorld extends DurableObject<Env> {
       await this.save();
     }
     return json({ error: err, version: this.version, tx });
+  }
+
+  // ---------- online battles, run by the server (hidden information never reaches the browser) ----------
+
+  private async session(me: string): Promise<PvpSession | null> {
+    return (await this.ctx.storage.get<PvpSession>(`pvp:${me}`)) ?? null;
+  }
+
+  /** an online battle started and never finished counts as a loss */
+  private async forfeit(w: World, me: string, s: PvpSession) {
+    if (w.managers.some((m) => m.id === me)) forfeitRanked(w, me, s.oppId);
+    await this.ctx.storage.delete(`pvp:${me}`);
+    this.dirty = true;
+  }
+
+  private async sweepPvp(w: World) {
+    const all = await this.ctx.storage.list<PvpSession>({ prefix: 'pvp:' });
+    for (const [key, s] of all) if (Date.now() - s.startedAt > PVP_ABANDON_MS) await this.forfeit(w, key.slice(4), s);
+  }
+
+  /** "Find opponent": the server picks the opponent and the seed, deals, and sends the player's view only */
+  private async pvpStart(req: Request) {
+    const me = await this.player(req);
+    if (!me) return json({ error: 'Please log in again' }, 401);
+    const w = await this.world();
+    if (!w.managers.some((m) => m.id === me)) return json({ error: 'Please log in again' }, 401);
+    const old = await this.session(me);
+    if (old) await this.forfeit(w, me, old);
+    const mine = teamOf(w, getManager(w, me));
+    const err = teamError(mine);
+    if (err) return json({ error: `Battle deck not ready: ${err}` });
+    const opp = pickPvpOpponent(w, undefined, me);
+    if (!opp || opp.id === me) return json({ error: 'No opponent available right now' });
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 2 ** 31;
+    const st = createBattle(mine, teamOf(w, opp), seed);
+    const s: PvpSession = { st, oppId: opp.id, startedAt: Date.now() };
+    await this.ctx.storage.put(`pvp:${me}`, s);
+    if (this.dirty) await this.save();
+    return json({ view: redactBattle(st), oppId: opp.id, opp: { name: opp.name, elo: opp.elo, human: isHuman(opp) }, version: this.version });
+  }
+
+  /**
+   * One of the player's moves. The server applies it to the full state; after END TURN it plays the opponent's
+   * whole turn with the AI. The answer is the list of steps to animate (redacted views), and the result at the end.
+   */
+  private async pvpAct(req: Request) {
+    const me = await this.player(req);
+    if (!me) return json({ error: 'Please log in again' }, 401);
+    const { action } = (await req.json()) as { action: Action };
+    const w = await this.world();
+    const s = await this.session(me);
+    if (!s) return json({ error: 'No online battle in progress' });
+    const st = s.st;
+    if (st.winner !== undefined || st.active !== 0) return json({ error: 'Not your turn' });
+    const steps: { action: Action; ev: BattleEvent[]; view: BattleState }[] = [];
+    const step = (a: Action): string | null => {
+      const ev: BattleEvent[] = [];
+      const e = applyAction(st, a, ev);
+      if (!e) steps.push({ action: a, ev: redactEvents(ev), view: redactBattle(st) });
+      return e;
+    };
+    const err = step(action);
+    if (err) return json({ error: err });
+    if (action.t === 'end' && st.winner === undefined && st.active === 1) {
+      // the opponent's turn: their deck played by the AI, sharp (few random moves)
+      const opp = getManager(w, s.oppId);
+      const dur: Record<string, number> = {};
+      for (const uid of Object.keys(st.modelOf)) dur[uid] = w.robots[uid]?.durability ?? 1;
+      for (const a of planTurn(st, 1, { careful: opp.careful, sloppy: 0.08 }, dur)) {
+        if (st.winner !== undefined || st.active !== 1) break;
+        step(a);
+      }
+      if (st.winner === undefined && st.active === 1) step({ t: 'end' });
+    }
+    let result: { reward: number; tx: { label: string; hash?: string } | null; txError?: string } | null = null;
+    if (st.winner !== undefined) {
+      // the battle is over: it counts (ELO, W/D/L, wear, reward) and is recorded on NEAR with its log
+      const ledgerFrom = w.ledger.length;
+      const mine0 = new Map(robotsOf(w, me).map((r) => [r.uid, { ...r }]));
+      applyMatch(w, me, s.oppId, st, 'ranked');
+      const reward = w.ledger.slice(ledgerFrom).filter((x) => x.kind === 'reward' && x.to === me && !x.note).reduce((t, x) => t + x.amount, 0);
+      let tx: { label: string; hash?: string } | null = null;
+      let txError: string | undefined;
+      try {
+        tx = await this.mirror(w, me, 'match', [s.oppId, battleLogOf(st), 'ranked'], ledgerFrom, mine0);
+      } catch (e) {
+        txError = e instanceof Error ? e.message.slice(0, 200) : String(e);
+      }
+      await this.ctx.storage.delete(`pvp:${me}`);
+      this.lastBattle.set(me, Date.now());
+      this.dirty = true;
+      await this.save();
+      result = { reward, tx, txError };
+    } else await this.ctx.storage.put(`pvp:${me}`, s);
+    return json({ steps, result, version: this.version });
   }
 
   // ---------- recording moves on NEAR (the server is the only writer: contract *_for methods) ----------

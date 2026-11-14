@@ -52,7 +52,7 @@ import {
   teamOf,
   type World,
 } from '../engine/world';
-import { act, isShared } from '../store';
+import { act, isShared, pvpAct, pvpFinished, pvpStart } from '../store';
 import { GLITCH_TOTAL, confetti, glitchTakeover } from '../ui/battleEnd';
 import { centerOf, chroma, crack, createAim, flashScreen, ring, shake, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
@@ -198,6 +198,10 @@ const TUT_STEPS: { text: string; wait: TutWait; focus: string; point?: string }[
  */
 export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: TutorialProps; mode?: 'league' | 'online' }) {
   const online = mode === 'online';
+  // logged in, Online battles run on the shared world's server: the browser only animates the steps it gets back
+  // (the opponent's hand and deck never reach it — engine/hidden.ts)
+  const serverOnline = online && isShared();
+  const serverResult = useRef<{ reward: number; tx: { label: string; hash?: string } | null; txError?: string } | null>(null);
   const nextOpponent = (exclude?: string) => (online ? pickPvpOpponent(w, exclude) : pickOpponentForPlayer(w, exclude));
   const me = getManager(w, PLAYER_ID);
   const [oppId, setOppId] = useState(() => nextOpponent().id);
@@ -371,10 +375,11 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   const oppDiv = DIVISIONS[opp.div ?? 0];
 
   /** Start a battle against this opponent's battle deck. */
-  const startFight = (id: string) => {
+  const startFight = (id: string, serverView?: BattleState) => {
     const foe = getManager(w, id);
     const seed = (w.tick * 7919 + w.hour * 104729 + Date.now()) % 2 ** 31;
-    const st = createBattle(myTeam, teamOf(w, foe), seed);
+    // online (logged in): the server dealt the battle and sent our view of it
+    const st = serverView ?? createBattle(myTeam, teamOf(w, foe), seed);
     const durBefore = Object.fromEntries(myTeam.map((r) => [r.uid, r.durability]));
     const rankBefore = Object.fromEntries(myTeam.map((r) => [r.uid, vetRank(r)]));
     setOppId(id);
@@ -393,7 +398,23 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   /** Online: a blind search — the opponent and their deck are revealed only on the battlefield. */
   const findOpponent = () => {
     setSearching(true);
+    setMsg(null);
     sfx('ui-open');
+    if (serverOnline) {
+      const t0 = Date.now();
+      pvpStart()
+        .then(async (r) => {
+          await sleep(Math.max(0, 1400 - (Date.now() - t0)));
+          setSearching(false);
+          startFight(r.oppId, r.view);
+        })
+        .catch((e) => {
+          setSearching(false);
+          setMsg(e instanceof Error ? e.message : String(e));
+          sfx('ui-error');
+        });
+      return;
+    }
     setTimeout(() => {
       setSearching(false);
       startFight(pickPvpOpponent(w).id);
@@ -777,13 +798,22 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
     }
     const f = fightRef.current!;
     let promo: Promo | undefined;
-    act((w) => {
-      const L = leagueOf(w);
-      const before = { div: L.div, crowns: L.crowns };
-      applyMatch(w, PLAYER_ID, f.oppId, final, online ? 'ranked' : 'league');
-      if (L.div > before.div) promo = { div: before.div, prize: divisionPrize(before.div, before.crowns), crowned: false };
-      else if (L.crowns > before.crowns) promo = { div: L.div, prize: divisionPrize(L.div, before.crowns), crowned: true };
-    });
+    if (serverOnline) {
+      // the server already counted the battle and recorded it on NEAR: fetch the updated world
+      const r = serverResult.current;
+      serverResult.current = null;
+      await pvpFinished(r?.tx ?? null, r?.txError);
+      act((w) => {
+        w.lastPlayerReward = { reward: r?.reward ?? 0, capped: false };
+      });
+    } else
+      act((w) => {
+        const L = leagueOf(w);
+        const before = { div: L.div, crowns: L.crowns };
+        applyMatch(w, PLAYER_ID, f.oppId, final, online ? 'ranked' : 'league');
+        if (L.div > before.div) promo = { div: before.div, prize: divisionPrize(before.div, before.crowns), crowned: false };
+        else if (L.crowns > before.crowns) promo = { div: L.div, prize: divisionPrize(L.div, before.crowns), crowned: true };
+      });
     setResult({
       fresh: true,
       st: final,
@@ -802,15 +832,23 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
   };
 
   /** Plays one action with animations and sounds, then commits it. Returns the new state. */
-  const runAction = async (a: Action): Promise<BattleState> => {
+  const runAction = async (a: Action, server?: { ev: BattleEvent[]; view: BattleState }): Promise<BattleState> => {
     const before = fightRef.current!.st;
-    const after = structuredClone(before);
-    const ev: BattleEvent[] = [];
-    const err = applyAction(after, a, ev);
-    if (err) {
-      setMsg(err);
-      sfx('ui-error');
-      return before;
+    let after: BattleState;
+    let ev: BattleEvent[];
+    if (server) {
+      // a step the server computed (online): its view of the table and its events
+      after = server.view;
+      ev = server.ev;
+    } else {
+      after = structuredClone(before);
+      ev = [];
+      const err = applyAction(after, a, ev);
+      if (err) {
+        setMsg(err);
+        sfx('ui-error');
+        return before;
+      }
     }
     after.history = [...before.history, ...ev];
     const side = before.active;
@@ -1013,11 +1051,46 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
     setBusy(false);
   };
 
+  /** Online (logged in): send the move to the server, then animate every step it returns (after END TURN: the
+   *  opponent's whole turn). Returns the last state. */
+  const serverMove = async (a: Action): Promise<BattleState> => {
+    let res: Awaited<ReturnType<typeof pvpAct>>;
+    try {
+      res = await pvpAct(a);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+      sfx('ui-error');
+      return fightRef.current!.st;
+    }
+    serverResult.current = res.result;
+    let cur = fightRef.current!.st;
+    for (const [i, step] of res.steps.entries()) {
+      if (!alive.current) return cur;
+      if (i > 0) {
+        // the opponent's moves, as the server played them
+        if (i === 1) {
+          setCaption(`${opp.name} is thinking…`);
+          await sleep(700);
+        }
+        const sa = step.action;
+        const uid = sa.t === 'deploy' ? sa.uid : sa.t === 'attack' ? sa.from : sa.t === 'vent' ? sa.uid : null;
+        const mid = uid ? (step.view.modelOf[uid] ?? cur.modelOf[uid]) : undefined;
+        const name = mid ? model(mid).name : '';
+        if (sa.t !== 'end') setCaption(sa.t === 'deploy' ? `${opp.name} deploys ${name}` : sa.t === 'attack' ? `${name} attacks` : `${name} cools down`);
+      }
+      cur = await runAction(step.action, step);
+      if (i > 0) await sleep(420);
+      if (cur.winner !== undefined) return cur;
+    }
+    if (a.t === 'end' && cur.winner === undefined) setCaption('Your turn');
+    return cur;
+  };
+
   const doAction = async (a: Action) => {
     if (busy) return;
     setMsg(null);
     setBusy(true);
-    const after = await runAction(a);
+    const after = serverOnline ? await serverMove(a) : await runAction(a);
     if (after.winner !== undefined || !alive.current) return;
     setBusy(false);
   };
@@ -1028,6 +1101,11 @@ export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: T
     setHandSel(null);
     setPending(null);
     setBusy(true);
+    if (serverOnline) {
+      const after = await serverMove({ t: 'end' });
+      if (after.winner === undefined && alive.current) setBusy(false);
+      return;
+    }
     const after = await runAction({ t: 'end' });
     if (after.winner !== undefined) return;
     await enemyTurn();
