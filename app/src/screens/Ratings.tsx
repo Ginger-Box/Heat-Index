@@ -1,7 +1,10 @@
 import { PLAYER_ID, STRATEGY_LABEL, isHuman, netWorth, type Manager, type World } from '../engine/world';
+import { useState } from 'react';
 import { ClassTag, Cr, Glitch } from '../ui/common';
+import { Profile } from './Profile';
 
 export function Ratings({ w }: { w: World }) {
+  const [profile, setProfile] = useState<string | null>(null);
   const champs = [...w.managers].sort((a, b) => b.elo - a.elo);
   const mags = w.managers.map((m) => ({ m, worth: netWorth(w, m) })).sort((a, b) => b.worth - a.worth);
   /** prize places: the developer's account (DEV) plays out of competition, so it gets no number */
@@ -17,16 +20,20 @@ export function Ratings({ w }: { w: World }) {
   /** bots are marked; people are shown by name (you, or another player's NEAR account) */
   const who = (m: Manager) => (
     <>
-      {m.name}
+      <span className="team-link" onClick={() => setProfile(m.id)} title="Open the profile">
+        {m.name}
+      </span>
       {m.dev && <span className="tag dev-tag" title="The game's developer: plays out of competition, takes no prize place">DEV</span>}
       {m.id === PLAYER_ID ? <span className="tag you-tag">YOU</span> : isHuman(m) ? <span className="tag human-tag" title={m.id}>PLAYER</span> : <span className="tag bot-tag" title="A bot team (algorithmic)">BOT</span>}
     </>
   );
   return (
     <div className="grid">
+      {profile && <Profile w={w} id={profile} onClose={() => setProfile(null)} />}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))' }}>
         <div className="panel">
           <h2>⚔️ Champions</h2>
+          <p className="muted" style={{ margin: '0 0 6px' }}>Click a team to open its profile.</p>
           <p className="muted" style={{ marginTop: 0 }}>
             ELO from <b>online battles</b> only (league battles don't count). The top 3 at the season's end get 600 / 350 / 200 CR. A DEV account takes no prize place. {w.managers.filter((m) => !isHuman(m)).length} bot
             teams, {w.managers.filter(isHuman).length} {w.managers.filter(isHuman).length === 1 ? 'player' : 'players'}.
