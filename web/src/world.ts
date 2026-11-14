@@ -119,6 +119,13 @@ export class SharedWorld extends DurableObject<Env> {
       this.dirty = true;
       await this.save();
     }
+    // the Ratings now count online battles only: players' old records (league battles included) start over once
+    if (this.w && !this.w.rankedOnly) {
+      for (const m of this.w.managers) if (isHuman(m)) Object.assign(m, { elo: 1000, wins: 0, losses: 0, draws: 0 });
+      this.w.rankedOnly = true;
+      this.dirty = true;
+      await this.save();
+    }
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
     return this.w;
   }
@@ -375,7 +382,7 @@ export class SharedWorld extends DurableObject<Env> {
         err = setTeam(w, me, a[0]);
         break;
       case 'match':
-        err = this.match(w, me, String(a[0]), a[1] as BattleLog);
+        err = this.match(w, me, String(a[0]), a[1] as BattleLog, a[2] === 'ranked' ? 'ranked' : 'league');
         break;
       default:
         return json({ error: `Unknown move ${name}` }, 400);
@@ -466,24 +473,40 @@ export class SharedWorld extends DurableObject<Env> {
       const result = res === null ? 2 : res === 0 ? 1 : 0;
       const out = await this.chainCall('record_battle_for', {
         player: me,
-        opponent: opp?.name ?? String(a[0]),
+        // online battles are marked so the contract never counts them toward the league
+        opponent: a[2] === 'ranked' ? `online:${opp?.name ?? String(a[0])}`.slice(0, 64) : (opp?.name ?? String(a[0])),
         result,
         reward: String(reward),
         seed: log.input.seed >>> 0,
         wear,
         replay,
       });
-      return { label: `Battle vs ${opp?.name}: ${['loss', 'win', 'draw'][result]} · +${reward} CR`, hash: out.hash };
+      return {
+        label: `${a[2] === 'ranked' ? 'Online battle' : 'Battle'} vs ${opp?.name}: ${['loss', 'win', 'draw'][result]} · +${reward} CR`,
+        hash: out.hash,
+      };
     }
     return null;
   }
 
   /** a battle counts only if its log replays: the player's deck is theirs, every move is legal, the result is real */
-  private match(w: World, me: string, oppId: string, log: BattleLog): string | null {
+  /**
+   * A battle counts only if its log replays. 'league': against a bot team (PvE). 'ranked' (Online): against another
+   * player's deck played by the AI, or a bot — the opponent's robots in the log must be theirs.
+   */
+  private match(w: World, me: string, oppId: string, log: BattleLog, mode: 'ranked' | 'league'): string | null {
     const now = Date.now();
     if (now - (this.lastBattle.get(me) ?? 0) < 30_000) return 'One battle per 30 seconds';
     const opp = w.managers.find((m) => m.id === oppId);
-    if (!opp || isHuman(opp)) return 'Battles are against the bot teams';
+    if (!opp || opp.id === me) return 'No such opponent';
+    if (mode === 'league' && isHuman(opp)) return 'League battles are against the bot teams';
+    if (mode === 'ranked' && isHuman(opp)) {
+      // a player's deck: every robot of side B must be theirs and working
+      for (const r of log?.input?.b ?? []) {
+        const own = w.robots[r.uid];
+        if (!own || own.owner !== opp.id || own.durability <= 0 || own.modelId !== r.modelId) return "That isn't the opponent's deck";
+      }
+    }
     if (!log?.input?.a?.length) return 'No battle log';
     const mine = new Map(robotsOf(w, me).map((r) => [r.uid, r]));
     for (const r of log.input.a) {
@@ -495,7 +518,7 @@ export class SharedWorld extends DurableObject<Env> {
     if (teamError(log.input.a.map((r) => mine.get(r.uid)!))) return 'Not a legal deck';
     const { st, error } = replayBattle(log);
     if (error) return `The battle does not replay: ${error}`;
-    applyMatch(w, me, oppId, st);
+    applyMatch(w, me, oppId, st, mode);
     this.lastBattle.set(me, now);
     getManager(w, me); // (keeps the manager hot)
     return null;

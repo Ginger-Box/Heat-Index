@@ -403,6 +403,17 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   colour. A guest Hangar (12 robots): 3981 → 640 DOM nodes, 3341 → 2 SVG rects, no long tasks.
 - README: the roadmap section removed.
 
+### Online: ranked battles against players' decks (Nov 14)
+- A new **Online** tab: ranked battles against another player's battle deck from the shared world, played by the AI
+  under their name (asynchronous PvP); players first, nearest by ELO, a bot deck only ~1 battle in 10 or when no
+  one else is around. The **Arena** tab is now the Pit League only (PvE).
+- `applyMatch(…, mode)`: 'ranked' moves ELO and W/D/L (online battles and the bots' own matches); 'league' pays,
+  wears, counts veterans and league progress, but leaves the ratings alone. In a ranked battle against a player's
+  deck the absent player's robots don't wear and they earn nothing; their record and ELO move. The server checks
+  that side B's robots really are the opponent's, replays the battle, and records it on-chain as `online:<name>` so
+  the contract never counts it toward the league. The players' old mixed records were reset once.
+- Season prizes for the top 3 ELO: 300/200/100 → 600/350/200 CR. 19 engine tests.
+
 ## Next
 - Card art.
 - README for judges, demo video.

@@ -8,7 +8,8 @@ import { sfx } from '../audio';
 import { NeonPointer } from './Pointer';
 
 export const TOUR: { tab: string; title: string; text: string }[] = [
-  { tab: 'arena', title: 'ARENA', text: 'Pick an opponent and one of your decks, fight for credits and ELO. Every battle wears your robots out.' },
+  { tab: 'arena', title: 'ARENA', text: 'The Pit League (PvE): beat the bot teams of your division to move up. Every battle pays credits and wears your robots out.' },
+  { tab: 'online', title: 'ONLINE', text: "Ranked battles against other players' decks, played by the AI under their name. Only these count for ELO and the Ratings." },
   {
     tab: 'hangar',
     title: 'HANGAR',
@@ -25,7 +26,7 @@ export const TOUR: { tab: string; title: string; text: string }[] = [
     text: 'Three AI traders run the market. Invest credits in a broker and get a share of its daily profit.',
   },
   { tab: 'analytics', title: 'ANALYTICS', text: 'Price and relevance history of every robot and every class — spot the trends.' },
-  { tab: 'ratings', title: 'RATINGS', text: 'The ELO ladder and the richest managers. A season lasts 7 game days.' },
+  { tab: 'ratings', title: 'RATINGS', text: 'The online ELO ladder (players and bots) and the richest managers. A season lasts 7 days.' },
 ];
 
 export function Tour({ onTab, onDone }: { onTab: (tab: string) => void; onDone: () => void }) {

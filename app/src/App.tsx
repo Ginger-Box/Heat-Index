@@ -40,6 +40,7 @@ function readTutorial(): TutorialStage {
 
 const TABS = [
   ['arena', 'Arena'],
+  ['online', 'Online'],
   ['hangar', 'Hangar'],
   ['market', 'Market'],
   ['brokers', 'Brokers'],
@@ -254,8 +255,9 @@ export default function App() {
         {tutorial === 'battle' ? (
           <Arena w={w} tutorial={{ onDone: () => advanceTutorial('tour') }} key="training" />
         ) : (
-          tab === 'arena' && <Arena w={w} />
+          tab === 'arena' && <Arena w={w} key="league" />
         )}
+        {tutorial !== 'battle' && tab === 'online' && <Arena w={w} mode="online" key="online" />}
         {tutorial !== 'battle' && tab === 'hangar' && <Hangar w={w} />}
         {tab === 'market' && <Market w={w} />}
         {tab === 'brokers' && <Brokers w={w} />}

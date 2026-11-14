@@ -179,7 +179,7 @@ function winAgainst(w: World, oppId: string, seed: number) {
   for (let i = 0; i < 200; i++) {
     const st = simulateBattle(teamOf(w, me), teamOf(w, getManager(w, oppId)), seed + i * 977, [{ careful: 0.5 }, { careful: 0.5, sloppy: 1 }]);
     if (st.winner === 0) {
-      applyMatch(w, PLAYER_ID, oppId, st);
+      applyMatch(w, PLAYER_ID, oppId, st, 'league');
       return;
     }
   }
@@ -284,4 +284,25 @@ test('the shared world: 5-minute game hours, a real day per game day, no local p
   assert.equal(dayOf(w), 2);
   assert.ok(w.history.length >= h0 + 288 - 1, 'a price snapshot every game hour');
   assert.equal(clockOf(w, 6), '00:30');
+});
+
+test('league battles leave ELO and W/D/L alone; online battles move both; an absent player\'s robots do not wear', async () => {
+  const { addHuman, restorePlayerFromChain, pickPvpOpponent } = await import('../src/engine/world');
+  const w = createWorld(41, 't');
+  const me = getManager(w, PLAYER_ID);
+  const bot = w.managers.find((m) => m.div === 0)!;
+  const st1 = simulateBattle(teamOf(w, me), teamOf(w, bot), 3, [{ careful: 0.5 }, { careful: 0.5 }]);
+  applyMatch(w, PLAYER_ID, bot.id, st1, 'league');
+  assert.deepEqual([me.elo, me.wins + me.losses + me.draws], [1000, 0]);
+  // another player joins with a deck of their own
+  const bob = addHuman(w, 'bob.testnet', 'Bob');
+  restorePlayerFromChain(w, 'bob.testnet', { credits: 500, robots: MODELS.slice(0, 12).map((x, i) => ({ tokenId: `t${i}`, modelId: x.id, durability: x.maxDur })) }, 'bob.testnet');
+  assert.equal(pickPvpOpponent(w).human || pickPvpOpponent(w).human || pickPvpOpponent(w).human, true, 'players come first');
+  const bobDur = robotsOf(w, 'bob.testnet').map((r) => r.durability);
+  const st2 = simulateBattle(teamOf(w, me), teamOf(w, bob), 9, [{ careful: 0.5 }, { careful: 0.5 }]);
+  applyMatch(w, PLAYER_ID, 'bob.testnet', st2, 'ranked');
+  assert.equal(me.wins + me.losses + me.draws, 1);
+  assert.equal(bob.wins + bob.losses + bob.draws, 1);
+  assert.ok(me.elo !== 1000 || st2.winner === null);
+  assert.deepEqual(robotsOf(w, 'bob.testnet').map((r) => r.durability), bobDur);
 });

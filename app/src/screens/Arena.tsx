@@ -40,6 +40,8 @@ import {
   selectDeck,
   getManager,
   pickOpponentForPlayer,
+  pickPvpOpponent,
+  isHuman,
   divisionTeams,
   leagueOf,
   playerReward,
@@ -50,7 +52,7 @@ import {
   teamOf,
   type World,
 } from '../engine/world';
-import { act } from '../store';
+import { act, isShared } from '../store';
 import { GLITCH_TOTAL, confetti, glitchTakeover } from '../ui/battleEnd';
 import { centerOf, chroma, crack, createAim, flashScreen, ring, shake, sparks, type Aim, type AimKind } from '../ui/battleFx';
 import { DurBar, Glitch, RobotCard } from '../ui/common';
@@ -190,9 +192,15 @@ const TUT_STEPS: { text: string; wait: TutWait; focus: string; point?: string }[
   { text: 'Now break the enemy Core!', wait: 'free', focus: 'enemy', point: '.b-core.side-1' },
 ];
 
-export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
+/**
+ * The Arena has two modes: 'league' — the Pit League against the bot teams (PvE: rewards, league progress, no ELO);
+ * 'online' — ranked battles against another player's deck, played by the AI under their name (ELO, the Ratings).
+ */
+export function Arena({ w, tutorial, mode = 'league' }: { w: World; tutorial?: TutorialProps; mode?: 'league' | 'online' }) {
+  const online = mode === 'online';
+  const nextOpponent = (exclude?: string) => (online ? pickPvpOpponent(w, exclude) : pickOpponentForPlayer(w, exclude));
   const me = getManager(w, PLAYER_ID);
-  const [oppId, setOppId] = useState(() => pickOpponentForPlayer(w).id);
+  const [oppId, setOppId] = useState(() => nextOpponent().id);
   const [fight, setFight] = useState<Fight | null>(null);
   const [view, setView] = useState<BattleState | null>(null); // what is drawn (during animations may differ from fight.st)
   const [handSel, setHandSel] = useState<string | null>(null);
@@ -417,7 +425,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
   if (!fight) {
     return (
       <div className="grid">
-        {result && !result.fresh && <ResultPanel w={w} {...result} onClose={() => setResult(null)} />}
+        {result && !result.fresh && <ResultPanel w={w} {...result} ranked={online} onClose={() => setResult(null)} />}
         {result?.fresh && (
           <EndOverlay
             winner={result.st.winner}
@@ -427,21 +435,49 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
               setResult({ ...result, fresh: false });
             }}
           >
-            <ResultPanel w={w} {...result} onClose={() => {}} bare />
+            <ResultPanel w={w} {...result} ranked={online} onClose={() => {}} bare />
           </EndOverlay>
         )}
         <div className="panel">
-          <h2>Arena</h2>
-          <LeagueLadder w={w} onPick={(id) => setOppId(id)} current={oppId} />
+          <h2>{online ? 'Online' : 'Arena · Pit League'}</h2>
+          {online ? (
+            <p className="muted" style={{ marginTop: 0 }}>
+              Ranked battles against <b>other players' decks</b> — the AI plays their battle team under their name. Wins,
+              losses and <b>ELO</b> here are what the Ratings show; the top 3 at the season's end get 600 / 350 / 200 CR.
+              {isShared()
+                ? ' A bot deck comes up only now and then, or when no other player is around.'
+                : ' As a guest you face bot decks — log in to fight players in the shared world.'}
+            </p>
+          ) : (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>
+                PvE: climb the league against the bot teams. League battles pay and wear your robots, but don't change
+                your ELO — that's the Online tab.
+              </p>
+              <LeagueLadder w={w} onPick={(id) => setOppId(id)} current={oppId} />
+            </>
+          )}
           <div className="row" style={{ alignItems: 'flex-start', gap: 24 }}>
             <div>
               <h3>Opponent</h3>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 {opp.name}
-                {leagueOf(w).beaten.includes(opp.id) && <span className="up" style={{ fontSize: 13 }}> ✔ beaten</span>}
+                {online ? (
+                  isHuman(opp) ? <span className="tag human-tag">PLAYER</span> : <span className="tag bot-tag">BOT</span>
+                ) : (
+                  leagueOf(w).beaten.includes(opp.id) && <span className="up" style={{ fontSize: 13 }}> ✔ beaten</span>
+                )}
               </div>
               <div className="muted">
-                <span style={{ color: oppDiv.color }}>{oppDiv.name}</span> · ELO {opp.elo} · {STRATEGY_LABEL[opp.strategy]}
+                {online ? (
+                  <>
+                    ELO <b>{opp.elo}</b> · {opp.wins}/{opp.draws}/{opp.losses} · {isHuman(opp) ? 'their battle deck, played by the AI' : STRATEGY_LABEL[opp.strategy]}
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: oppDiv.color }}>{oppDiv.name}</span> · {STRATEGY_LABEL[opp.strategy]}
+                  </>
+                )}
               </div>
               {classesOf(opp).length > 0 && (
                 <div style={{ marginTop: 6 }} title={classesOf(opp).map((c) => CLASS_HELP[c]).join(' ')}>
@@ -454,11 +490,18 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
                   ))}
                 </div>
               )}
-              <div className="muted" style={{ marginTop: 4 }}>
-                Purse ×{oppDiv.purse} · deck up to {oppDiv.cap} energy
-              </div>
+              {!online && (
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Purse ×{oppDiv.purse} · deck up to {oppDiv.cap} energy
+                </div>
+              )}
+              {online && (
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Your ELO {me.elo} · {me.wins}/{me.draws}/{me.losses} (W/D/L, online only)
+                </div>
+              )}
               <div className="row" style={{ marginTop: 10 }}>
-                <button onClick={() => setOppId(pickOpponentForPlayer(w, oppId).id)}>Another opponent</button>
+                <button onClick={() => setOppId(nextOpponent(oppId).id)}>Another opponent</button>
                 <button
                   className="primary"
                   disabled={!!teamErr || !!teamError(teamOf(w, opp))}
@@ -699,7 +742,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     act((w) => {
       const L = leagueOf(w);
       const before = { div: L.div, crowns: L.crowns };
-      applyMatch(w, PLAYER_ID, f.oppId, final);
+      applyMatch(w, PLAYER_ID, f.oppId, final, online ? 'ranked' : 'league');
       if (L.div > before.div) promo = { div: before.div, prize: divisionPrize(before.div, before.crowns), crowned: false };
       else if (L.crowns > before.crowns) promo = { div: L.div, prize: divisionPrize(L.div, before.crowns), crowned: true };
     });
@@ -717,7 +760,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     setView(null);
     setBusy(false);
     setBanner(null);
-    setOppId(pickOpponentForPlayer(w).id);
+    setOppId(nextOpponent().id);
   };
 
   /** Plays one action with animations and sounds, then commits it. Returns the new state. */
@@ -915,7 +958,8 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
     let cur = fightRef.current!.st;
     // opponents in the demo are a bit sloppy: about one move in five is not the best one
     // lower leagues play sloppier (Scrap: 4 moves in 10 are not the best one; Apex: always the best)
-    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: tutorial ? 0.7 : oppDiv.sloppy }, dur);
+    // league teams play by their division; a player's deck online is played sharp (few random moves)
+    const plan = planTurn(cur, 1, { careful: opp.careful, sloppy: tutorial ? 0.7 : online ? 0.08 : oppDiv.sloppy }, dur);
     for (const a of plan) {
       if (!alive.current || cur.winner !== undefined) return;
       const uid = a.t === 'deploy' ? a.uid : a.t === 'attack' ? a.from : a.t === 'vent' ? a.uid : null;
@@ -1188,7 +1232,7 @@ export function Arena({ w, tutorial }: { w: World; tutorial?: TutorialProps }) {
             <div className="b-opp">
               <b>{opp.name}</b>
               <small className="muted">
-                {tutorial ? 'Training' : oppDiv.name}
+                {tutorial ? 'Training' : online ? `${isHuman(opp) ? 'Player' : 'Bot'} · ELO ${opp.elo}` : oppDiv.name}
                 {classesOf(opp).length ? ` · ${classesOf(opp).map((c) => CLASS_LABEL[c]).join(' + ')}` : ''}
               </small>
             </div>
@@ -1363,7 +1407,10 @@ function ResultPanel({
   promo,
   onClose,
   bare,
+  ranked,
 }: {
+  /** an online (ranked) battle: show the ELO change */
+  ranked?: boolean;
   w: World;
   st: BattleState;
   oppName: string;
@@ -1403,8 +1450,17 @@ function ResultPanel({
             (capped · {purseLeft(w)} CR left today)
           </span>
         )}{' '}
-        · ELO {eloBefore} →{' '}
-        <b>{me.elo}</b>
+        {ranked ? (
+          <>
+            · ELO {eloBefore} →{' '}
+            <b className={me.elo >= eloBefore ? 'up' : 'down'}>
+              {me.elo} ({me.elo >= eloBefore ? '+' : ''}
+              {me.elo - eloBefore})
+            </b>
+          </>
+        ) : (
+          <span className="muted"> · league battle (no ELO)</span>
+        )}
       </p>
       {promo && (
         <div className="promo-banner">

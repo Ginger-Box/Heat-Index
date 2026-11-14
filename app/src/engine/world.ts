@@ -210,6 +210,8 @@ export interface World {
   /** game hours per day / NPC matches per game hour (absent: 12 / 12 — a local world) */
   hoursPerDay?: number;
   matchesPerHour?: number;
+  /** ELO and W/D/L count only ranked (online) battles — set once the old, mixed records were reset */
+  rankedOnly?: boolean;
   /** the Factory is on strike (no restocking) until this game hour */
   strikeUntil?: number;
 }
@@ -772,15 +774,32 @@ export function sideTeamValues(st: BattleState): [number, number] {
   return v;
 }
 
-export function applyMatch(w: World, aId: string, bId: string, st: BattleState) {
+/**
+ * How a battle counts:
+ *  - 'ranked' — ELO and W/D/L (the Ratings): online battles against another player's deck, and the bots' own matches;
+ *  - 'league' — the Arena's Pit League (PvE): rewards, wear, veterans and league progress, but no ELO or W/D/L.
+ * In a ranked battle against a player's deck the other player isn't there (their deck is played by the AI): their
+ * robots don't wear and they earn nothing, but the result moves both ELOs.
+ */
+export type MatchMode = 'ranked' | 'league';
+
+export function applyMatch(w: World, aId: string, bId: string, st: BattleState, mode: MatchMode = 'ranked') {
   const a = getManager(w, aId);
   const b = getManager(w, bId);
   const sides: [Manager, Manager] = [a, b];
+  const ghost = mode === 'ranked' && isHuman(a) && isHuman(b); // b's deck was played by the AI
   // team value at base prices — the battle purse comes from it
   const teamValue = sideTeamValues(st);
   for (let s = 0; s < 2; s++) {
     const res = st.winner === null ? 0.5 : st.winner === s ? 1 : 0;
     const m = sides[s];
+    if (ghost && s === 1) {
+      // the absent player: only their record and ELO move
+      if (res === 1) m.wins++;
+      else if (res === 0) m.losses++;
+      else m.draws++;
+      continue;
+    }
     for (const uid of Object.keys(st.wear)) {
       const r = w.robots[uid];
       if (!r || r.owner !== m.id || !st.wear[uid].fielded) continue;
@@ -818,11 +837,13 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     m.credits += reward;
     if (m.id === PLAYER_ID) playerHooks.match?.(st, sides[1 - s].id, res === 1 ? 1 : res === 0 ? 0 : 2, reward);
     ledger(w, { kind: 'reward', from: 'arena', to: m.id, amount: reward });
-    if (res === 1) m.wins++;
-    else if (res === 0) m.losses++;
-    else m.draws++;
+    if (mode === 'ranked') {
+      if (res === 1) m.wins++;
+      else if (res === 0) m.losses++;
+      else m.draws++;
+    }
   }
-  elo(a, b, st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0);
+  if (mode === 'ranked') elo(a, b, st.winner === null ? 0.5 : st.winner === 0 ? 1 : 0);
   ledger(w, {
     kind: 'match',
     from: a.id,
@@ -844,10 +865,24 @@ export function applyMatch(w: World, aId: string, bId: string, st: BattleState) 
     const me = isHuman(a) ? 0 : 1;
     const opp = sides[1 - me];
     const txt = st.winner === null ? 'draw' : st.winner === me ? 'win' : 'loss';
-    if (sides[me].id === PLAYER_ID) log(w, 'match', `Battle vs ${opp.name}: ${txt}`);
-    if (st.winner === me) leagueWin(w, sides[me], opp);
+    if (sides[me].id === PLAYER_ID) log(w, 'match', `${mode === 'ranked' ? 'Online battle' : 'Battle'} vs ${opp.name}: ${txt}`);
+    if (mode === 'league' && st.winner === me) leagueWin(w, sides[me], opp);
   }
-  if (a.id === PLAYER_ID) shareOp(PLAYER_ID, 'match', [b.id, battleLogOf(st)]);
+  if (a.id === PLAYER_ID) shareOp(PLAYER_ID, 'match', [b.id, battleLogOf(st), mode]);
+}
+
+/**
+ * Online (ranked) opponent: another player's battle deck, played by the AI under their name. Players come first —
+ * nearest by ELO; a bot deck only about one battle in ten, or when there's nobody else.
+ */
+export function pickPvpOpponent(w: World, exclude?: string, managerId = PLAYER_ID): Manager {
+  const me = getManager(w, managerId);
+  const near = (pool: Manager[]) =>
+    [...pool].sort((x, y) => Math.abs(x.elo - me.elo) - Math.abs(y.elo - me.elo)).slice(0, 3);
+  const players = w.managers.filter((m) => isHuman(m) && m.id !== me.id && m.id !== exclude && !teamError(teamOf(w, m)));
+  const bots = w.managers.filter((m) => !isHuman(m) && m.id !== exclude && !teamError(teamOf(w, m)));
+  const pool = players.length && Math.random() >= 0.1 ? near(players) : near(bots.length ? bots : players);
+  return pool[Math.floor(Math.random() * pool.length)] ?? me;
 }
 
 // ---------- the Pit League ----------
@@ -1287,9 +1322,11 @@ function seasonEnd(w: World) {
     .sort((a, b) => b.worth - a.worth)
     .slice(0, 3);
   const prizes = [300, 200, 100];
+  // the online ladder pays more: 600 / 350 / 200 for the top 3 ELO at the season's end
+  const champPrizes = [600, 350, 200];
   const res: SeasonResult = {
     season: w.season,
-    champions: champs.map((m, i) => ({ id: m.id, name: m.name, elo: m.elo, prize: prizes[i] })),
+    champions: champs.map((m, i) => ({ id: m.id, name: m.name, elo: m.elo, prize: champPrizes[i] })),
     magnates: mags.map((x, i) => ({ id: x.m.id, name: x.m.name, worth: x.worth, prize: prizes[i] })),
   };
   for (const c of res.champions) getManager(w, c.id).credits += c.prize;

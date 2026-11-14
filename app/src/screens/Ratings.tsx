@@ -18,7 +18,7 @@ export function Ratings({ w }: { w: World }) {
         <div className="panel">
           <h2>⚔️ Champions</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            ELO rating from battles. The top 3 at season end get 300 / 200 / 100 CR. {w.managers.filter((m) => !isHuman(m)).length} bot
+            ELO from <b>online battles</b> only (league battles don't count). The top 3 at the season's end get 600 / 350 / 200 CR. {w.managers.filter((m) => !isHuman(m)).length} bot
             teams, {w.managers.filter(isHuman).length} {w.managers.filter(isHuman).length === 1 ? 'player' : 'players'}.
           </p>
           <table>
