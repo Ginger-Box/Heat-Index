@@ -18,6 +18,7 @@ import {
   listRobot,
   playNpcMatch,
   recycle,
+  removeHuman,
   renameDeck,
   repair,
   restorePlayerFromChain,
@@ -42,7 +43,8 @@ export type JournalEntry =
   | { t: 'chainId'; uid: string; id?: string }
   | { t: 'adopted'; account: string }
   | { t: 'pvp'; me: string; oppId: string; log: BattleLog; now: number }
-  | { t: 'forfeit'; me: string; oppId: string; now: number };
+  | { t: 'forfeit'; me: string; oppId: string; now: number }
+  | { t: 'leave'; accountId: string };
 
 /** runs fn with Date.now() fixed (the engine's daily caps read the date) */
 function at<T>(now: number, fn: () => T): T {
@@ -151,6 +153,8 @@ export function applyEntry(w: World, e: JournalEntry): string | null {
     case 'forfeit':
       at(e.now, () => forfeitRanked(w, e.me, e.oppId));
       return null;
+    case 'leave':
+      return removeHuman(w, e.accountId);
   }
 }
 

@@ -41,6 +41,11 @@ test('replaying the journal on the previous snapshot reproduces the world exactl
   for (let i = 0; i < 20; i++) apply({ t: 'tick', now: 1_800_000_000_000 });
   apply({ t: 'forfeit', me: 'amy.testnet', oppId: live.managers[0].id, now: 1_800_000_100_000 });
   apply({ t: 'adopted', account: 'npc-x.testnet' });
+  // a test account leaves without a trace in the rankings
+  apply({ t: 'join', accountId: 'tester.testnet', name: 'tester', devs: [], chain: { credits: 500, robots: [{ tokenId: 'robot:spark:7', modelId: 'spark', durability: 6 }] } });
+  assert.equal(apply({ t: 'leave', accountId: 'tester.testnet' }), null);
+  assert.ok(!live.managers.some((m) => m.id === 'tester.testnet'));
+  assert.ok(!Object.values(live.robots).some((r) => r.owner === 'tester.testnet'));
 
   const replayed = JSON.parse(snap) as World;
   for (const e of JSON.parse(JSON.stringify(entries)) as JournalEntry[]) applyEntry(replayed, e);

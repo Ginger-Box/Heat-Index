@@ -1,8 +1,10 @@
 // End-to-end check of signed moves against the live site and testnet, with a test account whose full-access key is
 // in the local near CLI credentials (TESTER, default tester.heat-index-game.testnet):
 // a fresh game key (limited to `register`) enrols → joins the shared world → buys a robot with a signed move →
-// the purchase is on-chain; then a move signed for a lower price is refused by the contract.
+// the purchase is on-chain; then a move signed for a lower price is refused by the contract. At the end the test
+// account leaves the shared world again (it never stays in the rankings).
 // Run: npx tsx scripts/e2e-signed.ts
+import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -67,3 +69,12 @@ console.log(ok.tx?.hash && after === before + 1 ? `✓ signed buy recorded: ${ok
 const none = await fetch(`${SITE}/api/world/op`, { method: 'POST', headers: H, body: JSON.stringify({ name: 'buy', args: [o.b.id, o.modelId] }) }).then((r) => r.json() as Promise<{ error?: string }>);
 console.log(none.error ? `✓ an unsigned move is refused: ${none.error.slice(0, 80)}` : '✗ an unsigned move went through');
 await full.deleteKey(pub);
+// the test account leaves the shared world again — it must not show up in any ranking
+const secrets = JSON.parse(readFileSync(join(homedir(), '.near-credentials', 'heat-index-web', 'secrets.json'), 'utf8'));
+const leaveToken = createHmac('sha256', secrets.OWNER_SECRET).update('leave').digest('hex');
+const left = await fetch(`${SITE}/api/world/leave`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${leaveToken}` },
+  body: JSON.stringify({ accountId: ME }),
+}).then((r) => r.json() as Promise<{ error?: string | null }>);
+console.log(left.error ? `✗ the test account didn't leave: ${left.error}` : '✓ the test account left the shared world (no ranking shows it)');

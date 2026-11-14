@@ -1850,3 +1850,16 @@ export function npcShopMarket(w: World, rng: Rng) {
   const b = rng.pick(buyers);
   buyListing(w, b.id, l.uid);
 }
+
+/** A test account leaves the shared world entirely: its manager, its robots (listed ones too) and its broker stakes
+ *  are gone, so it shows up in no ranking. Its tokens on NEAR are untouched. */
+export function removeHuman(w: World, accountId: string): string | null {
+  const m = w.managers.find((x) => x.id === accountId);
+  if (!m || !isHuman(m)) return 'No such player';
+  const listed = new Set((w.listings ?? []).filter((l) => l.seller === accountId).map((l) => l.uid));
+  w.listings = (w.listings ?? []).filter((l) => l.seller !== accountId);
+  for (const [uid, r] of Object.entries(w.robots)) if (r.owner === accountId || listed.has(uid)) delete w.robots[uid];
+  for (const b of w.brokers) delete b.shares[accountId];
+  w.managers = w.managers.filter((x) => x.id !== accountId);
+  return null;
+}

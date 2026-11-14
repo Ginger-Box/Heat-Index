@@ -528,6 +528,11 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   has any move method: signed_move (players' relayed moves), record_verified_battle_for (online battles),
   commit_world, adopt_world_wallet, sync_world_credits. `npm run verify` checks every team's key.
 
+### Test accounts leave no trace (Nov 14)
+- Engine `removeHuman` + journal entry `leave` (manager, robots, listings and broker stakes gone; replayable like
+  any change); owner-only `/api/world/leave`. `scripts/e2e-signed.ts` now removes its test account at the end, and
+  `tester` was removed from the live world, so no ranking shows it.
+
 ## Next
 - Card art.
 - README for judges, demo video.

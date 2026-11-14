@@ -246,6 +246,17 @@ export class SharedWorld extends DurableObject<Env> {
       if (url.pathname.endsWith('/pvp/start')) return await this.pvpStart(req);
       if (url.pathname.endsWith('/pvp/act')) return await this.pvpAct(req);
       if (url.pathname.endsWith('/public')) return await this.publicState();
+      if (url.pathname.endsWith('/leave')) {
+        // a test account leaves the shared world without a trace in the rankings (owner token required)
+        const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'leave')}`;
+        if (!ok) return json({ error: 'Forbidden' }, 403);
+        const { accountId } = (await req.json()) as { accountId: string };
+        await this.world();
+        await this.ctx.storage.delete(`pvp:${accountId}`);
+        const err = this.apply({ t: 'leave', accountId: String(accountId) });
+        await this.save();
+        return json({ error: err });
+      }
       if (url.pathname.endsWith('/commit')) {
         // demo/debug: commit the world now instead of at the top of the hour (owner token required)
         const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'commit')}`;
