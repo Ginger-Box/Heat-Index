@@ -34,12 +34,18 @@ import {
   type World,
 } from '../../app/src/engine/world';
 import { replayBattle, type BattleLog } from '../../app/src/engine/replay';
+import { applyPolicy, brokerPrompt, parsePolicy } from '../../app/src/engine/brokerAi';
 import { teamError } from '../../app/src/engine/team';
 import { vetRank } from '../../app/src/engine/veteran';
 
 interface Env {
   OWNER_SECRET: string;
+  /** NEAR AI Cloud API key — the brokers' minds (absent: rule-based brokers) */
+  NEARAI_KEY?: string;
 }
+
+/** a verifiable (TEE) open model on NEAR AI Cloud */
+const BROKER_MODEL = 'Qwen/Qwen3.8-27B';
 
 const CONTRACT_ID = 'heat-index-game.testnet';
 const RPC_URL = 'https://test.rpc.fastnear.com';
@@ -123,6 +129,7 @@ export class SharedWorld extends DurableObject<Env> {
       playNpcMatch(w);
       this.dirty = true;
     }
+    await this.brokerMinds(w);
     await this.save();
     await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
   }
@@ -134,10 +141,57 @@ export class SharedWorld extends DurableObject<Env> {
       if (url.pathname.endsWith('/state')) return await this.state(req);
       if (url.pathname.endsWith('/op')) return await this.op(req);
       if (url.pathname.endsWith('/public')) return await this.publicState();
+      if (url.pathname.endsWith('/think')) {
+        const ok = (req.headers.get('authorization') ?? '') === `Bearer ${await hmacHex(this.env.OWNER_SECRET, 'think')}`;
+        return ok ? await this.think() : json({ error: 'Forbidden' }, 403);
+      }
       return json({ error: 'Not found' }, 404);
     } catch (e) {
       return json({ error: e instanceof Error ? e.message.slice(0, 300) : 'error' }, 500);
     }
+  }
+
+  // ---------- the brokers' minds (NEAR AI Cloud) ----------
+
+  private tried = new Map<string, number>();
+
+  /** once a game hour, each open broker asks its model for a policy (clamped to its bounds: engine/brokerAi.ts) */
+  private async brokerMinds(w: World) {
+    const key = this.env.NEARAI_KEY;
+    if (!key) return;
+    const due = w.brokers.filter((b) => !b.closed && (b.ai?.at ?? -1) < w.hour && this.tried.get(b.id) !== w.hour);
+    await Promise.all(
+      due.map(async (b) => {
+        this.tried.set(b.id, w.hour);
+        try {
+          const res = await fetch('https://cloud-api.near.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: BROKER_MODEL, messages: brokerPrompt(w, b), temperature: 0.7, max_tokens: 400 }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const out = (await res.json()) as { id?: string; choices?: { message?: { content?: string } }[] };
+          const text = (out.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
+          const p = parsePolicy(b, text);
+          if (p) {
+            applyPolicy(w, b, p, { model: BROKER_MODEL, chatId: out.id });
+            this.dirty = true;
+          }
+        } catch {
+          /* the model is unavailable — the broker keeps its last policy */
+        }
+      }),
+    );
+  }
+
+  /** debug/demo: run the brokers' minds now (owner token required) */
+  async think(): Promise<Response> {
+    const w = await this.world();
+    this.tried.clear();
+    for (const b of w.brokers) if (b.ai) b.ai.at = -1;
+    await this.brokerMinds(w);
+    await this.save();
+    return json({ brokers: w.brokers.map((b) => ({ id: b.id, ai: b.ai ?? null, style: b.style })) });
   }
 
   // ---------- players ----------

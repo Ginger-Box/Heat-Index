@@ -5,7 +5,7 @@ Built for the NEAR hackathon track **"Games With Real Economies"**.
 
 Robots are cards that **wear out**: every battle costs durability, repairs cost credits — every hit has a price.
 A robot's market price follows its **relevance** (how often it wins and how many teams field it), so the market
-*is* the meta. Algorithmic brokers trade with a **reaction lag** — spot what's rising before they do and you profit.
+*is* the meta. AI brokers — run by an LLM on **NEAR AI Cloud** — trade with a **reaction lag** — spot what's rising before they do and you profit.
 
 > **Play:** https://heat-index-web.ginger-box.workers.dev — email (one-time code), NEAR wallet, or guest ·
 > locally on `http://localhost:3000` (email through NEAR Auth).
@@ -20,7 +20,7 @@ A robot's market price follows its **relevance** (how often it wins and how many
    heat pips, screen cracks on heavy hits.
 3. **Market** tab → hover a price: the tooltip explains it (relevance × stock × the broker's markup). The **BUY /
    SELL** signal is actual relevance vs what brokers price in — they notice the meta with a delay.
-4. **Brokers** tab → three algorithmic brokers (rule-based, not LLMs) with their own cash, stock, reaction speed and a live remark; invest in one and
+4. **Brokers** tab → three AI brokers (in the shared world each is run by an LLM on NEAR AI Cloud within fixed bounds) with their own cash, stock, reaction speed and a live remark; invest in one and
    get a cut of its daily profit.
 5. ⚙ (top right) → **Fast-forward a week** → 7 game days in ~35 s: prices, relevance and broker fortunes move;
    **Analytics** shows the history by robot and by class.
@@ -55,7 +55,7 @@ login runs on `localhost:3000` because the shared testnet NEAR Auth app only all
 
 ## On NEAR
 
-The game's economy runs in the browser (12 NPC teams, 3 algorithmic brokers, hourly prices), and **the player's side of it is
+The game's economy runs in the browser (12 NPC teams, 3 AI brokers, hourly prices), and **the player's side of it is
 on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is a **NEP-245 multi-token** ledger.
 
 - **Credits** are the multi token `cr`; **every robot** is its own token `robot:<model>:<serial>` (supply 1) with
@@ -120,7 +120,7 @@ replay itself (yet) — it would need the battle engine in Rust — so a forged 
 - **Champion** — build a deck of 10–15 robots, fight in the Arena, climb the ELO ladder. Push your robots hard
   and pay for repairs, or play carefully and save money.
 - **Magnate** — trade robots on the Market, read the BUY / SELL signal (actual relevance vs what brokers price in),
-  and invest in algorithmic brokers for a share of their profit.
+  and invest in AI brokers for a share of their profit.
 
 ## The economy loop
 
@@ -135,9 +135,16 @@ battles ──► wins / picks ──► relevance ──► price
   played to the end; worn robots resell for scrap.
 - **Battle purse** = a share of both decks' value (2.5% between NPCs, 6% in the player's battles; the winner takes
   75%), so stakes grow with what you bring.
-- **3 algorithmic brokers** (deterministic rules, not an LLM) with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
+- **3 AI brokers** with in-game wallets, stock and different reaction speeds (a steady corp, a volatile black market,
   a scrap dealer), each with a face and a voice. **12 NPC teams** with their own strategies (hype / contrarian /
   thrifty), playing in **the Pit League** (below).
+- **The brokers' minds — NEAR AI Cloud.** In the shared world, once a game hour each broker sends a brief of its
+  market (cash, upkeep, its segment, actual relevance vs what it prices in, stock, the latest news) to
+  `Qwen/Qwen3.8-27B` on NEAR AI Cloud — a *verifiable* model running in a TEE — and gets back a policy: markup,
+  reaction speed, stock level, models to stock up on or dump, and a line to customers in character. The game clamps
+  every number to the broker's own bounds ([`engine/brokerAi.ts`](app/src/engine/brokerAi.ts)), so the model steers
+  each broker's strategy but can't break the economy; the Brokers screen shows the current decision and the model.
+  Guests' local worlds keep the rule-based brokers (no API key in the browser).
 - **The Pit League** — the player's progression. Four divisions of three teams: *Scrap* (one class, decks ≤ 24
   energy, a sloppy AI) → *Chrome* (one class, ≤ 30) → *Neon* (two-class combos, ≤ 36) → *Apex* (top combos at the
   full 42, a sharp AI; the boss is Armor guards kept alive by Repair medics). Beat every team of your division once

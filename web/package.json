@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "npm --prefix ../app run build:web && cf deploy --secrets-file $HOME/.near-credentials/heat-index-web/secrets.json"
+    "deploy": "npm --prefix ../app run build:web && node scripts/secrets.mjs && cf deploy --secrets-file $HOME/.near-credentials/heat-index-web/deploy-secrets.json"
   },
   "devDependencies": {
     "cf": "^1.0.0-beta.32",

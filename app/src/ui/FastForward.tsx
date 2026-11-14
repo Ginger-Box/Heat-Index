@@ -76,7 +76,7 @@ export function FastForward({ onClose }: { onClose: () => void }) {
           <i style={{ width: `${(done / TOTAL_HOURS) * 100}%` }} />
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          12 NPC teams fight and trade with algorithmic brokers. Prices use the same formulas as in normal play (file{' '}
+          12 NPC teams fight and trade with the brokers (rule-based here; run by NEAR AI in the shared world). Prices use the same formulas as in normal play (file{' '}
           <code>pricing.ts</code>). The six robots with the biggest price change:
         </p>
         <LineChart

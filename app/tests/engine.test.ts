@@ -254,3 +254,21 @@ test('a recorded battle replays to the same winner and wear; a tampered log is r
   const bad = { ...log, actions: [{ t: 'attack', from: 'ghost#x', to: 'core' } as const, ...log.actions] };
   assert.match(replayBattle(bad).error ?? '', /illegal/);
 });
+
+// ---------- broker minds (NEAR AI) ----------
+
+test('a broker model answer is clamped to the broker\'s bounds; garbage is ignored', async () => {
+  const { parsePolicy, applyPolicy, brokerPrompt, POLICY_BOUNDS } = await import('../src/engine/brokerAi');
+  const w = createWorld(31, 't');
+  const k = w.brokers.find((b) => b.id === 'kessler')!;
+  const p = parsePolicy(k, '<think>{"x":1}</think> sure: {"spread": 0.9, "react": 5, "targetStock": 99, "focus": ["titan","spark","nope"], "dump": ["bastion"], "remark": "Steady."}'.replace(/<think>[\s\S]*?<\/think>/g, ''))!;
+  assert.deepEqual([p.spread, p.react, p.targetStock], [POLICY_BOUNDS.kessler.spread[1], POLICY_BOUNDS.kessler.react[1], POLICY_BOUNDS.kessler.stock[1]]);
+  assert.deepEqual(p.focus, ['titan']); // spark is outside Kessler's segment, "nope" isn't a model
+  assert.equal(parsePolicy(k, 'no json here'), null);
+  applyPolicy(w, k, p, { model: 'test' });
+  assert.equal(k.style.spread, POLICY_BOUNDS.kessler.spread[1]);
+  assert.ok(k.ai && k.ai.dump.includes('bastion'));
+  assert.ok(brokerPrompt(w, k)[1].content.includes('"market"'));
+  advanceHours(w, 3); // the world keeps running with the policy applied
+  assert.ok(robotsOf(w, 'kessler').every((r) => r.modelId !== 'bastion' || r.durability >= 0));
+});

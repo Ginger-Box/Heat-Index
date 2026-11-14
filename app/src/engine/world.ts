@@ -122,6 +122,18 @@ export interface Broker {
   paidTotal?: Record<string, number>;
   /** how many robots of each model were bought from the Factory today (expensive ones are capped) */
   restockedToday?: Record<string, number>;
+  /** the broker's latest decision by its LLM mind (shared world, engine/brokerAi.ts) */
+  ai?: {
+    at: number;
+    spread: number;
+    react: number;
+    targetStock: number;
+    focus: string[];
+    dump: string[];
+    remark: string;
+    model: string;
+    chatId?: string;
+  };
 }
 
 export type OwnedRobot = Robot & { owner: string; loaner?: boolean; /** NEP-245 token id of this robot on NEAR, once it is on-chain */ chainId?: string };
@@ -1161,7 +1173,9 @@ function brokerHour(w: World, rel: Record<string, number>) {
       if ((w.strikeUntil ?? 0) > w.hour) break; // Factory strike: nothing to restock
       if (!carries(b, x.id)) continue;
       const stock = brokerStock(w, b, x.id).length;
-      if (stock >= b.style.targetStock) continue;
+      // the broker's mind (shared world) can stock up on some models and stop restocking others
+      if (b.ai?.dump.includes(x.id)) continue;
+      if (stock >= b.style.targetStock + (b.ai?.focus.includes(x.id) ? 1 : 0)) continue;
       const cap = x.cost >= 5 ? 1 : x.cost === 4 ? 2 : Infinity;
       if ((b.restockedToday?.[x.id] ?? 0) >= cap) continue;
       // cash reserve after restocking: an expensive model needs a bigger reserve, otherwise a small broker goes broke

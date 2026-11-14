@@ -1,4 +1,4 @@
-// Faces and voices of the three algorithmic brokers: a hand-drawn pixel portrait, a title, a one-line bio, and a live remark
+// Faces and voices of the three brokers (LLM-run on NEAR AI in the shared world, rule-based for guests): a hand-drawn pixel portrait, a title, a one-line bio, and a live remark
 // that reacts to the market (their profit, their cash, the robots they misprice, the player's stake).
 
 import { memo, type ReactElement } from 'react';
@@ -119,6 +119,8 @@ const pick = <T,>(xs: T[], seed: number) => xs[Math.abs(seed) % xs.length];
 
 /** The broker's live remark: what it thinks of the market right now, in its own voice. */
 export function brokerQuote(w: World, b: Broker): string {
+  // the broker's own words when its LLM mind spoke this game hour or the last (shared world)
+  if (b.ai?.remark && w.hour - b.ai.at <= 1) return b.ai.remark;
   const seed = w.hour * 7 + b.id.length * 13;
   const rel = actualRelevance(w);
   // the robot this broker misprices the most (it sees relevance late)

@@ -18,6 +18,7 @@ import {
   type World,
 } from '../engine/world';
 import { sfx } from '../audio';
+import { model } from '../engine/robots';
 import { act } from '../store';
 import { Cr, Glitch, Tip } from '../ui/common';
 import { BrokerPortrait, PERSONAS, brokerQuote } from '../ui/brokerPersona';
@@ -260,6 +261,17 @@ export function Brokers({ w }: { w: World }) {
                   <span className="tag">👥 {outside.toFixed(0)}%</span>
                 </Tip>
               </div>
+              {b.ai ? (
+                <div className="broker-mind" title={`Decided by ${b.ai.model} on NEAR AI Cloud (verifiable, runs in a TEE)${b.ai.chatId ? ` · chat ${b.ai.chatId}` : ''}. Bounds are fixed by the game.`}>
+                  🧠 <b>{b.ai.model.split('/').pop()}</b> · NEAR AI · markup {Math.round(b.ai.spread * 100)}% · reacts {Math.round(b.ai.react * 100)}% · keeps {b.ai.targetStock}
+                  {b.ai.focus.length ? ` · stocking up: ${b.ai.focus.map((id) => model(id).name).join(', ')}` : ''}
+                  {b.ai.dump.length ? ` · dumping: ${b.ai.dump.map((id) => model(id).name).join(', ')}` : ''}
+                </div>
+              ) : (
+                <div className="broker-mind muted" title="In the shared world (log in) each broker is run by an LLM on NEAR AI Cloud within fixed bounds; in a guest world it follows its rules.">
+                  ⚙ rules (guest world) — log in for the AI-run shared market
+                </div>
+              )}
               {(() => {
                 const list = Object.entries(b.shares)
                   .filter(([id, sh]) => id !== HOUSE && sh > 0)

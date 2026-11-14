@@ -358,6 +358,16 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   joined with its 20 robots / 819 CR from the chain, a battle replayed and counted, the leaderboard shows 12 BOTs.
 - Ratings mark BOT / PLAYER / YOU; brokers list their investors; a "● SHARED WORLD" tag with the days left.
 
+### Brokers with an LLM mind on NEAR AI Cloud (Nov 14)
+- The jury flagged "AI brokers" with no AI. Now, in the shared world, once a game hour each open broker sends a
+  brief of its market to `Qwen/Qwen3.8-27B` on NEAR AI Cloud (verifiable, TEE) and gets a policy back — markup,
+  reaction speed, stock level, models to stock up on / dump, a remark in character. `engine/brokerAi.ts` builds the
+  prompt and clamps the answer to each broker's own bounds (Kessler stays slow and pricey, Magpie fast and cheap),
+  so the model steers but can't break the economy; restocking follows its focus/dump. The Brokers screen shows the
+  current decision and the model; the broker's live remark is the model's line. Guests keep the rule-based brokers
+  (no API key in the browser). The API key is a Worker secret built from a local file at deploy time.
+- Analytics: the last 7 days by default, any season or all of it; the whole history is kept.
+
 ## Next
 - Card art.
 - README for judges, demo video.
