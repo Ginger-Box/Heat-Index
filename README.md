@@ -28,8 +28,8 @@ shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bou
    [`/api/world/public`](https://heat-index-web.ginger-box.workers.dev/api/world/public).
 5. Guest: ⚙ (top right) → **Fast-forward a week** → 7 game days in ~35 s; **Analytics** shows the history by robot
    and by class. (The shared world runs in real time: no fast-forward.)
-6. Logged in on NEAR? The **NEAR** cell in the top bar lists each move the game server recorded for you on testnet,
-   with an explorer link. Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet).
+6. Logged in on NEAR? The **NEAR** cell in the top bar lists each move you signed (the game server relays it and
+   pays the gas) with an explorer link. Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet).
 
 ### What is on-chain and what is simulated
 
@@ -39,15 +39,15 @@ shared world each broker is run by an LLM on **NEAR AI Cloud**, inside fixed bou
 | Registration: 12 starter robots + 1000 CR | **on-chain** | [register tx](https://testnet.nearblocks.io/txns/9LkHUBch9gbU1rBH9TQAz8WzgFVaFnuo8fdkPHmGpgnk) |
 | Player buys a robot (credits burned, robot token minted) | **on-chain** | [buy tx](https://testnet.nearblocks.io/txns/8Qd8Mj9a8xvTDth2jsc7T1M3pv23cYbgZqqyAFJK8yUS) |
 | Battle result: reward minted, each robot's wear written | **on-chain** | [battle tx](https://testnet.nearblocks.io/txns/2bFPt1rCy6iXAdckKVo7BnneWWAxeUBXN6xmfAe8eqKU) |
-| **Only the game server relays moves**, and every player move carries the player's signature (`signed_move`, below); the world's own wallets go through `*_for` methods callable only by the contract account. A battle needs its replay hash, a win needs the robots that fought. A player's browser key can only `register` | **on-chain** (contract v0.9, 39 unit tests incl. both exploits from the review) | [record_battle_for tx](https://testnet.nearblocks.io/txns/DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt) → `npm run verify-battle DFPnyQpFV72ywVNHtTmfyWoY4D4hNCq7kL8Fej9VXHGt` ✓ |
+| **Who can write what**: a player's moves only through `signed_move` (the player's own signature, relayed by the server); a bot team's only from the team's own account (`npc_*`); battles only after the contract replays them. The server's key holds no move method of its own (`signed_move`, `record_verified_battle_for` for online battles, `commit_world`, `adopt_world_wallet`, `sync_world_credits`), and a player's browser key can only `register` | **on-chain** (contract v0.9, 39 unit tests incl. both exploits from the reviews) | [a signed buy](https://testnet.nearblocks.io/txns/7B93t2FnGw7EkW6DhRFAuGHYESoEsFuvJAfR6XTemA28) · `npm run verify` checks every key |
 | Sales and repairs | **on-chain** | [sell tx](https://testnet.nearblocks.io/txns/2b2HaZpN9uggRKTy5KTLy7ST7tHV26vvhAWhGRAdEYjm) · [repair tx](https://testnet.nearblocks.io/txns/5TxCb4g24XeafCvFLxYdLMtVccuGr2RPc5jWZPfKicK8) |
-| Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (`record_battle_for`, shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
-| **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result; `npm run verify-battle <tx>` replays it with the engine and checks every move's legality, the result and each robot's wear against the record | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
-| Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (`record_battle_for` → `league_of`, `league` events) | `league_of` of any `bot-*` account |
+| Veteran records: every robot's battles and wins; wins give a rank (★ 3, ★★ 8, ★★★ 15) and raise the most a broker may pay for it | **on-chain** (written by every recorded battle — `signed_move`, `record_verified_battle_for`, `npc_record_battle`; shown in `mt_token(...).record`, `veteran` events) | `mt_tokens_for_owner` of any `bot-*` account |
+| **Battle replays**: every battle's full action log (both sides) is published at `/api/battles/<sha256>`; its hash is written on-chain with the result (today the contract replays it itself, below); `npm run verify-battle <tx>` replays it off-chain too and checks every move's legality, the result and each robot's wear against the record (the linked tx is an older, server-recorded battle) | **on-chain hash + public log** | [battle tx](https://testnet.nearblocks.io/txns/Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw) → `npm run verify-battle Cd37xArc5ZCz838WgN5Wt5P8JYK2m2NkwbqKDoBgNkUw` ✓ |
+| Pit League progress (division, teams beaten, crowns) and the division prizes, minted by the contract itself | **on-chain** (a player's signed league battle → `league_of`, `league` events) | `league_of` of any `bot-*` account |
 | Anti-abuse: a robot sells for at most 2.5 × what its owner paid (× veteran bonus); trading profit ≤ 1500 CR a day; battle rewards + league prizes ≤ 3000 CR a day (`purse_today`); 6 rank-wins a day per robot; credits can't be transferred, robots only to registered players; only the game's relayer can create accounts | **on-chain** (`paid_for`, `purse_today`) | a Spark bought for 9 CR [can't be resold for 60](https://testnet.nearblocks.io/txns/3vwmqfQE2pyDapvWL8XHtDq5TmFfiBkWsFWnBec7HVxy) — *"Price is too far above what you paid"*; [22 CR goes through](https://testnet.nearblocks.io/txns/HWYqks4NJdp24wXDnDg7Jrneprh2S6wn7k47kAsfrbKD) |
 | **The shared world is replayable from its public record**: every change to the world (bot matches, players' moves with their timestamps, AI policies, online battle results, joins) is a journal entry applied by one engine function (`app/src/engine/journal.ts`). Every hour the server publishes the world (`/api/world-log/<n>/snapshot`, players' secret decks stripped) and the journal that led to it (`/api/world-log/<n>/journal`), and commits both SHA-256 on NEAR, each commitment naming the previous one. `npm run verify-world` replays hour N's journal on snapshot N-1 with the game's engine and checks it lands exactly on the committed hash — prices, brokers, bot matches and every balance are re-derivable, not just trusted | **on-chain** (`commit_world`, `world_commit`, `world_epochs`, `world_commit` events) | `npm run verify-world` ✓ |
 | **Players sign their own moves**: every move recorded for a player — buy, sell, repair, list, buy a listing, a league battle (its log's SHA-256), consent to an online battle — is signed in the player's browser by their own key; the server only relays it and pays the gas. `signed_move` checks the ed25519 signature against the player's enrolled keys (a device enrols by calling `register`, the one method its game key may call), a fresh nonce, a 1-hour window, and that what happens stays inside what was signed (price ≤ the signed maximum, the same token, the same log). The server-relayed `*_for` methods now refuse players' accounts — they only move the world's own wallets — so **the server can't move a player's assets without their signature** | **on-chain** (`signed_move`, `signing_keys_of`, `signed_move` events) | `npm run e2e-signed`: a signed buy [lands](https://testnet.nearblocks.io/txns/7B93t2FnGw7EkW6DhRFAuGHYESoEsFuvJAfR6XTemA28); one signed for less is refused; an unsigned one is refused |
-| **The contract replays every battle itself**: the battle rules are ported to Rust inside the contract (`contract/src/battle.rs`). `record_verified_battle_for` takes the battle's full action log, re-runs it move by move, rejects any illegal move or unfinished battle, and **decides the result and each robot's wear on its own** — from the durability it holds on-chain, checking that every robot in the log is the player's token of that model and no higher veteran rank than recorded. The server only supplies the (capped) reward. Players' and bot teams' battles both go through it — it is the only way a battle is recorded: the server's key can't call the old server-reported `record_battle_for` (`npm run verify` checks the key). A differential test replays 37 battles played by the TypeScript engine and gets the same winners and wear | **on-chain** (`battle_verified` events, the log's SHA-256 = the battle's `replay`) | [a bot battle replayed on-chain](https://testnet.nearblocks.io/txns/81SVrgoyUoqRYH9nVuLaheodwLU7T3DzNq4cYYQNtEzw) (`battle_verified`, 10.6 Tgas) |
+| **The contract replays every battle itself**: the battle rules are ported to Rust inside the contract (`contract/src/battle.rs`). `record_verified_battle_for` takes the battle's full action log, re-runs it move by move, rejects any illegal move or unfinished battle, and **decides the result and each robot's wear on its own** — from the durability it holds on-chain, checking that every robot in the log is the player's token of that model and no higher veteran rank than recorded. The server only supplies the (capped) reward. Players' battles (`signed_move`, online ones through `record_verified_battle_for`) and bot teams' (`npc_record_battle`) all go through this replay — it is the only way a battle is recorded: no key can call the old server-reported `record_battle_for` (`npm run verify` checks the keys). A differential test replays 37 battles played by the TypeScript engine and gets the same winners and wear | **on-chain** (`battle_verified` events, the log's SHA-256 = the battle's `replay`) | [a bot battle replayed on-chain](https://testnet.nearblocks.io/txns/81SVrgoyUoqRYH9nVuLaheodwLU7T3DzNq4cYYQNtEzw) (`battle_verified`, 10.6 Tgas) |
 | **Player-owned market**: players list their robots at their own price (Hangar → *List*); the token is escrowed by the contract until another player — or a bot team, when a listing beats the brokers — buys it. Credits go from buyer to seller (5% fee burned); the price is capped by what a broker could pay at that wear and 2.5× what the seller paid, and the seller's profit counts toward the daily cap, so the market can't move credits between accounts | **on-chain** (`list_robot_for`, `buy_listing_for`, `unlist_robot_for`, `listings`, `listed` / `trade` events) | Market tab → *Player market* |
 | **Online battles are dealt by the chain**: before an online battle the server must open it on-chain (`open_battle_for`); the contract draws the seed from NEAR's randomness (`env::random_seed`) and stores it, and the battle can only be recorded with exactly that seed — the server can't shop for a favourable deal or replay one it likes | **on-chain** (`open_battle_of`, `battle_opened` events) | the `seed` in each online battle's record = the one drawn in its `open_battle_for` tx |
 | Anti-sybil: a robot transferred to another player (`mt_transfer` / `mt_batch_transfer`) gets a purchase basis of 1 CR, so it can't be sold for credits — fresh accounts can't funnel their starters into one | **on-chain** | `paid_for` of a transferred robot = 1 |
@@ -72,8 +72,11 @@ replayable and can't be quietly rewritten. If that server stops, every account k
 NPC economy stops with it. A broker's shop stock stays off-chain (only its cash is on its account), and the world's
 wallets are synced by the server, not driven by the contract. The contract replays every battle itself from its log (the rules
 are ported to Rust), so a result or wear the log doesn't produce can't be recorded; what the server still decides is
-the bots' moves and the reward inside the contract's caps. The public
-site's email login is custodial (see below). PvP is asynchronous: an online opponent's deck is played by the
+the bots' moves and the reward inside the contract's caps. In an online battle the player signs the consent to the
+battle (which opens it with an on-chain seed), not each action inside it: the server relays those actions, and the
+contract checks that the whole battle is legal and dealt from that seed — but it can't tell who chose a legal move.
+The public
+site's email login is custodial (see below) until the player takes custody (Settings → *Own your account*). PvP is asynchronous: an online opponent's deck is played by the
 server's AI, not by the other player live.
 
 ## On NEAR
@@ -94,8 +97,9 @@ brokers, prices every game hour. **The player's side of it is on NEAR testnet**:
   game details, so the player's economy can be replayed from the chain.
 - **Login with email (NEAR Auth)**: email / Google / passkey through NEAR Auth → the MPC network derives the player's
   own key → the contract creates `<name>.heat-index-game.testnet` owned by that key and registers the player
-  (12 starter robots + 1000 CR). The browser gets a key limited to `register`; every move after that is recorded
-  by the game server after it checks it, so there are **no popups** and no way to forge a move from the browser. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
+  (12 starter robots + 1000 CR). The browser gets a key limited to `register`; every move after that is signed by
+  that key and relayed by the game server (`signed_move`), so there are **no popups**, and neither the browser nor the
+  server can make a move the player didn't sign. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
   account creation is sent by the dev server (`vite.config.ts`, key read from the local near CLI credentials,
   never shipped to the browser) — so email login works when you run the game locally.
 - **Email login on the public site (Privy) — a workaround, see the note below.** Privy sends a 6-digit code; a
@@ -119,15 +123,16 @@ brokers, prices every game hour. **The player's side of it is on NEAR testnet**:
 - The HUD's NEAR cell shows the account, on-chain credits, robots on-chain and the latest transactions with explorer
   links.
 
-**Trust model.** The browser can't write moves, and online deals come from the chain's randomness: the shared world's server prices every trade from its own brokers'
-quotes and replays every battle from its action log, then records it with `*_for` methods only the contract account
-can call. On top of that, the contract checks every value against the game's own rules, kept on-chain: each model's base price and durability come from a table in the
+**Trust model.** A player's moves are signed by the player's own key and only relayed by the server (`signed_move`
+checks the signature, a fresh nonce and that the price, token or battle log is the one signed); a bot team's moves are
+signed by the team's account; every battle is replayed by the contract, which decides the result and the wear; online
+deals come from the chain's randomness; and the world's history is committed hourly and replayable
+(`npm run verify-world`). On top of that, the contract checks every value against the game's own rules, kept on-chain: each model's base price and durability come from a table in the
 contract; a purchase must lie in the market's possible range for that model (30–280% of base), a sale can't exceed
 what a broker could pay at that wear, a repair can't be cheaper than the game's minimum for the restored durability,
 a battle reward is capped (≤ 25% of the player's robots' base value, ≤ 400 CR) and limited to one battle per 30 s,
-durability only goes down in battle, and nobody can spend credits they don't have. **Battles are replayable**: the
-action log's SHA-256 is required with each result and the log is public, so anyone can re-run the battle
-(`npm run verify-battle <tx>`) and see whether the recorded win and wear are real.
+durability only goes down in battle, and nobody can spend credits they don't have. The logs stay public, so anyone
+can also re-run a battle off-chain (`npm run verify-battle <tx>`).
 
 ## Two worlds
 
@@ -142,7 +147,7 @@ action log's SHA-256 is required with each result and the log is public, so anyo
   record, places, net worth broken down, recent battles and the robots it owns — never its battle deck. Joining, the server reads
   the player's robots, credits and league progress **from the chain**, not from the browser; every move the player
   makes is replayed on the shared world with their account as the manager, and **a battle only counts if its action
-  log replays** to the reported result; the server then records the move on NEAR. League battles are against the bot
+  log replays** to the reported result; the server then relays the player's signed move to NEAR. League battles are against the bot
   teams; Online battles are against other players' decks and run entirely on the server (below).
 
 ## Two ways to play
