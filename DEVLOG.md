@@ -242,6 +242,24 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   After: Kessler +355, Magpie +130, Junkman +663 — all three in the black, none closes; NPC cash grows slowly
   (avg ~310 → ~550 over a week); the league's division strengths unchanged.
 
+### Broker risk: upkeep, market events, real bankruptcies (Nov 14)
+- Playtest note on the previous fix: now every broker slowly earns, none can fail, and the Junkman still always wins —
+  investing in brokers has no risk and no decision. `scripts/brokers.ts` (12 worlds × 14 days) confirmed it: the
+  Junkman was the best broker in 12 of 12 worlds, 0 bankruptcies.
+- **Daily upkeep** (Kessler 70, Magpie 50, Junkman 55 CR): a broker that can't cover it goes bankrupt and closes until
+  investors reopen it. Brokers keep a thinner cash reserve, so they trade closer to the edge.
+- **Market events** (one a day with 50% chance), each hitting a different business: tax audit (−35% of cash, the
+  richest broker is the likeliest target), Arena security contract (Kessler +250…500), police raid (Magpie loses a
+  quarter of its stock), smuggled shipment (Magpie gets 3–5 free robots), environmental inspection (the Junkman's
+  yard cleared and fined), riot in the Pit (every NPC robot −2 durability: scrap and repairs in demand), Factory
+  recall of a model, Factory strike (no restocking for 2 days), streamer hype on a model. Shown as "Market news" on
+  the Brokers screen.
+- The black market gets a smuggler's discount at the Factory (90% of the base price) — without it Magpie, the
+  fastest-reacting broker, lost money on average.
+- Result over 12 worlds × 14 days: best broker — Magpie 6, Kessler 4, Junkman 2; a bankruptcy in 4 of 12 worlds
+  (Magpie 2, Junkman 2, all reopened by investors); Kessler never failed. So: Kessler is the safe, slow stake, Magpie
+  the gamble, the Junkman in between — and who wins a season depends on its meta and its news.
+
 ## Next
 - Card art.
 - README for judges, demo video.

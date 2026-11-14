@@ -78,6 +78,23 @@ const BANNER: Record<string, string> = {
   scrap: '⚠ SCRAP YARD · MIND THE EDGES',
 };
 
+/** The latest market events and broker news (bankruptcies, investments, audits, raids…). */
+function MarketNews({ w }: { w: World }) {
+  const news = w.events.filter((e) => e.kind === 'broker').slice(-5).reverse();
+  if (!news.length) return null;
+  return (
+    <div className="market-news">
+      <b>Market news</b>
+      {news.map((e, i) => (
+        <div key={`${e.tick}-${i}`} className={/bankrupt/.test(e.text) ? 'down' : /reopened|contract|shipment/.test(e.text) ? 'up' : ''}>
+          <span className="muted">Day {e.day} · </span>
+          {e.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Brokers({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
@@ -115,7 +132,15 @@ export function Brokers({ w }: { w: World }) {
                     The stake price follows the broker's capital (cash + its stock). You can sell your stake back at any
                     time at the current price — if the broker has free cash.
                   </li>
-                  <li>Below 60 CR a broker goes bankrupt and closes. Investors can bring it back to life.</li>
+                  <li>
+                    Every broker pays a <b>daily upkeep</b>. If it can't cover it, it goes bankrupt and closes — your
+                    stake stops paying until investors bring it back to life.
+                  </li>
+                  <li>
+                    <b>Market news</b> hits each business differently: audits, raids, inspections, Factory strikes,
+                    recalls, riots, hype. Kessler is steady, Magpie is a gamble, the Junkman lives off broken robots —
+                    who ends the season on top is never fixed.
+                  </li>
                   <li>Stakes count toward your net worth — the Magnates ranking.</li>
                 </ul>
               </div>
@@ -126,6 +151,7 @@ export function Brokers({ w }: { w: World }) {
           Own a piece of a broker — get a cut of its profit every day.
         </p>
         {msg && <div className="error">{msg}</div>}
+        <MarketNews w={w} />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>

@@ -170,6 +170,8 @@ export interface World {
   league?: LeagueState;
   /** the player's realised trading profit today (UTC day number) — capped like on NEAR */
   gainDay?: { day: number; amount: number };
+  /** the Factory is on strike (no restocking) until this game hour */
+  strikeUntil?: number;
 }
 
 export const dayOf = (w: World) => Math.floor(w.hour / HOURS_PER_DAY) + 1;
@@ -294,7 +296,7 @@ export function bestBid(w: World, r: OwnedRobot): { broker: Broker; price: numbe
     }
     price = Math.round(price);
     // buying a robot, the broker never dips below its reserve — otherwise it goes broke on other people's sell-offs
-    if (price > b.credits - BANKRUPT_BELOW - 100) continue;
+    if (price > b.credits - BANKRUPT_BELOW - 100 * RESERVE) continue;
     if (!best || price > best.price) best = { broker: b, price };
   }
   return best;
@@ -606,9 +608,11 @@ const BANKRUPT_BELOW = 60;
 /** Which part of a broker's daily profit is paid as dividends (split by shares) */
 export const DIVIDEND_SHARE = 0.8;
 const SCRAP_YARD_CAP = 12;
+/** how much cash a broker keeps aside (1 = careful; lower = it trades closer to the edge and can go broke) */
+const RESERVE = 0.3;
 /** the scrap dealer refurbishes at most this many robots an hour, paying this share of a normal repair */
 const JUNK_REPAIRS_PER_HOUR = 1;
-const JUNK_REPAIR_COST = 1.5;
+const JUNK_REPAIR_COST = 1.6;
 const REOPEN_AT = 250;
 
 function elo(a: Manager, b: Manager, score: number) {
@@ -997,19 +1001,22 @@ function brokerHour(w: World, rel: Record<string, number>) {
     // Restocking from the Factory. The Factory makes expensive models slowly: at most 1 a day (energy 5–6)
     // and 2 a day (energy 4) per broker — they run short, and the price jumps on the shortage.
     for (const x of MODELS) {
+      if ((w.strikeUntil ?? 0) > w.hour) break; // Factory strike: nothing to restock
       const stock = brokerStock(w, b, x.id).length;
       if (stock >= b.style.targetStock) continue;
       const cap = x.cost >= 5 ? 1 : x.cost === 4 ? 2 : Infinity;
       if ((b.restockedToday?.[x.id] ?? 0) >= cap) continue;
       // cash reserve after restocking: an expensive model needs a bigger reserve, otherwise a small broker goes broke
-      if (b.credits - x.basePrice < BANKRUPT_BELOW + Math.max(100, x.basePrice * 0.8)) continue;
+      if (b.credits - x.basePrice < BANKRUPT_BELOW + Math.max(100, x.basePrice * 0.8) * RESERVE) continue;
       // A broker doesn't stock what it would have to sell below cost: such a robot disappears from stock,
       // the shortage raises the price, and once restocking pays again the broker buys it.
       if (askPrice(brokerFair(w, b, x.id), b.style) < x.basePrice) continue;
-      b.credits -= x.basePrice; // the money goes to the Factory — a sink
+      // the money goes to the Factory — a sink (the black market gets a smuggler's discount)
+      const factoryPrice = Math.round(x.basePrice * (b.id === 'soroka' ? 0.9 : 1));
+      b.credits -= factoryPrice;
       b.restockedToday = { ...(b.restockedToday ?? {}), [x.id]: (b.restockedToday?.[x.id] ?? 0) + 1 };
       const r = mint(w, x.id, b.id);
-      ledger(w, { kind: 'mint', from: b.id, to: 'factory', uid: r.uid, amount: x.basePrice });
+      ledger(w, { kind: 'mint', from: b.id, to: 'factory', uid: r.uid, amount: factoryPrice });
     }
     if (b.credits < BANKRUPT_BELOW) {
       b.closed = true;
@@ -1100,12 +1107,123 @@ function seasonEnd(w: World) {
   w.season++;
 }
 
+// ---------- broker risk: upkeep and market events ----------
+
+/** Daily upkeep (rent, staff, bribes): a broker that doesn't trade enough bleeds money and can go bankrupt. */
+export const BROKER_UPKEEP: Record<string, number> = { kessler: 70, soroka: 50, scrap: 55 };
+/** Chance per day of a market event. */
+const EVENT_CHANCE = 0.5;
+
+function brokerUpkeep(w: World) {
+  for (const b of w.brokers) {
+    if (b.closed) continue;
+    const fee = BROKER_UPKEEP[b.id] ?? 50;
+    b.credits -= fee;
+    ledger(w, { kind: 'repair', from: b.id, to: 'burn', amount: fee, note: 'upkeep' });
+    // can't cover tomorrow's upkeep on top of the minimum reserve → the creditors close it
+    if (b.credits < BANKRUPT_BELOW + fee) {
+      b.closed = true;
+      log(w, 'broker', `${b.name} couldn't pay its upkeep and went bankrupt. Invest to reopen it.`);
+    }
+  }
+}
+
+/**
+ * Market events: one a day at most, at random. Each hits a different business, so which broker ends a season on
+ * top depends on the luck of the season and on the meta — not on who it is. The richest broker draws the taxman.
+ */
+function marketEvent(w: World, r: Rng) {
+  if (r.next() >= EVENT_CHANCE) return;
+  const open = w.brokers.filter((b) => !b.closed);
+  if (!open.length) return;
+  const byId = (id: string) => open.find((b) => b.id === id);
+  // every broker has a bad day and a lucky one: audit / contract (Kessler), raid / shipment (Magpie),
+  // inspection / riot (Junkman); recall, strike and hype hit whoever holds the wrong stock
+  const kind = r.pick(['audit', 'contract', 'raid', 'shipment', 'inspection', 'riot', 'recall', 'strike', 'hype']);
+  switch (kind) {
+    case 'audit': {
+      // the richer, the likelier
+      const total = open.reduce((s, b) => s + Math.max(1, b.credits), 0);
+      let x = r.next() * total;
+      const b = open.find((bb) => (x -= Math.max(1, bb.credits)) <= 0) ?? open[0];
+      const fine = Math.round(b.credits * 0.35);
+      b.credits -= fine;
+      ledger(w, { kind: 'repair', from: b.id, to: 'burn', amount: fine, note: 'tax audit' });
+      log(w, 'broker', `📋 Tax audit at ${b.name}: fined ${fine} CR (35% of its cash).`);
+      break;
+    }
+    case 'recall': {
+      const x = r.pick(MODELS.filter((m) => m.cost >= 2));
+      let lost = 0;
+      for (const b of w.brokers) for (const rb of brokerStock(w, b, x.id)) (delete w.robots[rb.uid], lost++);
+      log(w, 'broker', `⚠ Factory recall: every ${x.name} in brokers' stock is defective and recalled (${lost} robots). Shortage ahead.`);
+      break;
+    }
+    case 'strike':
+      w.strikeUntil = w.hour + HOURS_PER_DAY * 2;
+      log(w, 'broker', `✊ Factory strike: no new robots for 2 days. Brokers with full stock will cash in.`);
+      break;
+    case 'raid': {
+      const b = byId('soroka');
+      if (!b) return;
+      const stock = robotsOf(w, b.id);
+      const taken = stock.filter(() => r.next() < 0.25);
+      for (const rb of taken) delete w.robots[rb.uid];
+      log(w, 'broker', `🚨 Police raid on the black market: ${b.name} loses ${taken.length} robots to confiscation.`);
+      break;
+    }
+    case 'contract': {
+      const b = byId('kessler');
+      if (!b) return;
+      const pay = 250 + Math.round(r.next() * 250);
+      b.credits += pay;
+      ledger(w, { kind: 'reward', from: 'arena', to: b.id, amount: pay, note: 'security contract' });
+      log(w, 'broker', `🤝 ${b.name} lands a security contract with the Arena: +${pay} CR.`);
+      break;
+    }
+    case 'shipment': {
+      const b = byId('soroka');
+      if (!b) return;
+      const got = Array.from({ length: 3 + Math.floor(r.next() * 3) }, () => mint(w, r.pick(MODELS).id, b.id));
+      log(w, 'broker', `📦 A smuggled shipment reaches ${b.name}: ${got.length} robots for free.`);
+      break;
+    }
+    case 'inspection': {
+      const b = byId('scrap');
+      if (!b) return;
+      const scrap = robotsOf(w, b.id).filter((x) => x.durability <= 0);
+      for (const rb of scrap) delete w.robots[rb.uid];
+      const fine = Math.round(b.credits * 0.15);
+      b.credits -= fine;
+      ledger(w, { kind: 'repair', from: b.id, to: 'burn', amount: fine, note: 'inspection' });
+      log(w, 'broker', `☣ Environmental inspection at ${b.name}: the scrap yard is cleared and fined ${fine} CR.`);
+      break;
+    }
+    case 'riot': {
+      for (const m of w.managers) {
+        if (m.id === PLAYER_ID) continue;
+        for (const rb of robotsOf(w, m.id)) rb.durability = Math.max(0, rb.durability - 2);
+      }
+      log(w, 'broker', `🔥 Riot in the Pit: every NPC team's robots took a beating. Repairs and scrap are in demand.`);
+      break;
+    }
+    case 'hype': {
+      const x = r.pick(MODELS);
+      for (const b of w.brokers) b.perceived[x.id] = Math.min(100, b.perceived[x.id] + 30);
+      log(w, 'broker', `📈 Hype: a streamer swears by ${x.name}. Brokers mark it up — until the battles say otherwise.`);
+      break;
+    }
+  }
+}
+
 function endHour(w: World) {
   const rel = actualRelevance(w);
   brokerHour(w, rel);
   w.hour++;
   snapshot(w, rel);
   if (w.hour % HOURS_PER_DAY === 0) {
+    brokerUpkeep(w);
+    withRng(w, (r) => marketEvent(w, r));
     brokerDayEnd(w);
     // league money: NPC teams get their division's daily stipend
     for (const m of w.managers) {
