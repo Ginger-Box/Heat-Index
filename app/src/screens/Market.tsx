@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { createPortal } from 'react-dom';
 import { winRate } from '../engine/pricing';
 import { CLASSES, CLASS_HELP, CLASS_ICON, CLASS_LABEL, MODELS, classOf, type RobotClass } from '../engine/robots';
-import { MARKET_FEE, PLAYER_ID, actualRelevance, buy, buyListing, carries, getManager, quote, rangeLabel, refPrice, robotsOf, unlistRobot, type World } from '../engine/world';
+import { DAYS_PER_SEASON, MARKET_FEE, PLAYER_ID, clockOf, hoursPerDay, actualRelevance, buy, buyListing, carries, getManager, quote, rangeLabel, refPrice, robotsOf, unlistRobot, type World } from '../engine/world';
 import { model as modelOf } from '../engine/robots';
 import { crunch, sfx } from '../audio';
 import { act, worldVersion } from '../store';
@@ -792,7 +792,7 @@ function PlayerMarket({ w }: { w: World }) {
               {head('price', 'Price')}
               {head('broker', 'Brokers', "The cheapest broker's price for this model")}
               {head('deal', 'Deal', 'How much cheaper than the cheapest broker')}
-              {head('new', 'Listed', 'Newest first')}
+              {head('new', 'Listed', 'Season day and game time — newest first')}
               <th />
             </tr>
           </thead>
@@ -812,7 +812,9 @@ function PlayerMarket({ w }: { w: World }) {
                   </td>
                   <td className="muted">{ask !== null ? <Cr v={ask} /> : '—'}</td>
                   <td>{Number.isFinite(deal) ? <Delta v={Math.round(deal * 100)} /> : '—'}</td>
-                  <td className="muted">{w.hour - l.at < 1 ? 'new' : `${w.hour - l.at} game h ago`}</td>
+                  <td className="muted" title="Season day and game time it was listed">
+                    Day {(Math.floor(l.at / hoursPerDay(w)) % DAYS_PER_SEASON) + 1} · {clockOf(w, l.at)}
+                  </td>
                   <td>
                     {mine ? (
                       <button className="small" onClick={() => setMsg(act((w) => unlistRobot(w, PLAYER_ID, l.uid)))}>
