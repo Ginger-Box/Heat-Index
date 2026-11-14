@@ -395,6 +395,14 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   the contract for wasm32. `npm run verify` checks the new key layout and that the AI brokers' decisions are public
   (`/api/world/public`). README corrected (model name, test counts, verifier status, hybrid-economy limits).
 
+### Hangar lag (Nov 14)
+- With 50 robots the Hangar made the cursor lag: every robot sprite was an inline SVG with hundreds of pixel rects,
+  a drop-shadow filter and effect layers flipping 3–6 times a second (re-rasterised every frame), and every card
+  carried several pixel icons as SVG rects too. Sprites are now three cached images per model (body + two effect
+  frames that only toggle opacity — GPU-composited), and icons are one element with a cached CSS mask in the text
+  colour. A guest Hangar (12 robots): 3981 → 640 DOM nodes, 3341 → 2 SVG rects, no long tasks.
+- README: the roadmap section removed.
+
 ## Next
 - Card art.
 - README for judges, demo video.

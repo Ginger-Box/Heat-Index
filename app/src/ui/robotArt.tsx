@@ -9,7 +9,7 @@
 // Each class also gets an animated layer (lightning, flames, fuse sparks, steam, rotor blur, shield glint),
 // drawn as two pixel frames that the CSS flips between (index.css · "living sprites").
 
-import { memo, type ReactElement } from 'react';
+import { memo } from 'react';
 import { classOf, model } from '../engine/robots';
 
 const N = 28;
@@ -382,8 +382,9 @@ function draw(modelId: string): Canvas {
 }
 
 /** Rows of same-colored pixels merged into rectangles. */
-function rows(g: Grid, key: string): ReactElement[] {
-  const out: ReactElement[] = [];
+/** One layer of a sprite as an SVG string (runs of same-colour pixels merged into one rect). */
+function layerSvg(g: Grid, vb: string, glow = ''): string {
+  let out = '';
   for (let y = 0; y < N; y++) {
     let x = 0;
     while (x < N) {
@@ -394,17 +395,27 @@ function rows(g: Grid, key: string): ReactElement[] {
       }
       let w = 1;
       while (x + w < N && g[y][x + w] === col) w++;
-      out.push(<rect key={`${key}${x}-${y}`} x={x} y={y} width={w} height={1} fill={col} />);
+      out += `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${col}"/>`;
       x += w;
     }
   }
-  return out;
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" shape-rendering="crispEdges">${glow}${out}</svg>`,
+  )}`;
 }
 
-/** Robot sprite as crisp pixel SVG with an animated effects layer. */
-export const RobotSprite = memo(function RobotSprite({ modelId, size = 56 }: { modelId: string; size?: number }) {
+interface SpriteImages {
+  body: string;
+  a: string;
+  b: string;
+}
+const spriteCache = new Map<string, SpriteImages>();
+
+/** The three layers of a model's sprite, rendered once and cached as images. */
+function spriteImages(modelId: string): SpriteImages {
+  const hit = spriteCache.get(modelId);
+  if (hit) return hit;
   const c = draw(modelId);
-  const cls = classOf(modelId);
   // auto-crop: a square around everything drawn (effects included), standing on the ground line
   let minX = N,
     minY = N,
@@ -422,17 +433,25 @@ export const RobotSprite = memo(function RobotSprite({ modelId, size = 56 }: { m
   const side = Math.max(16, maxX - minX + 3, maxY - minY + 3);
   const vx = Math.round((minX + maxX + 1) / 2 - side / 2);
   const vy = maxY + 2 - side;
+  const vb = `${vx} ${vy} ${side} ${side}`;
+  const imgs = { body: layerSvg(c.px, vb), a: layerSvg(c.fxA, vb), b: layerSvg(c.fxB, vb) };
+  spriteCache.set(modelId, imgs);
+  return imgs;
+}
+
+/**
+ * Robot sprite: three cached images (body + two effect frames). The effect frames only toggle opacity, which the
+ * GPU composites for free — the old inline SVGs (hundreds of rects each, filtered and re-rasterised every frame)
+ * made the cursor lag on a Hangar full of robots.
+ */
+export const RobotSprite = memo(function RobotSprite({ modelId, size = 56 }: { modelId: string; size?: number }) {
+  const im = spriteImages(modelId);
+  const cls = classOf(modelId);
   return (
-    <svg
-      className={`robot-sprite rs-${cls}`}
-      viewBox={`${vx} ${vy} ${side} ${side}`}
-      width={size}
-      height={size}
-      shapeRendering="crispEdges"
-    >
-      <g className="rs-body">{rows(c.px, 'p')}</g>
-      <g className="rs-fx rs-a">{rows(c.fxA, 'a')}</g>
-      <g className="rs-fx rs-b">{rows(c.fxB, 'b')}</g>
-    </svg>
+    <span className={`robot-sprite rs-${cls}`} style={{ width: size, height: size }}>
+      <img className="rs-body" src={im.body} alt="" draggable={false} />
+      <img className="rs-fx rs-a" src={im.a} alt="" draggable={false} />
+      <img className="rs-fx rs-b" src={im.b} alt="" draggable={false} />
+    </span>
   );
 });

@@ -1796,6 +1796,13 @@ th.sorted {
 .px-icon {
   display: inline-block;
   vertical-align: -2px;
+  flex: none;
+  /* the icon's shape is a cached mask image (ui/icons.tsx); its colour is the text colour */
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
 }
 button .px-icon {
   margin-right: 4px;
@@ -2965,8 +2972,8 @@ html.cy-on input:not([type]) {
   }
 }
 
-/* pixel robot on a card */
-.card .art .robot-sprite {
+/* pixel robot on a card: the shadow sits on the static body image only (rasterised once) */
+.card .art .robot-sprite .rs-body {
   filter: drop-shadow(0 2px 0 #0008);
 }
 
@@ -4209,7 +4216,24 @@ button.pick {
   animation: end-body-in 0.4s 0.8s both;
 }
 
-/* living robot sprites (ui/robotArt.tsx): two effect frames alternate, medics hover */
+/* living robot sprites (ui/robotArt.tsx): three cached images stacked; the effect frames only toggle opacity
+   (composited by the GPU, nothing is re-rasterised), medics hover */
+.robot-sprite {
+  position: relative;
+  display: inline-block;
+  flex: none;
+}
+.robot-sprite img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.robot-sprite .rs-fx {
+  will-change: opacity;
+}
 .robot-sprite .rs-a {
   animation: rs-a var(--rs-speed, 0.36s) steps(1) infinite;
 }
@@ -4227,7 +4251,7 @@ button.pick {
   --rs-speed: 1.6s;
 }
 .robot-sprite.rs-shock .rs-fx {
-  filter: drop-shadow(0 0 1px #7fd8ff);
+  filter: drop-shadow(0 0 1px #7fd8ff); /* static per image: rasterised once */
 }
 .robot-sprite.rs-repair .rs-body {
   animation: rs-hover 1.4s steps(2) infinite;

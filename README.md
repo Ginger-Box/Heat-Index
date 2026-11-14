@@ -57,7 +57,7 @@ prices through the same `*_for` contract methods, signed by the game's account (
 **Honest limits — this is a hybrid economy.** The players' assets and every move they make are on NEAR; the
 *world* around them (NPC teams, brokers, prices) is simulated by the game's engine on one server. If that server
 stops, players keep their tokens and history, but the NPC economy stops with it. Brokers and NPC teams have
-in-game wallets, not NEAR accounts (roadmap). The contract doesn't replay battles itself (that needs the engine in
+in-game wallets, not NEAR accounts. The contract doesn't replay battles itself (that needs the engine in
 Rust): the server replays every battle before recording it, and the public log makes any record checkable, so a
 forged result is *detectable* and can't be sent from a browser — but the trust in the server is real. The public
 site's email login is custodial (see below). Battles are against the bots; no PvP yet.
@@ -232,19 +232,6 @@ Other scripts (from `app/`): `npm run build`, `npm run balance`, `npm run econom
 | `web/` | the public site: static assets + a Worker — the shared world (`src/world.ts`), email login, battle logs |
 | `contract/` | the NEP-245 game contract (Rust) |
 | `DEVLOG.md` | development history |
-
-## Roadmap
-
-- [x] Playable game: combat, market, brokers, NPC economy, analytics
-- [x] NEAR: NEP-245 contract on testnet for credits and robots, trades and battle results on-chain
-- [x] Email login (NEAR Auth, localhost) and wallet login (NEAR Connect)
-- [x] Battle replays (public logs + on-chain hashes, `npm run verify-battle`), second-device login
-- [x] Shared real-time world; brokers run by an LLM on NEAR AI Cloud
-- [x] Only the game server records moves (`*_for`); exploit tests
-- [ ] The battle engine in Rust, so the contract replays battles itself
-- [ ] Brokers and NPC teams as NEAR accounts with their own wallets; on-chain orders
-- [ ] PvP battles between players
-- [ ] Demo video
 
 ## Credits
 

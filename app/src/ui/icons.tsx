@@ -1,27 +1,50 @@
 // Pixel icons: drawn on a grid ('#' = pixel), colored with the current text color.
 // No emoji, so they look the same everywhere and match the pixel style.
 
+const maskCache = new Map<string, string>();
+/** The icon's shape as an SVG image (runs of pixels merged), made once per icon. */
+function maskOf(rows: string[], w: number, h: number): string {
+  const key = rows.join('|');
+  const hit = maskCache.get(key);
+  if (hit) return hit;
+  let rects = '';
+  rows.forEach((r, y) => {
+    let x = 0;
+    while (x < r.length) {
+      if (r[x] !== '#') {
+        x++;
+        continue;
+      }
+      let n = 1;
+      while (r[x + n] === '#') n++;
+      rects += `<rect x="${x}" y="${y}" width="${n}" height="1"/>`;
+      x += n;
+    }
+  });
+  const url = `url("data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">${rects}</svg>`,
+  )}")`;
+  maskCache.set(key, url);
+  return url;
+}
+
+/**
+ * A pixel icon in the current text colour: one element whose CSS mask is the icon's shape (cached), instead of an
+ * inline SVG with a rect per pixel — cards carry several icons each, and thousands of rects made the Hangar heavy.
+ */
 function PixelIcon({ rows, size = 20, title }: { rows: string[]; size?: number; title?: string }) {
   const w = Math.max(...rows.map((r) => r.length));
   const h = rows.length;
-  const px: [number, number][] = [];
-  rows.forEach((r, y) => [...r].forEach((c, x) => c === '#' && px.push([x, y])));
+  const mask = maskOf(rows, w, h);
   return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      width={size}
-      height={(size * h) / w}
-      shapeRendering="crispEdges"
-      fill="currentColor"
-      aria-hidden={title ? undefined : true}
-      role={title ? 'img' : undefined}
+    <span
       className="px-icon"
-    >
-      {title && <title>{title}</title>}
-      {px.map(([x, y]) => (
-        <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} />
-      ))}
-    </svg>
+      role={title ? 'img' : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      title={title}
+      style={{ width: size, height: (size * h) / w, WebkitMaskImage: mask, maskImage: mask }}
+    />
   );
 }
 
