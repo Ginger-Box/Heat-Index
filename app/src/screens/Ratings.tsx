@@ -4,11 +4,21 @@ import { ClassTag, Cr, Glitch } from '../ui/common';
 export function Ratings({ w }: { w: World }) {
   const champs = [...w.managers].sort((a, b) => b.elo - a.elo);
   const mags = w.managers.map((m) => ({ m, worth: netWorth(w, m) })).sort((a, b) => b.worth - a.worth);
+  /** prize places: the developer's account (DEV) plays out of competition, so it gets no number */
+  const placeOf = (list: Manager[]) => {
+    const p = new Map<string, number>();
+    let n = 0;
+    for (const m of list) if (!m.dev) p.set(m.id, ++n);
+    return (m: Manager) => (m.dev ? '—' : p.get(m.id));
+  };
+  const champPlace = placeOf(champs);
+  const magPlace = placeOf(mags.map((x) => x.m));
   const hl = (id: string) => (id === PLAYER_ID ? { background: '#22e3ff18', fontWeight: 700 } : undefined);
   /** bots are marked; people are shown by name (you, or another player's NEAR account) */
   const who = (m: Manager) => (
     <>
       {m.name}
+      {m.dev && <span className="tag dev-tag" title="The game's developer: plays out of competition, takes no prize place">DEV</span>}
       {m.id === PLAYER_ID ? <span className="tag you-tag">YOU</span> : isHuman(m) ? <span className="tag human-tag" title={m.id}>PLAYER</span> : <span className="tag bot-tag" title="A bot team (algorithmic)">BOT</span>}
     </>
   );
@@ -18,7 +28,7 @@ export function Ratings({ w }: { w: World }) {
         <div className="panel">
           <h2>⚔️ Champions</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            ELO from <b>online battles</b> only (league battles don't count). The top 3 at the season's end get 600 / 350 / 200 CR. {w.managers.filter((m) => !isHuman(m)).length} bot
+            ELO from <b>online battles</b> only (league battles don't count). The top 3 at the season's end get 600 / 350 / 200 CR. A DEV account takes no prize place. {w.managers.filter((m) => !isHuman(m)).length} bot
             teams, {w.managers.filter(isHuman).length} {w.managers.filter(isHuman).length === 1 ? 'player' : 'players'}.
           </p>
           <table>
@@ -31,9 +41,9 @@ export function Ratings({ w }: { w: World }) {
               </tr>
             </thead>
             <tbody>
-              {champs.map((m, i) => (
+              {champs.map((m) => (
                 <tr key={m.id} style={hl(m.id)}>
-                  <td>{i + 1}</td>
+                  <td>{champPlace(m)}</td>
                   <td title={STRATEGY_LABEL[m.strategy]}>
                     {who(m)} {m.focus && <ClassTag cls={m.focus} />}
                   </td>
@@ -51,7 +61,7 @@ export function Ratings({ w }: { w: World }) {
         <div className="panel">
           <h2>💰 Magnates</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            Net worth = credits + robots at buyback price + broker shares. The top 3 get 300 / 200 / 100 CR.
+            Net worth = credits + robots at buyback price + broker shares. The top 3 get 300 / 200 / 100 CR (a DEV account takes no prize place).
           </p>
           <table>
             <thead>
@@ -63,9 +73,9 @@ export function Ratings({ w }: { w: World }) {
               </tr>
             </thead>
             <tbody>
-              {mags.map(({ m, worth }, i) => (
+              {mags.map(({ m, worth }) => (
                 <tr key={m.id} style={hl(m.id)}>
-                  <td>{i + 1}</td>
+                  <td>{magPlace(m)}</td>
                   <td>{who(m)}</td>
                   <td>
                     <Cr v={worth} />

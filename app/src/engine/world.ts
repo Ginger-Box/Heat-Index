@@ -77,6 +77,8 @@ export interface Manager {
   div?: number;
   /** a logged-in player in the shared world (id = their NEAR account) */
   human?: boolean;
+  /** the game's developer: shown with a DEV tag and never takes a season prize place */
+  dev?: boolean;
   /** a human's climb through the Pit League */
   league?: LeagueState;
   /** a human's battle rewards + league prizes today (UTC day) — capped like on NEAR */
@@ -1339,8 +1341,10 @@ function snapshot(w: World, rel: Record<string, number>) {
 }
 
 function seasonEnd(w: World) {
-  const champs = [...w.managers].sort((a, b) => b.elo - a.elo).slice(0, 3);
-  const mags = w.managers
+  // the developer's own account plays out of competition: the prizes go to the next places
+  const contenders = w.managers.filter((m) => !m.dev);
+  const champs = [...contenders].sort((a, b) => b.elo - a.elo).slice(0, 3);
+  const mags = contenders
     .map((m) => ({ m, worth: netWorth(w, m) }))
     .sort((a, b) => b.worth - a.worth)
     .slice(0, 3);

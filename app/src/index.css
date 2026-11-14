@@ -5415,6 +5415,7 @@ p.tour-swap {
 .bot-tag { color: var(--muted); border-color: var(--muted); }
 .human-tag { color: var(--cyan); border-color: var(--cyan); }
 .you-tag { color: var(--yellow); border-color: var(--yellow); }
+.dev-tag { color: var(--magenta, #ff3fd0); border-color: var(--magenta, #ff3fd0); }
 .broker-mind { font-size: 12px; margin: 6px 0 2px; color: var(--cyan); }
 .broker-mind.muted { color: var(--muted); }
 

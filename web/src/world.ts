@@ -107,6 +107,12 @@ async function hmacHex(secret: string, text: string) {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+/** The game developer's own accounts: tagged DEV in the Ratings and left out of the season prizes. */
+const DEV_ACCOUNTS = ['ginger.heat-index-game.testnet'];
+function markDevs(w: World) {
+  for (const m of w.managers) if (DEV_ACCOUNTS.includes(m.id)) m.dev = true;
+}
+
 export class SharedWorld extends DurableObject<Env> {
   private w: World | null = null;
   private startMs = 0;
@@ -140,6 +146,7 @@ export class SharedWorld extends DurableObject<Env> {
       this.dirty = true;
       await this.save();
     }
+    if (this.w) markDevs(this.w);
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
     return this.w;
   }
@@ -288,6 +295,7 @@ export class SharedWorld extends DurableObject<Env> {
       const league = await view<{ div: number; beaten: string[]; crowns: number }>('league_of', { account_id: accountId });
       const nm = String(name || accountId.split('.')[0]).slice(0, 24);
       addHuman(w, accountId, nm);
+      markDevs(w);
       restorePlayerFromChain(
         w,
         accountId,
@@ -351,7 +359,7 @@ export class SharedWorld extends DurableObject<Env> {
     const w = await this.world();
     return json({
       version: this.version,
-      managers: w.managers.map((m) => ({ id: m.id, name: m.name, human: isHuman(m), elo: m.elo, wins: m.wins, losses: m.losses, credits: m.credits })),
+      managers: w.managers.map((m) => ({ id: m.id, name: m.name, human: isHuman(m), dev: !!m.dev, elo: m.elo, wins: m.wins, losses: m.losses, credits: m.credits })),
       // the brokers' minds, publicly: the latest policy each LLM chose, the model, and the NEAR AI chat id
       brokerModel: BROKER_MODEL,
       brokers: w.brokers.map((b) => ({ id: b.id, name: b.name, closed: b.closed, credits: Math.round(b.credits), style: b.style, ai: b.ai ?? null })),
