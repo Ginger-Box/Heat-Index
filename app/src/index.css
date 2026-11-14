@@ -5484,3 +5484,6 @@ p.tour-swap {
 
 .list-form { display: inline-flex; gap: 3px; align-items: center; }
 .list-form input { width: 58px; font-size: 11px; padding: 2px 4px; }
+
+.market-view { margin-bottom: -4px; }
+.market-view button { font-size: 13px; padding: 6px 14px; }

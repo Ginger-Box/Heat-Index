@@ -22,6 +22,22 @@ const SIGNAL_GAP = 3; // ~12% of robots carry a signal at any moment (checked wi
 export function Market({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'class', desc: false });
+  // the brokers' shops by default; the player market is a tab of its own (remembered per browser)
+  const [view, setView] = useState<'brokers' | 'players'>(() => {
+    try {
+      return localStorage.getItem('hi-market-view') === 'players' ? 'players' : 'brokers';
+    } catch {
+      return 'brokers';
+    }
+  });
+  const pickView = (v: 'brokers' | 'players') => {
+    setView(v);
+    try {
+      localStorage.setItem('hi-market-view', v);
+    } catch {
+      /* private mode */
+    }
+  };
   const [cls, setCls] = useState<RobotClass | 'all'>('all');
   const [q, setQ] = useState('');
   const [show, setShow] = useState<Show>('all');
@@ -240,7 +256,18 @@ export function Market({ w }: { w: World }) {
 
   return (
     <div className="grid">
-      <PlayerMarket w={w} />
+      <div className="chips market-view">
+        <button data-sfx="toggle" className={view === 'brokers' ? 'primary' : ''} onClick={() => pickView('brokers')}>
+          🏪 Brokers
+        </button>
+        <button data-sfx="toggle" className={view === 'players' ? 'primary' : ''} onClick={() => pickView('players')}>
+          🤝 Player market{(w.listings?.length ?? 0) > 0 ? ` (${w.listings!.length})` : ''}
+        </button>
+      </div>
+      {view === 'players' ? (
+        <PlayerMarket w={w} />
+      ) : (
+        <>
       {/* --- class overview --- */}
       <div className="panel">
         <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -548,6 +575,8 @@ export function Market({ w }: { w: World }) {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -653,50 +682,109 @@ function computeClassStats(w: World, rows: Row[]) {
 /** The player market: robots listed by players at their own price (escrowed on NEAR until sold or withdrawn). */
 function PlayerMarket({ w }: { w: World }) {
   const [msg, setMsg] = useState<string | null>(null);
-  const list = [...(w.listings ?? [])].sort((a, b) => b.at - a.at);
+  type PKey = 'robot' | 'class' | 'dur' | 'seller' | 'price' | 'broker' | 'deal' | 'new';
+  const [sort, setSort] = useState<{ key: PKey; desc: boolean }>({ key: 'new', desc: true });
   const cheapestAsk = (modelId: string) => {
     const asks = w.brokers.filter((b) => !b.closed && carries(b, modelId)).map((b) => quote(w, b, modelId).ask);
     return asks.length ? Math.min(...asks) : null;
   };
+  const rows = (w.listings ?? [])
+    .map((l) => {
+      const r = w.robots[l.uid];
+      if (!r) return null;
+      const ask = cheapestAsk(r.modelId);
+      return {
+        l,
+        r,
+        name: modelOf(r.modelId).name,
+        cls: classOf(r.modelId),
+        seller: l.seller === PLAYER_ID ? 'you' : (w.managers.find((m) => m.id === l.seller)?.name ?? l.seller),
+        ask,
+        // how much cheaper than the cheapest broker (negative: dearer)
+        deal: ask ? (ask - l.price) / ask : -Infinity,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  const val = (x: (typeof rows)[number]): number | string => {
+    switch (sort.key) {
+      case 'robot':
+        return x.name;
+      case 'class':
+        return x.cls;
+      case 'dur':
+        return x.r.durability;
+      case 'seller':
+        return x.seller;
+      case 'price':
+        return x.l.price;
+      case 'broker':
+        return x.ask ?? Infinity;
+      case 'deal':
+        return x.deal;
+      default:
+        return x.l.at;
+    }
+  };
+  rows.sort((a, b) => {
+    const p = val(a);
+    const q = val(b);
+    const c = typeof p === 'string' ? p.localeCompare(String(q)) : p - (q as number);
+    return sort.desc ? -c : c;
+  });
+  const head = (key: PKey, label: string, tip?: string) => (
+    <th
+      className={`sortable ${sort.key === key ? 'sorted' : ''}`}
+      title={tip}
+      onClick={() => {
+        sfx('ui-sort');
+        setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'robot' && key !== 'class' && key !== 'seller' && key !== 'price' }));
+      }}
+    >
+      {label}
+      <span className="sort-arrow">{sort.key === key ? (sort.desc ? ' ▼' : ' ▲') : ' ↕'}</span>
+    </th>
+  );
   return (
     <div className="panel">
       <h2>Player market</h2>
       <p className="muted" style={{ marginTop: 0 }}>
         Robots players listed at their own price — escrowed on NEAR until sold. The seller gets the price minus a {Math.round(MARKET_FEE * 100)}% fee
-        (burned). Bot teams shop here too when a listing beats the brokers. List your own from the Hangar.
+        (burned). Bot teams shop here too when a listing beats the brokers. List your own from the Hangar (a robot outside your decks → List).
       </p>
-      {list.length === 0 ? (
-        <p className="muted">No listings yet — be the first: Hangar → a robot → List.</p>
+      {rows.length === 0 ? (
+        <p className="muted">No listings yet — be the first: Hangar → a robot outside your decks → List.</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Robot</th>
-              <th>Durability</th>
-              <th>Seller</th>
-              <th>Price</th>
-              <th>Brokers</th>
+              {head('robot', 'Robot')}
+              {head('class', 'Class')}
+              {head('dur', 'Durability')}
+              {head('seller', 'Seller')}
+              {head('price', 'Price')}
+              {head('broker', 'Brokers', "The cheapest broker's price for this model")}
+              {head('deal', 'Deal', 'How much cheaper than the cheapest broker')}
+              {head('new', 'Listed', 'Newest first')}
               <th />
             </tr>
           </thead>
           <tbody>
-            {list.map((l) => {
-              const r = w.robots[l.uid];
-              if (!r) return null;
-              const seller = w.managers.find((m) => m.id === l.seller);
+            {rows.map(({ l, r, name, seller, ask, deal }) => {
               const mine = l.seller === PLAYER_ID;
-              const ask = cheapestAsk(r.modelId);
               return (
                 <tr key={l.uid}>
+                  <td>{name}</td>
                   <td>
-                    <ClassTag modelId={r.modelId} /> {modelOf(r.modelId).name}
+                    <ClassTag modelId={r.modelId} />
                   </td>
                   <td>{r.durability}</td>
-                  <td>{mine ? 'you' : (seller?.name ?? l.seller)}</td>
+                  <td>{seller}</td>
                   <td>
                     <Cr v={l.price} />
                   </td>
                   <td className="muted">{ask !== null ? <Cr v={ask} /> : '—'}</td>
+                  <td>{Number.isFinite(deal) ? <Delta v={Math.round(deal * 100)} /> : '—'}</td>
+                  <td className="muted">{w.hour - l.at < 1 ? 'new' : `${w.hour - l.at} game h ago`}</td>
                   <td>
                     {mine ? (
                       <button className="small" onClick={() => setMsg(act((w) => unlistRobot(w, PLAYER_ID, l.uid)))}>
