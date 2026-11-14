@@ -514,6 +514,12 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   `/api/world-log/N/{snapshot,journal}`) + contract `commit_world(epoch, state, journal, prev)` (append-only,
   chained). Contract 38 tests. `npm run verify-world`: hour 3 re-derived from the public record on testnet.
 
+### Kessler's new account (Nov 14)
+- `broker-kessler-corp` had lost its full-access key (an interrupted setup run), so Kessler moved to
+  `broker-kessler.heat-index-game.testnet` (keys kept locally; a decision key for the server). The server adopted it
+  as a world wallet on its own and Kessler records its TEE-verified decisions from there; the old account stays
+  on-chain, retired. `scripts/world-wallets.ts` no longer touches the server's key.
+
 ## Next
 - Card art.
 - README for judges, demo video.

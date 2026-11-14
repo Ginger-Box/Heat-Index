@@ -10,7 +10,9 @@ const BROKERS: [string, string][] = [
   ['scrap', 'Junkman'],
 ];
 export const WORLD_WALLETS: { kind: 'broker' | 'npc'; key: string; name: string; account: string }[] = [
-  ...BROKERS.map(([id, name]) => ({ kind: 'broker' as const, key: id, name, account: `broker-${slug(name)}${WALLET_SUFFIX}` })),
+  // Kessler's first account (broker-kessler-corp) lost its full-access key in an interrupted setup run, so it moved
+  // to broker-kessler (keys kept); the old account stays on-chain as a retired world wallet
+  ...BROKERS.map(([id, name]) => ({ kind: 'broker' as const, key: id, name, account: `broker-${id === 'kessler' ? 'kessler' : slug(name)}${WALLET_SUFFIX}` })),
   ...NPC_SETUP.map((n) => ({ kind: 'npc' as const, key: n.name, name: n.name, account: `npc-${slug(n.name)}${WALLET_SUFFIX}` })),
 ];
 /** a broker's NEAR account, by broker id */

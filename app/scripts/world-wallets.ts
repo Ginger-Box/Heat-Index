@@ -53,18 +53,7 @@ for (const w of WORLD_WALLETS) {
   }
 }
 
-// the world server's key: the existing moves + the world wallets' methods, no allowance cap (hundreds of NPC moves a day)
-if (!secrets.SERVER_KEY_V2) {
-  const sk = KeyPair.fromRandom('ed25519');
-  await parent.addFunctionCallAccessKey({
-    publicKey: sk.getPublicKey().toString(),
-    contractId: CONTRACT,
-    methodNames: ['buy_robot_for', 'sell_robot_for', 'repair_robot_for', 'record_battle_for', 'adopt_world_wallet', 'sync_world_credits', 'drop_world_robot'],
-    allowance: undefined,
-  });
-  secrets.SERVER_KEY_V2 = sk.toString();
-  console.log('server key v2 added');
-}
+// (the world server's own key is managed separately: it is rotated whenever the contract gains a server method)
 secrets.BROKER_KEYS = JSON.stringify(brokerKeys);
 writeFileSync(SECRETS, JSON.stringify(secrets, null, 2), { mode: 0o600 });
 console.log('secrets updated:', Object.keys(secrets).join(', '));
