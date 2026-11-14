@@ -385,6 +385,65 @@ impl Contract {
         self.owner_keys.remove(&owner_key);
     }
 
+    /// Owner only: point a login key (NEAR Auth or the public site's email login) at an existing player account.
+    /// The login can only use that account if the key is also an access key on it — which only the account's own
+    /// owner can add — so this changes where a login lands, never who controls an account.
+    pub fn link_owner_key(&mut self, owner_key: String, account_id: AccountId) {
+        require!(env::predecessor_account_id() == self.owner_id, "Owner only");
+        require!(self.players.get(&account_id).is_some(), "Not a player");
+        self.owner_keys.insert(owner_key, account_id);
+    }
+
+    /// Owner only: move a player's game state (robot tokens, credits, battle stats, the further league progress)
+    /// from duplicate accounts into one — for players who ended up with several accounts while logins were tied to
+    /// a browser. Every move is a standard NEP-245 `mt_transfer` event with the memo "account merge".
+    pub fn merge_players(&mut self, from: Vec<AccountId>, into: AccountId) {
+        require!(env::predecessor_account_id() == self.owner_id, "Owner only");
+        require!(self.players.get(&into).is_some(), "Target is not a player");
+        for src in from {
+            require!(src != into, "Can't merge an account into itself");
+            let Some(p) = self.players.get(&src).cloned() else { continue };
+            let tokens: Vec<String> = self.owned.get(&src).map(|set| set.iter().cloned().collect()).unwrap_or_default();
+            for t in &tokens {
+                if let Some(mut r) = self.robots.get(t).cloned() {
+                    self.sub(t, &src, 1);
+                    self.add(t, &into, 1);
+                    r.owner_id = into.clone();
+                    self.robots.insert(t.clone(), r);
+                    self.untrack(&src, t);
+                    self.track(&into, t);
+                }
+            }
+            let cr = self.balance(CREDITS, &src);
+            if cr > 0 {
+                self.sub(CREDITS, &src, cr);
+                self.add(CREDITS, &into, cr);
+            }
+            let mut ids = tokens.clone();
+            if cr > 0 {
+                ids.push(CREDITS.to_string());
+            }
+            if !ids.is_empty() {
+                let amounts: Vec<U128> = ids.iter().map(|t| if t == CREDITS { U128(cr) } else { U128(1) }).collect();
+                event("nep245", "1.0.0", "mt_transfer", json!([{ "old_owner_id": src, "new_owner_id": into, "token_ids": ids, "amounts": amounts, "memo": "account merge" }]));
+            }
+            let mut q = self.players.get(&into).cloned().unwrap_or_default();
+            q.wins += p.wins;
+            q.losses += p.losses;
+            q.draws += p.draws;
+            q.battles += p.battles;
+            q.trades += p.trades;
+            self.players.insert(into.clone(), q);
+            self.players.insert(src.clone(), Player { registered_at_ms: p.registered_at_ms, ..Default::default() });
+            if let Some(l) = self.league.get(&src).cloned() {
+                let cur = self.league.get(&into).cloned().unwrap_or_default();
+                if (l.div, l.crowns) > (cur.div, cur.crowns) {
+                    self.league.insert(into.clone(), l);
+                }
+            }
+        }
+    }
+
     /// The player account created for a NEAR Auth (email) key, if any.
     pub fn account_for_owner_key(&self, owner_key: String) -> Option<AccountId> {
         self.owner_keys.get(&owner_key).cloned()
@@ -1063,6 +1122,26 @@ mod tests {
             .attached_deposit(NearToken::from_yoctonear(1))
             .build());
         c.mt_transfer("nobody.testnet".parse().unwrap(), ids[0].clone(), U128(1), None, None);
+    }
+
+    #[test]
+    fn duplicate_accounts_merge_into_one() {
+        let (mut c, _) = setup("vic.testnet");
+        ctx("vic-2.testnet");
+        c.register();
+        ctx("game.testnet");
+        c.merge_players(vec!["vic-2.testnet".parse().unwrap()], "vic.testnet".parse().unwrap());
+        let vic: AccountId = "vic.testnet".parse().unwrap();
+        assert_eq!(c.mt_balance_of(vic.clone(), CREDITS.into()).0, 2000);
+        assert_eq!(c.mt_tokens_for_owner(vic, None, Some(100)).len(), 24);
+        assert_eq!(c.mt_tokens_for_owner("vic-2.testnet".parse().unwrap(), None, None).len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Owner only")]
+    fn only_the_owner_merges() {
+        let (mut c, _) = setup("wes.testnet");
+        c.merge_players(vec!["x.testnet".parse().unwrap()], "wes.testnet".parse().unwrap());
     }
 
     #[test]

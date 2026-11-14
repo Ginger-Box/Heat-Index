@@ -314,6 +314,21 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   league progress came back.
 - Login screen copy: "Sign in / sign up with email", and a line that returning players get their progress back.
 
+### One account per player: linking logins and merging duplicates (Nov 14)
+- While logins were tied to a browser, the author ended up with four game accounts (`ginger`, `ginger-2`, `pilot`
+  from NEAR Auth on localhost, `ginger-3` from the public site's email login). NEAR accounts can't be renamed and the
+  game contract has no keys on player accounts, so the merge needs the owner's own signature:
+  - a one-off localhost tool (`?link-account=ginger&from=ginger-3`, `app/src/ui/LinkAccount.tsx`) signs ONE
+    transaction with the player's NEAR Auth key: AddKey(the email login's key → `ginger`). NEAR Auth signing =
+    Auth0 approval window → the fast-auth contract's `sign` (sent by the dev relayer with 1 yoctoNEAR — the MPC
+    signer requires it; without it the call silently returns null) → MPC signature → the transaction is sent.
+    Browsers only open the approval window straight from a click, so the transaction is prepared beforehand.
+  - contract (owner-only, no state change): `link_owner_key` points a login at an existing account (it can't give
+    access — the key must already be on that account), `merge_players` moves robot tokens, credits, stats and the
+    further league progress (NEP-245 `mt_transfer` events, memo "account merge"). 22 unit tests.
+  - Result: `ginger` holds 50 robots and 3109 CR; both email logins (Privy on the site, NEAR Auth on localhost)
+    open `ginger`.
+
 ## Next
 - Card art.
 - README for judges, demo video.

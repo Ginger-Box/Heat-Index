@@ -18,6 +18,63 @@ function nearRelayer(): Plugin {
     name: 'heat-index-near-relayer',
     apply: 'serve',
     configureServer(server) {
+      // One-off account linking (tools/LinkAccount on localhost): submit a NEAR Auth signature request to the
+      // fast-auth contract and return the MPC signature (base64). The relayer only pays gas; what gets signed is
+      // a transaction the player approved in the NEAR Auth window.
+      server.middlewares.use('/api/near/fastauth-sign', (req, res) => {
+        const origin = req.headers.origin ?? ''
+        if (
+          req.method !== 'POST' ||
+          !/^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin) ||
+          !String(req.headers['content-type'] ?? '').startsWith('application/json')
+        ) {
+          res.statusCode = 403
+          return res.end()
+        }
+        let body = ''
+        req.on('data', (c) => (body += c))
+        req.on('end', async () => {
+          res.setHeader('Content-Type', 'application/json')
+          try {
+            const r = JSON.parse(body || '{}') as { guardId: string; verifyPayload: string; signPayload: number[]; algorithm?: string }
+            const creds = JSON.parse(
+              readFileSync(join(homedir(), '.near-credentials', 'testnet', `${CONTRACT_ID}.json`), 'utf8'),
+            )
+            const { Account, JsonRpcProvider } = await import('near-api-js')
+            const provider = new JsonRpcProvider({ url: 'https://rpc.testnet.near.org' })
+            const relayer = new Account(CONTRACT_ID, provider, creds.private_key)
+            let lastErr: unknown
+            // the MPC signer needs 1 yoctoNEAR attached (fast-auth forwards it); without it the call returns null
+            for (const deposit of [1n]) {
+              try {
+                const out = await relayer.callFunctionRaw({
+                  contractId: 'fast-auth.testnet',
+                  methodName: 'sign',
+                  args: {
+                    guard_id: r.guardId,
+                    verify_payload: r.verifyPayload,
+                    sign_payload: r.signPayload,
+                    algorithm: r.algorithm ?? 'eddsa',
+                  },
+                  gas: 300_000_000_000_000n,
+                  deposit,
+                })
+                const st = out.status as { SuccessValue?: string }
+                if (st && typeof st === 'object' && st.SuccessValue && st.SuccessValue !== 'bnVsbA==')
+                  return res.end(JSON.stringify({ signature: st.SuccessValue }))
+                throw new Error(`No signature in the result: ${JSON.stringify(out.status).slice(0, 300)}`)
+              } catch (e) {
+                lastErr = e
+                if (!/deposit/i.test(String(e))) break
+              }
+            }
+            throw lastErr
+          } catch (e) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }))
+          }
+        })
+      })
       server.middlewares.use('/api/near/create-player', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405

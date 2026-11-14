@@ -154,7 +154,7 @@ export async function finishPrivyLogin(accessToken: string, playerName: string):
   return out.accountId;
 }
 
-async function nearAuthClient() {
+export async function nearAuthClient() {
   const [{ FastAuthClient }, { JavascriptProvider }] = await Promise.all([
     import('@fast-auth-near/browser-sdk'),
     import('@fast-auth-near/javascript-provider'),

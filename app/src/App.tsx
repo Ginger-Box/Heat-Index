@@ -26,6 +26,7 @@ import { FastForwardIcon, GearIcon, PauseIcon, PlayIcon, SpeakerIcon } from './u
 import { FastForward } from './ui/FastForward';
 import { Tour } from './ui/Tour';
 import { NearCell, NearLogin } from './ui/NearPanel';
+import { LinkAccount } from './ui/LinkAccount';
 
 const TUTORIAL_KEY = 'heat-index-tutorial';
 type TutorialStage = 'battle' | 'tour' | 'done';
@@ -99,6 +100,9 @@ export default function App() {
     return () => clearInterval(t);
   }, [!!w, live, ff, stage]);
 
+  // one-off account linking tool (localhost only): ?link-account=<account>&from=<email-login account>
+  if (location.origin === 'http://localhost:3000' && new URLSearchParams(location.search).has('link-account'))
+    return <LinkAccount />;
   if (resume.busy)
     return (
       <div className="panel login">

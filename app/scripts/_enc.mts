@@ -1,0 +1,10 @@
+import { createRequire } from 'node:module';
+import { KeyPair, PublicKey, actions, createTransaction, baseDecode } from 'near-api-js';
+const require = createRequire(import.meta.url);
+const v5 = require('../node_modules/@fast-auth-near/browser-sdk/node_modules/near-api-js/lib/transaction.js');
+const k = KeyPair.fromRandom('ed25519');
+const newKey = PublicKey.fromString(KeyPair.fromRandom('ed25519').getPublicKey().toString());
+const tx = createTransaction('ginger.heat-index-game.testnet', k.getPublicKey(), 'ginger.heat-index-game.testnet', 123n, [actions.addFullAccessKey(newKey)], baseDecode('11111111111111111111111111111111'));
+const b5 = Buffer.from(v5.encodeTransaction(tx));
+const b7 = Buffer.from(tx.encode ? tx.encode() : []);
+console.log('v5 len', b5.length, 'v7 len', b7.length, 'equal', b5.equals(b7));
