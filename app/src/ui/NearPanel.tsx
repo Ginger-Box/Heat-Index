@@ -1,7 +1,7 @@
 // NEAR in the interface: a HUD cell with the player's account and a status LED, and a drop-down panel with the
 // on-chain balance, the latest game transactions (links to the explorer) and the login buttons.
 
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useReducer, useRef, useState } from 'react';
 import { sfx } from '../audio';
 import { PLAYER_ID } from '../engine/world';
 import { getWorld } from '../store';
@@ -10,7 +10,7 @@ import {
   chainCredits,
   chainSession,
   chainTxs,
-  emailLoginAvailable,
+  emailLoginKind,
   loginWithEmail,
   loginWithWallet,
   onChain,
@@ -25,6 +25,8 @@ export function useChain() {
   useEffect(() => onChain(bump), []);
   return { session: chainSession(), txs: chainTxs() };
 }
+
+const PrivyEmail = lazy(() => import('./PrivyEmail'));
 
 const short = (id: string) => (id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-10)}` : id);
 
@@ -50,7 +52,32 @@ export function NearLogin({ name, onDone }: { name: string; onDone?: () => void 
       setBusy(null);
     }
   };
-  const emailOk = emailLoginAvailable();
+  const kind = emailLoginKind();
+  const emailOk = kind === 'nearauth';
+  const [privyOpen, setPrivyOpen] = useState(false);
+  const privyDone = async () => {
+    onDone?.();
+    if (getWorld()) await linkRobots();
+    sfx('ui-buy');
+  };
+  if (kind === 'privy')
+    return (
+      <div className="near-login">
+        {privyOpen ? (
+          <Suspense fallback={<small className="muted">Loading email login…</small>}>
+            <PrivyEmail name={name || 'player'} onDone={privyDone} onError={setErr} />
+          </Suspense>
+        ) : (
+          <button className="primary" type="button" disabled={!!busy} onClick={() => setPrivyOpen(true)}>
+            ✉ Continue with email
+          </button>
+        )}
+        <button type="button" disabled={!!busy} onClick={() => run('wallet')}>
+          {busy === 'wallet' ? 'Waiting for the wallet…' : '◈ Connect NEAR wallet'}
+        </button>
+        {err && <div className="error">{err}</div>}
+      </div>
+    );
   return (
     <div className="near-login">
       <button

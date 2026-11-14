@@ -7,14 +7,15 @@ Robots are cards that **wear out**: every battle costs durability, repairs cost 
 A robot's market price follows its **relevance** (how often it wins and how many teams field it), so the market
 *is* the meta. AI brokers trade with a **reaction lag** — spot what's rising before they do and you profit.
 
-> **Play:** https://heat-index-web.ginger-box.workers.dev (NEAR wallet or guest) · locally on `http://localhost:3000`
-> (email login too — the shared testnet NEAR Auth app only accepts localhost).
+> **Play:** https://heat-index-web.ginger-box.workers.dev — email (one-time code), NEAR wallet, or guest ·
+> locally on `http://localhost:3000` (email through NEAR Auth).
 > Contract: [`heat-index-game.testnet`](https://testnet.nearblocks.io/address/heat-index-game.testnet) on NEAR testnet.
 
 ## For judges: 2 minutes
 
 1. Open the game (public site, or `cd app && npm install && npm run dev` → `http://localhost:3000`).
-   Pick **Continue with email** (localhost only), **Connect NEAR wallet**, or **Play as a guest** (off-chain).
+   Pick **Continue with email** (a 6-digit code — a real NEAR account is created for you), **Connect NEAR wallet**,
+   or **Play as a guest** (off-chain).
 2. A short **training battle** starts → you see the Overheat combat: deploy into slots, drag an arrow to attack,
    heat pips, screen cracks on heavy hits.
 3. **Market** tab → hover a price: the tooltip explains it (relevance × stock × the broker's markup). The **BUY /
@@ -69,6 +70,22 @@ on NEAR testnet**: the contract [`contract/src/lib.rs`](contract/src/lib.rs) is 
   game signs moves **without popups**. The shared testnet NEAR Auth app only allows `http://localhost:3000`, and
   account creation is sent by the dev server (`vite.config.ts`, key read from the local near CLI credentials,
   never shipped to the browser) — so email login works when you run the game locally.
+- **Email login on the public site (Privy) — a workaround, see the note below.** Privy sends a 6-digit code; a
+  Cloudflare Worker next to the site ([`web/src/index.ts`](web/src/index.ts)) verifies the Privy token with Privy's
+  public keys and calls the same factory to create `<name>.heat-index-game.testnet`, with the browser's limited game
+  key. A returning player (another device, a cleared browser) gets a new game key on the same account. The Worker
+  signs account creation with a **function-call key of the contract account that can only call
+  `create_player_account`** (3 NEAR gas allowance) — not the full-access key.
+
+> ⚠️ **Why Privy and not NEAR Auth on the public site.** We built email login on **NEAR Auth** first (it works:
+> run the game on `http://localhost:3000`). To use it on our own domain a project needs its own NEAR Auth
+> credentials, and the only way to get them is NEAR Auth's application form — **the form is closed**, and the
+> shared testnet app only accepts `localhost`. So the public site uses Privy (email + one-time code) plus a small
+> Cloudflare Worker as a stand-in. The trade-off: this path is **custodial** — the player's owner key is derived on
+> our server (HMAC of the Privy user id with a server secret), so the server could act for the account. That is
+> acceptable for a testnet game and is how most email-login games work; with NEAR Auth credentials the public site
+> would switch back to the player owning their key.
+
 - **Login with a wallet (NEAR Connect)**: Meteor, Intear, MyNearWallet… — one approval adds the limited game key and
   registers the player. Works on the public site.
 - The HUD's NEAR cell shows the account, on-chain credits, robots on-chain and the latest transactions with explorer

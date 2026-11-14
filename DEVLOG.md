@@ -292,6 +292,19 @@ All numbers quoted below come from the simulation scripts in `app/scripts/`.
   moderate / 14 low in dev tools and `elliptic` inside the NEAR SDKs (no upstream fix).
 - Not done before the deadline: a running per-account robot value (L1), revoking the game key on sign-out, a CSP.
 
+### Public site on Cloudflare Workers + email login with Privy (Nov 14)
+- The public site moved to Cloudflare Workers static assets (`web/`, deployed with the `cf` CLI):
+  https://heat-index-web.ginger-box.workers.dev. The app stays on Vite 6; `web/` holds only the deploy project.
+- Email login on the public site: NEAR Auth needs per-project credentials for a custom domain, and its application
+  form is closed; the shared testnet app accepts only localhost. Workaround, after looking at how another entry
+  (Bluffalo) does it: **Privy** (email + 6-digit code, headless `@privy-io/js-sdk-core`, our own form, loaded
+  lazily) and a **Worker route** `/api/privy/login` that verifies the Privy token with Privy's public JWKS, derives
+  the player's owner key from the Privy user id (HMAC with a server secret, nothing stored), and either creates
+  `<name>.heat-index-game.testnet` through the contract's factory or adds the browser's new game key to the
+  existing account. The Worker signs with a new function-call key of the contract account limited to
+  `create_player_account` (3 NEAR gas allowance); secrets live outside the repo and go up with `--secrets-file`.
+  Custodial by design — stated in the README.
+
 ## Next
 - Card art.
 - README for judges, demo video.

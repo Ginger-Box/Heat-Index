@@ -12,7 +12,7 @@
 
 import { Buffer } from 'buffer';
 import { Account, JsonRpcProvider, KeyPair, actions } from 'near-api-js';
-import { CONTRACT_ID, EXPLORER, GAME_KEY_ALLOWANCE, GAME_METHODS, NEAR_AUTH, RPC_URL } from './config';
+import { CONTRACT_ID, EXPLORER, GAME_KEY_ALLOWANCE, GAME_METHODS, NEAR_AUTH, PRIVY_APP_ID, PUBLIC_ORIGIN, RPC_URL } from './config';
 
 // near-api-js v5 inside the NEAR Auth SDK expects Node's Buffer
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer ??= Buffer;
@@ -131,6 +131,26 @@ export function chainCall<T = unknown>(label: string, method: string, args: Reco
 // ---------- login: email (NEAR Auth) ----------
 
 export const emailLoginAvailable = () => location.origin === NEAR_AUTH.origin;
+/** Which email login this page uses: NEAR Auth on localhost:3000, Privy on the public site, or none. */
+export const emailLoginKind = (): 'nearauth' | 'privy' | null =>
+  emailLoginAvailable() ? 'nearauth' : PRIVY_APP_ID && location.origin === PUBLIC_ORIGIN ? 'privy' : null;
+
+/**
+ * Public site, after Privy confirmed the email: the Worker checks the Privy token and creates the player's
+ * `<name>.heat-index-game.testnet` (or, for a returning player, adds this browser's game key to it).
+ */
+export async function finishPrivyLogin(accessToken: string, playerName: string): Promise<string> {
+  const game = KeyPair.fromRandom('ed25519');
+  const res = await fetch('/api/privy/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name: accountName(playerName), gameKey: game.getPublicKey().toString() }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { accountId?: string; error?: string };
+  if (!res.ok || !out.accountId) throw new Error(out.error ?? 'Could not create the account');
+  saveSession({ accountId: out.accountId, gameKey: game.toString(), via: 'email' });
+  return out.accountId;
+}
 
 async function nearAuthClient() {
   const [{ FastAuthClient }, { JavascriptProvider }] = await Promise.all([
